@@ -1,0 +1,266 @@
+import { Entity, Column } from 'typeorm';
+import { BaseCompanyEntity } from '../../../common/entities/base.entity';
+
+@Entity('optimization_settings')
+export class OptimizationSettingsEntity extends BaseCompanyEntity {
+  @Column({ name: 'algorithm_type', default: 'full_pipeline' })
+  algorithmType: string;
+
+  // Genetic Algorithm
+  @Column({ name: 'ga_population_size', default: 50 })
+  gaPopulationSize: number;
+
+  @Column({ name: 'ga_generations', default: 100 })
+  gaGenerations: number;
+
+  @Column({ name: 'ga_mutation_rate', type: 'float', default: 0.1 })
+  gaMutationRate: number;
+
+  @Column({ name: 'ga_crossover_rate', type: 'float', default: 0.8 })
+  gaCrossoverRate: number;
+
+  // Simulated Annealing
+  @Column({ name: 'sa_initial_temperature', type: 'float', default: 1000.0 })
+  saInitialTemperature: number;
+
+  @Column({ name: 'sa_cooling_rate', type: 'float', default: 0.95 })
+  saCoolingRate: number;
+
+  @Column({ name: 'sa_min_temperature', type: 'float', default: 0.01 })
+  saMinTemperature: number;
+
+  // Tabu Search
+  @Column({ name: 'ts_tabu_size', default: 10 })
+  tsTabuSize: number;
+
+  @Column({ name: 'ts_max_iterations', default: 500 })
+  tsMaxIterations: number;
+
+  // ILP / Set Partitioning
+  @Column({ name: 'ilp_timeout_seconds', default: 60 })
+  ilpTimeoutSeconds: number;
+
+  // General
+  @Column({ name: 'time_budget_seconds', default: 300 })
+  timeBudgetSeconds: number;
+
+  // Crew Constraints (CCT / CLT art. 235-A a 235-G)
+  @Column({ name: 'cct_max_shift_minutes', default: 480 })
+  cctMaxShiftMinutes: number;          // jornada máxima (spread) — padrão 8h
+
+  @Column({ name: 'cct_max_work_minutes', default: 440 })
+  cctMaxWorkMinutes: number;           // trabalho efetivo máximo — padrão 7h20
+
+  @Column({ name: 'cct_max_driving_minutes', default: 270 })
+  cctMaxDrivingMinutes: number;        // direção contínua máxima — padrão 4h30
+
+  @Column({ name: 'cct_min_break_minutes', default: 30 })
+  cctMinBreakMinutes: number;          // intervalo mínimo entre trechos — padrão 30min
+
+  @Column({ name: 'cct_min_layover_minutes', default: 8 })
+  cctMinLayoverMinutes: number;        // pausa mínima no terminal mesmo bloco — padrão 8min
+
+  @Column({ name: 'cct_max_duties_per_day', default: 1 })
+  cctMaxDutiesPerDay: number;
+
+  @Column({ name: 'apply_cct', default: true })
+  applyCct: boolean;                   // se false, ignora restrições CCT (modo só custo)
+
+  // Soltura e recolhimento (garagem)
+  @Column({ name: 'pullout_minutes', default: 10 })
+  pulloutMinutes: number;              // tempo para sair da garagem à 1ª viagem
+
+  @Column({ name: 'pullback_minutes', default: 10 })
+  pullbackMinutes: number;             // tempo após última viagem para retornar à garagem
+
+  // Veículo
+  @Column({ name: 'max_vehicle_shift_minutes', default: 960 })
+  maxVehicleShiftMinutes: number;      // turno máximo de um veículo — padrão 16h
+
+  // Relief Points (mid-route driver change)
+  @Column({ name: 'allow_relief_points', default: false })
+  allowReliefPoints: boolean;
+
+  @Column({ name: 'is_active', default: false })
+  isActive: boolean;
+
+  @Column({ nullable: true })
+  name: string;
+
+  @Column({ nullable: true })
+  description: string;
+
+  // Novos campos CCT/CLT (sessão 2026) ──────────────────────────────────────────
+
+  /** Trabalho efetivo mínimo (0 = desabilitado) — CCT soft */
+  @Column({ name: 'cct_min_work_minutes', default: 0 })
+  cctMinWorkMinutes: number;
+
+  /** Turno mínimo (0 = desabilitado) — CCT soft */
+  @Column({ name: 'cct_min_shift_minutes', default: 0 })
+  cctMinShiftMinutes: number;
+
+  /** Horas extras máx./dia = 2h — CLT art.59 */
+  @Column({ name: 'cct_overtime_limit_minutes', default: 120 })
+  cctOvertimeLimitMinutes: number;
+
+  /** Janela que exige pausa obrigatória — UE 4h30 */
+  @Column({ name: 'cct_mandatory_break_after_minutes', default: 270 })
+  cctMandatoryBreakAfterMinutes: number;
+
+  /** Pausa fracionada parte 1 — UE */
+  @Column({ name: 'cct_split_break_first_minutes', default: 15 })
+  cctSplitBreakFirstMinutes: number;
+
+  /** Pausa fracionada parte 2 — UE */
+  @Column({ name: 'cct_split_break_second_minutes', default: 30 })
+  cctSplitBreakSecondMinutes: number;
+
+  /** Intervalo de refeição — Lei 13.103 */
+  @Column({ name: 'cct_meal_break_minutes', default: 60 })
+  cctMealBreakMinutes: number;
+
+  /** Descanso inter-jornada mínimo = 11h — CLT art.66 */
+  @Column({ name: 'cct_inter_shift_rest_minutes', default: 660 })
+  cctInterShiftRestMinutes: number;
+
+  /** Descanso semanal mínimo = 24h — CLT art.67 */
+  @Column({ name: 'cct_weekly_rest_minutes', default: 1440 })
+  cctWeeklyRestMinutes: number;
+
+  /** Descanso semanal reduzido — UE */
+  @Column({ name: 'cct_reduced_weekly_rest_minutes', default: 2160 })
+  cctReducedWeeklyRestMinutes: number;
+
+  /** Permitir descanso semanal reduzido */
+  @Column({ name: 'cct_allow_reduced_weekly_rest', default: false })
+  cctAllowReducedWeeklyRest: boolean;
+
+  /** Limite diário de condução — UE */
+  @Column({ name: 'cct_daily_driving_limit_minutes', default: 540 })
+  cctDailyDrivingLimitMinutes: number;
+
+  /** Limite diário estendido — UE */
+  @Column({ name: 'cct_extended_daily_driving_limit_minutes', default: 600 })
+  cctExtendedDailyDrivingLimitMinutes: number;
+
+  /** Número de extensões semanais permitidas — UE */
+  @Column({ name: 'cct_max_extended_driving_days_per_week', default: 2 })
+  cctMaxExtendedDrivingDaysPerWeek: number;
+
+  /** Limite semanal de condução — UE */
+  @Column({ name: 'cct_weekly_driving_limit_minutes', default: 3360 })
+  cctWeeklyDrivingLimitMinutes: number;
+
+  /** Limite quinzenal de condução — UE */
+  @Column({ name: 'cct_fortnight_driving_limit_minutes', default: 5400 })
+  cctFortnightDrivingLimitMinutes: number;
+
+  /** Tempo ocioso é remunerado — CCT motoristas */
+  @Column({ name: 'cct_idle_time_is_paid', default: true })
+  cctIdleTimeIsPaid: boolean;
+
+  /** Tempo de espera remunerado em percentual do salário-hora */
+  @Column({ name: 'cct_waiting_time_pay_pct', type: 'decimal', precision: 6, scale: 4, default: 0.30 })
+  cctWaitingTimePayPct: number;
+
+  /** Garantia mínima de horas remuneradas */
+  @Column({ name: 'cct_min_guaranteed_work_minutes', default: 0 })
+  cctMinGuaranteedWorkMinutes: number;
+
+  /** Exigir início e fim no mesmo depósito */
+  @Column({ name: 'enforce_same_depot_start_end', default: false })
+  enforceSameDepotStartEnd: boolean;
+
+  /** Exigir que cada plantão permaneça em uma única linha */
+  @Column({ name: 'enforce_single_line_duty', default: false })
+  enforceSingleLineDuty: boolean;
+
+  /** Peso de equidade entre motoristas */
+  @Column({ name: 'fairness_weight', type: 'decimal', precision: 8, scale: 4, default: 0 })
+  fairnessWeight: number;
+
+  /** Peso para domingos livres */
+  @Column({ name: 'sunday_off_weight', type: 'decimal', precision: 8, scale: 4, default: 0 })
+  sundayOffWeight: number;
+
+  /** Adicional de feriado */
+  @Column({ name: 'holiday_extra_pct', type: 'decimal', precision: 6, scale: 4, default: 1.0 })
+  holidayExtraPct: number;
+
+  /** Início período noturno = 22h — CLT art.73 */
+  @Column({ name: 'cct_nocturnal_start_hour', default: 22 })
+  cctNocturnalStartHour: number;
+
+  /** Fim período noturno = 05h — CLT art.73 */
+  @Column({ name: 'cct_nocturnal_end_hour', default: 5 })
+  cctNocturnalEndHour: number;
+
+  /** Fator hora noturna (52.5 min = 1h) — CLT art.73 §1 */
+  @Column({ name: 'cct_nocturnal_factor', type: 'decimal', precision: 6, scale: 4, default: 0.875 })
+  cctNocturnalFactor: number;
+
+  /** Adicional noturno +20% — CLT art.73 §2 */
+  @Column({ name: 'cct_nocturnal_extra_pct', type: 'decimal', precision: 6, scale: 4, default: 0.20 })
+  cctNocturnalExtraPct: number;
+
+  /** VSP: exigir mesmo depósito início/fim de bloco */
+  @Column({ name: 'same_depot_required', default: false })
+  sameDepotRequired: boolean;
+
+  /** EV: máximo de carregadores simultâneos */
+  @Column({ name: 'max_simultaneous_chargers', default: 0 })
+  maxSimultaneousChargers: number;
+
+  /** EV: tarifa pico */
+  @Column({ name: 'peak_energy_cost_per_kwh', type: 'decimal', precision: 10, scale: 4, default: 0 })
+  peakEnergyCostPerKwh: number;
+
+  /** EV: tarifa fora de pico */
+  @Column({ name: 'offpeak_energy_cost_per_kwh', type: 'decimal', precision: 10, scale: 4, default: 0 })
+  offpeakEnergyCostPerKwh: number;
+
+  /** Workpiece mínimo */
+  @Column({ name: 'min_workpiece_minutes', default: 0 })
+  minWorkpieceMinutes: number;
+
+  /** Workpiece máximo */
+  @Column({ name: 'max_workpiece_minutes', default: 480 })
+  maxWorkpieceMinutes: number;
+
+  /** Mínimo de viagens por workpiece */
+  @Column({ name: 'min_trips_per_piece', default: 1 })
+  minTripsPerPiece: number;
+
+  /** Máximo de viagens por workpiece */
+  @Column({ name: 'max_trips_per_piece', default: 4 })
+  maxTripsPerPiece: number;
+
+  /** Habilita pricing problem / geração de colunas */
+  @Column({ name: 'pricing_enabled', default: true })
+  pricingEnabled: boolean;
+
+  /** Força set covering / column generation */
+  @Column({ name: 'use_set_covering', default: false })
+  useSetCovering: boolean;
+
+  /** Preservar pares preferenciais ida-volta no mesmo veículo */
+  @Column({ name: 'preserve_preferred_pairs', default: true })
+  preservePreferredPairs: boolean;
+
+  /** Máximo de sucessores candidatos por tarefa na geração de colunas */
+  @Column({ name: 'max_candidate_successors_per_task', default: 5 })
+  maxCandidateSuccessorsPerTask: number;
+
+  /** Máximo global de colunas/workpieces geradas */
+  @Column({ name: 'max_generated_columns', default: 2500 })
+  maxGeneratedColumns: number;
+
+  /** Máximo de iterações de pricing problem */
+  @Column({ name: 'max_pricing_iterations', default: 1 })
+  maxPricingIterations: number;
+
+  /** Máximo de colunas adicionadas por rodada de pricing */
+  @Column({ name: 'max_pricing_additions', default: 192 })
+  maxPricingAdditions: number;
+}

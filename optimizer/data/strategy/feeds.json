@@ -1,0 +1,95 @@
+{
+  "last_id": 3,
+  "snapshots": [
+    {
+      "id": 1,
+      "created_at": "2026-03-30T22:39:45.801536+00:00",
+      "quality": {
+        "total_records": 1,
+        "gps_valid_count": 1,
+        "gps_invalid_count": 0,
+        "terminal_ack_count": 1,
+        "terminal_ack_missing_count": 0,
+        "gps_valid_ratio": 1.0,
+        "terminal_ack_ratio": 1.0
+      },
+      "records": [
+        {
+          "trip_id": 1,
+          "actual_start_time": 486,
+          "actual_end_time": null,
+          "vehicle_id": null,
+          "gps_valid": true,
+          "sent_to_driver_terminal": true,
+          "source": "avl"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "created_at": "2026-03-31T12:33:05.645273+00:00",
+      "quality": {
+        "total_records": 2,
+        "gps_valid_count": 1,
+        "gps_invalid_count": 1,
+        "terminal_ack_count": 1,
+        "terminal_ack_missing_count": 1,
+        "gps_valid_ratio": 0.5,
+        "terminal_ack_ratio": 0.5
+      },
+      "records": [
+        {
+          "trip_id": 1101,
+          "actual_start_time": 365,
+          "actual_end_time": 415,
+          "vehicle_id": 501,
+          "gps_valid": true,
+          "sent_to_driver_terminal": true,
+          "source": "avl"
+        },
+        {
+          "trip_id": 1102,
+          "actual_start_time": 437,
+          "actual_end_time": 487,
+          "vehicle_id": 502,
+          "gps_valid": false,
+          "sent_to_driver_terminal": false,
+          "source": "gtfs-rt"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "created_at": "2026-03-31T12:50:11.967108+00:00",
+      "quality": {
+        "total_records": 2,
+        "gps_valid_count": 1,
+        "gps_invalid_count": 1,
+        "terminal_ack_count": 1,
+        "terminal_ack_missing_count": 1,
+        "gps_valid_ratio": 0.5,
+        "terminal_ack_ratio": 0.5
+      },
+      "records": [
+        {
+          "trip_id": 2101,
+          "actual_start_time": 366,
+          "actual_end_time": 421,
+          "vehicle_id": 701,
+          "gps_valid": true,
+          "sent_to_driver_terminal": true,
+          "source": "avl"
+        },
+        {
+          "trip_id": 2102,
+          "actual_start_time": 445,
+          "actual_end_time": 500,
+          "vehicle_id": 702,
+          "gps_valid": false,
+          "sent_to_driver_terminal": false,
+          "source": "gtfs-rt"
+        }
+      ]
+    }
+  ]
+}

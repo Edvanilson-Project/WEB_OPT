@@ -1,0 +1,297 @@
+"""
+Modelos de domínio centrais do OTIMIZ Optimizer.
+Representam os dados do problema VSP/CSP.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Any, Dict, List, Optional
+
+
+class AlgorithmType(str, Enum):
+    GREEDY = "greedy"
+    GENETIC = "genetic"
+    SIMULATED_ANNEALING = "simulated_annealing"
+    TABU_SEARCH = "tabu_search"
+    SET_PARTITIONING = "set_partitioning"
+    JOINT_SOLVER = "joint_solver"
+    HYBRID_PIPELINE = "hybrid_pipeline"
+
+
+class SolverPhase(str, Enum):
+    VSP = "vsp"
+    CSP = "csp"
+    INTEGRATED = "integrated"
+
+
+@dataclass
+class Trip:
+    id: int
+    line_id: int
+    start_time: int
+    end_time: int
+    origin_id: int
+    destination_id: int
+    trip_group_id: Optional[int] = None
+    duration: int = 0
+    distance_km: float = 0.0
+    depot_id: Optional[int] = None
+    relief_point_id: Optional[int] = None
+    is_relief_point: bool = False
+    energy_kwh: float = 0.0
+    elevation_gain_m: float = 0.0
+    service_day: Optional[int] = None
+    is_holiday: bool = False
+    origin_latitude: Optional[float] = None
+    origin_longitude: Optional[float] = None
+    destination_latitude: Optional[float] = None
+    destination_longitude: Optional[float] = None
+    sent_to_driver_terminal: Optional[bool] = None
+    gps_valid: Optional[bool] = None
+    deadhead_times: Dict[int, int] = field(default_factory=dict)
+
+    def __post_init__(self):
+        if self.duration == 0:
+            self.duration = max(0, self.end_time - self.start_time)
+        if self.service_day is None:
+            self.service_day = self.start_time // 1440
+
+    def can_precede(self, other: "Trip", default_deadhead: int = 0) -> bool:
+        gap = other.start_time - self.end_time
+        needed = self.deadhead_times.get(other.origin_id, default_deadhead)
+        return gap >= needed
+
+    def fmt_time(self, minutes: int) -> str:
+        h, m = divmod(minutes, 60)
+        return f"{h:02d}:{m:02d}"
+
+    @property
+    def start_fmt(self) -> str:
+        return self.fmt_time(self.start_time)
+
+    @property
+    def end_fmt(self) -> str:
+        return self.fmt_time(self.end_time)
+
+
+@dataclass
+class VehicleType:
+    id: int
+    name: str
+    passenger_capacity: int
+    cost_per_km: float = 0.0
+    cost_per_hour: float = 0.0
+    fixed_cost: float = 800.0
+    is_electric: bool = False
+    battery_capacity_kwh: float = 0.0
+    minimum_soc: float = 0.15
+    charge_rate_kw: float = 0.0
+    energy_cost_per_kwh: float = 0.0
+    depot_id: Optional[int] = None
+
+    def trip_cost(self, trip: Trip) -> float:
+        return (
+            self.fixed_cost
+            + self.cost_per_km * trip.distance_km
+            + self.cost_per_hour * (trip.duration / 60)
+        )
+
+
+@dataclass
+class DutySegment:
+    block_id: int
+    trips: List[Trip] = field(default_factory=list)
+
+    @property
+    def start_time(self) -> int:
+        return self.trips[0].start_time if self.trips else 0
+
+    @property
+    def end_time(self) -> int:
+        return self.trips[-1].end_time if self.trips else 0
+
+    @property
+    def drive_minutes(self) -> int:
+        return sum(t.duration for t in self.trips)
+
+
+@dataclass
+class Block:
+    id: int
+    trips: List[Trip] = field(default_factory=list)
+    vehicle_type_id: Optional[int] = None
+    warnings: List[str] = field(default_factory=list)
+    meta: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def start_time(self) -> int:
+        return self.trips[0].start_time if self.trips else 0
+
+    @property
+    def end_time(self) -> int:
+        return self.trips[-1].end_time if self.trips else 0
+
+    @property
+    def total_duration(self) -> int:
+        return self.end_time - self.start_time
+
+    @property
+    def total_drive_minutes(self) -> int:
+        return sum(t.duration for t in self.trips)
+
+    @property
+    def idle_minutes(self) -> int:
+        return self.total_duration - self.total_drive_minutes
+
+    def total_deadhead_minutes(self) -> int:
+        total = 0
+        for i in range(len(self.trips) - 1):
+            t1, t2 = self.trips[i], self.trips[i + 1]
+            total += t1.deadhead_times.get(t2.origin_id, 0)
+        return total
+
+    def verify_no_overlap(self) -> List[str]:
+        issues = []
+        for i in range(len(self.trips) - 1):
+            a, b = self.trips[i], self.trips[i + 1]
+            if b.start_time < a.end_time:
+                issues.append(
+                    f"Sobreposição: viagem#{a.id} termina {a.end_fmt} > viagem#{b.id} inicia {b.start_fmt}"
+                )
+        return issues
+
+
+@dataclass
+class Duty:
+    id: int
+    tasks: List[Block] = field(default_factory=list)
+    segments: List[DutySegment] = field(default_factory=list)
+    spread_time: int = 0
+    work_time: int = 0
+    rest_violations: int = 0
+    shift_violations: int = 0
+    continuous_driving_violation: bool = False
+    warnings: List[str] = field(default_factory=list)
+    paid_minutes: int = 0
+    overtime_minutes: int = 0
+    nocturnal_minutes: int = 0
+    meta: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def all_trips(self) -> List[Trip]:
+        return [t for seg in self.segments for t in seg.trips]
+
+    @property
+    def start_time(self) -> int:
+        return self.segments[0].start_time if self.segments else 0
+
+    @property
+    def end_time(self) -> int:
+        return self.segments[-1].end_time if self.segments else 0
+
+    def add_task(self, block: Block) -> None:
+        self.tasks.append(block)
+        self.segments.append(DutySegment(block_id=block.id, trips=list(block.trips)))
+        self._recalculate()
+
+    def _recalculate(self) -> None:
+        if not self.segments:
+            return
+        self.work_time = sum(t.duration for seg in self.segments for t in seg.trips)
+        self.spread_time = self.end_time - self.start_time
+        if self.paid_minutes == 0:
+            self.paid_minutes = self.work_time
+
+
+@dataclass
+class VSPSolution:
+    blocks: List[Block] = field(default_factory=list)
+    total_cost: float = 0.0
+    unassigned_trips: List[Trip] = field(default_factory=list)
+    algorithm: str = ""
+    iterations: int = 0
+    elapsed_ms: float = 0.0
+    warnings: List[str] = field(default_factory=list)
+    meta: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def num_vehicles(self) -> int:
+        return len(self.blocks)
+
+    def is_feasible(self) -> bool:
+        return len(self.unassigned_trips) == 0
+
+
+@dataclass
+class CSPSolution:
+    duties: List[Duty] = field(default_factory=list)
+    total_cost: float = 0.0
+    uncovered_blocks: List[Block] = field(default_factory=list)
+    cct_violations: int = 0
+    algorithm: str = ""
+    elapsed_ms: float = 0.0
+    warnings: List[str] = field(default_factory=list)
+    meta: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def num_crew(self) -> int:
+        roster_count = self.meta.get("roster_count") if isinstance(self.meta, dict) else None
+        return int(roster_count) if roster_count is not None else len(self.duties)
+
+    def is_feasible(self) -> bool:
+        return len(self.uncovered_blocks) == 0 and self.cct_violations == 0
+
+
+@dataclass
+class OptimizationResult:
+    vsp: VSPSolution
+    csp: CSPSolution
+    total_cost: float = 0.0
+    algorithm: AlgorithmType = AlgorithmType.HYBRID_PIPELINE
+    total_elapsed_ms: float = 0.0
+    meta: Dict[str, Any] = field(default_factory=dict)
+
+    def as_dict(self) -> dict:
+        return {
+            "vehicles": self.vsp.num_vehicles,
+            "crew": self.csp.num_crew,
+            "total_trips": sum(len(b.trips) for b in self.vsp.blocks),
+            "total_cost": round(self.total_cost, 2),
+            "cct_violations": self.csp.cct_violations,
+            "unassigned_trips": len(self.vsp.unassigned_trips),
+            "uncovered_blocks": len(self.csp.uncovered_blocks),
+            "vsp_algorithm": self.vsp.algorithm,
+            "csp_algorithm": self.csp.algorithm,
+            "elapsed_ms": round(self.total_elapsed_ms, 1),
+            "warnings": [*self.vsp.warnings, *self.csp.warnings],
+            "meta": {**(self.vsp.meta or {}), **(self.csp.meta or {}), **(self.meta or {})},
+            "blocks": [
+                {
+                    "block_id": b.id,
+                    "trips": [t.id for t in b.trips],
+                    "num_trips": len(b.trips),
+                    "start_time": b.start_time,
+                    "end_time": b.end_time,
+                    "warnings": b.warnings,
+                    "meta": b.meta,
+                }
+                for b in self.vsp.blocks
+            ],
+            "duties": [
+                {
+                    "duty_id": d.id,
+                    "blocks": list(dict.fromkeys(int(b.meta.get("source_block_id", b.id)) for b in d.tasks)),
+                    "trip_ids": list(dict.fromkeys(int(tid) for tid in d.meta.get("covered_trip_ids", []))),
+                    "work_time": d.work_time,
+                    "spread_time": d.spread_time,
+                    "rest_violations": d.rest_violations,
+                    "warnings": d.warnings,
+                    "paid_minutes": d.paid_minutes,
+                    "overtime_minutes": d.overtime_minutes,
+                    "nocturnal_minutes": d.nocturnal_minutes,
+                    "meta": d.meta,
+                }
+                for d in self.csp.duties
+            ],
+        }

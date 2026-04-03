@@ -1,0 +1,162 @@
+{
+  "last_id": 3,
+  "items": [
+    {
+      "id": 1,
+      "created_at": "2026-03-30T22:39:45.798688+00:00",
+      "updated_at": "2026-03-30T22:39:45.798688+00:00",
+      "scenario_name": "mvp-smoke",
+      "trips": [
+        {
+          "id": 1,
+          "line_id": 10,
+          "trip_group_id": 99,
+          "start_time": 480,
+          "end_time": 540,
+          "origin_id": 1,
+          "destination_id": 2,
+          "duration": 60,
+          "distance_km": 18.0,
+          "is_relief_point": false,
+          "energy_kwh": 0.0,
+          "elevation_gain_m": 0.0,
+          "is_holiday": false,
+          "deadhead_times": {}
+        }
+      ],
+      "cct_params": {},
+      "vsp_params": {},
+      "estimate": {
+        "estimated_vehicles": 1,
+        "estimated_crew": 1,
+        "estimated_total_cost": 825.0,
+        "estimated_vehicle_cost": 800.0,
+        "estimated_crew_cost": 25.0,
+        "assumptions": {
+          "lp_used": true,
+          "max_shift_minutes": 480,
+          "max_work_minutes": 440,
+          "max_vehicle_shift_minutes": 960
+        }
+      }
+    },
+    {
+      "id": 2,
+      "created_at": "2026-03-31T12:33:05.641395+00:00",
+      "updated_at": "2026-03-31T12:33:05.641395+00:00",
+      "scenario_name": "smoke-exec-2026-03-31",
+      "trips": [
+        {
+          "id": 1101,
+          "line_id": 6,
+          "start_time": 360,
+          "end_time": 410,
+          "origin_id": 1,
+          "destination_id": 2,
+          "duration": 50,
+          "distance_km": 18.5,
+          "is_relief_point": false,
+          "energy_kwh": 0.0,
+          "elevation_gain_m": 0.0,
+          "is_holiday": false,
+          "deadhead_times": {
+            "2": 8
+          }
+        },
+        {
+          "id": 1102,
+          "line_id": 6,
+          "start_time": 420,
+          "end_time": 470,
+          "origin_id": 2,
+          "destination_id": 3,
+          "duration": 50,
+          "distance_km": 17.1,
+          "is_relief_point": false,
+          "energy_kwh": 0.0,
+          "elevation_gain_m": 0.0,
+          "is_holiday": false,
+          "deadhead_times": {
+            "1": 7
+          }
+        }
+      ],
+      "cct_params": {},
+      "vsp_params": {
+        "maxVehicles": 120,
+        "goal_weights": {},
+        "natural_language_rules": []
+      },
+      "estimate": {
+        "estimated_vehicles": 1,
+        "estimated_crew": 1,
+        "estimated_total_cost": 841.67,
+        "estimated_vehicle_cost": 800.0,
+        "estimated_crew_cost": 41.67,
+        "assumptions": {
+          "lp_used": true,
+          "max_shift_minutes": 480,
+          "max_work_minutes": 440,
+          "max_vehicle_shift_minutes": 960
+        }
+      }
+    },
+    {
+      "id": 3,
+      "created_at": "2026-03-31T12:49:21.893265+00:00",
+      "updated_at": "2026-03-31T12:49:21.893265+00:00",
+      "scenario_name": "inbox-auto-2026-03-31",
+      "trips": [
+        {
+          "id": 2101,
+          "line_id": 7,
+          "start_time": 360,
+          "end_time": 415,
+          "origin_id": 1,
+          "destination_id": 2,
+          "duration": 55,
+          "distance_km": 16.3,
+          "is_relief_point": false,
+          "energy_kwh": 0.0,
+          "elevation_gain_m": 0.0,
+          "is_holiday": false,
+          "deadhead_times": {
+            "2": 8
+          }
+        },
+        {
+          "id": 2102,
+          "line_id": 7,
+          "start_time": 430,
+          "end_time": 485,
+          "origin_id": 2,
+          "destination_id": 3,
+          "duration": 55,
+          "distance_km": 16.7,
+          "is_relief_point": false,
+          "energy_kwh": 0.0,
+          "elevation_gain_m": 0.0,
+          "is_holiday": false,
+          "deadhead_times": {
+            "1": 7
+          }
+        }
+      ],
+      "cct_params": {},
+      "vsp_params": {},
+      "estimate": {
+        "estimated_vehicles": 1,
+        "estimated_crew": 1,
+        "estimated_total_cost": 845.83,
+        "estimated_vehicle_cost": 800.0,
+        "estimated_crew_cost": 45.83,
+        "assumptions": {
+          "lp_used": true,
+          "max_shift_minutes": 480,
+          "max_work_minutes": 440,
+          "max_vehicle_shift_minutes": 960
+        }
+      }
+    }
+  ]
+}

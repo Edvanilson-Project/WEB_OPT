@@ -1,0 +1,50 @@
+import { Entity, Column, Index } from 'typeorm';
+import { BaseEntity } from '../../../common/entities/base.entity';
+
+export enum UserRole {
+  SUPER_ADMIN = 'super_admin',
+  COMPANY_ADMIN = 'company_admin',
+  ANALYST = 'analyst',
+  OPERATOR = 'operator',
+}
+
+export enum UserStatus {
+  ACTIVE = 'active',
+  INACTIVE = 'inactive',
+}
+
+@Entity('users')
+export class UserEntity extends BaseEntity {
+  @Column({ length: 150 })
+  name: string;
+
+  @Index({ unique: true })
+  @Column({ unique: true, length: 200 })
+  email: string;
+
+  @Column({ name: 'password_hash', length: 255 })
+  passwordHash: string;
+
+  @Column({
+    type: 'enum',
+    enum: UserRole,
+    default: UserRole.ANALYST,
+  })
+  role: UserRole;
+
+  @Column({
+    type: 'enum',
+    enum: UserStatus,
+    default: UserStatus.ACTIVE,
+  })
+  status: UserStatus;
+
+  @Column({ name: 'company_id', nullable: true })
+  companyId: number;
+
+  @Column({ name: 'avatar_url', nullable: true, length: 500 })
+  avatarUrl: string;
+
+  @Column({ name: 'last_login_at', nullable: true, type: 'timestamp' })
+  lastLoginAt: Date;
+}

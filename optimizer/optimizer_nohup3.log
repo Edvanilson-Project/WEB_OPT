@@ -1,0 +1,12 @@
+nohup: ignorando entrada
+INFO:     Started server process [61199]
+INFO:     Waiting for application startup.
+{"version": "2.0.0", "algorithms": ["greedy", "genetic", "simulated_annealing", "tabu_search", "set_partitioning", "joint_solver", "hybrid_pipeline"], "event": "optimizer_starting", "level": "info", "logger": "main", "timestamp": "2026-04-01T12:35:15.948211Z"}
+{"interval_seconds": 300, "event": "strategy_auto_reconcile_enabled", "level": "info", "logger": "main", "timestamp": "2026-04-01T12:35:15.948310Z"}
+{"scenario_id": 3, "source_snapshot_id": 3, "event": "strategy_auto_reconcile_ok", "level": "info", "logger": "main", "timestamp": "2026-04-01T12:35:15.949431Z"}
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+INFO:     127.0.0.1:50690 - "POST /optimize/ HTTP/1.1" 400 Bad Request
+INFO:     127.0.0.1:50690 - "POST /optimize/ HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38406 - "POST /optimize/ HTTP/1.1" 400 Bad Request
+INFO:     127.0.0.1:38406 - "POST /optimize/ HTTP/1.1" 200 OK
