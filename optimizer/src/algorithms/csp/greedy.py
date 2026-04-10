@@ -156,10 +156,10 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
     def _service_day(self, block: Block) -> int:
         return block.start_time // 1440
 
-    def _regular_overtime_minutes(self, spread_minutes: int) -> int:
+    def _regular_overtime_minutes(self, work_minutes: int) -> int:
         if self.max_work <= 0:
             return 0
-        return max(0, int(spread_minutes) - self.max_work)
+        return max(0, int(work_minutes) - self.max_work)
 
     def _transfer_needed(self, a: Block, b: Block) -> int:
         last = a.trips[-1]
@@ -490,7 +490,7 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
 
         block_drive = self._block_drive(block)
         new_work = duty.work_time + block_drive
-        overtime_minutes = self._regular_overtime_minutes(new_spread)
+        overtime_minutes = self._regular_overtime_minutes(new_work)
         if overtime_minutes > self.overtime_limit:
             return False, "overtime_hard", {"new_spread": new_spread, "overtime_minutes": overtime_minutes}
 

@@ -642,7 +642,7 @@ class SetPartitioningOptimizedCSP(BaseAlgorithm, ICSPAlgorithm):
         cost = 50.0 + work / 60.0 * _DEFAULT_CREW_COST_PER_HOUR + sum(gaps) * 0.1 + passive * self.goal_weights.get("passive_transfer", 0.25)
         target_work = max(self.greedy.min_work, min(self.greedy.max_work, int(self.goal_weights.get("target_work_minutes", self.greedy.max_work * 0.85))))
         target_spread = min(self.greedy.max_shift, int(self.goal_weights.get("target_spread_minutes", self.greedy.max_shift * 0.9)))
-        overtime_dev = max(0, spread - self.greedy.max_work)
+        overtime_dev = self.greedy._regular_overtime_minutes(work)
         underwork_dev = max(0, target_work - work)
         spread_dev = max(0, spread - target_spread)
         fairness_dev = abs(work - target_work)
