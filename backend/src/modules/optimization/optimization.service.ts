@@ -235,6 +235,17 @@ export class OptimizationService {
           nocturnal_factor: activeSettings?.cctNocturnalFactor ?? 0.875,
           nocturnal_extra_pct: activeSettings?.cctNocturnalExtraPct ?? 0.2,
         };
+        // Aplicar heurísticas de Modo de Operação (Urban vs Charter/Fretamento)
+        const opMode = dto.operationMode ?? 'urban';
+        if (opMode === 'charter') {
+          cctBase.max_shift_minutes = 900;
+          cctBase.idle_time_is_paid = true;
+          cctBase.waiting_time_pay_pct = 0.3;
+          cctBase.allow_relief_points = true;
+          cctBase.operator_change_terminals_only = false;
+          cctBase.long_unpaid_break_limit_minutes = 600;
+        }
+
         // dto.cspParams sobrescreve campos específicos (override por run)
         const cctOverride = dto.cspParams ?? {};
         const cctParams = {
@@ -245,7 +256,7 @@ export class OptimizationService {
           ...(cctOverride.breakMinutes !== undefined && {
             min_break_minutes: 12,
           }),
-          max_unpaid_break_minutes: 360,
+          ...((cctOverride as any).maxUnpaidBreakMinutes !== undefined ? { max_unpaid_break_minutes: (cctOverride as any).maxUnpaidBreakMinutes } : { max_unpaid_break_minutes: opMode === 'charter' ? 600 : 360 }),
           ...(cctOverride.minShiftMinutes !== undefined && {
             min_shift_minutes: cctOverride.minShiftMinutes,
           }),

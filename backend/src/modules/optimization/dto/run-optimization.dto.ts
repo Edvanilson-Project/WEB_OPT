@@ -46,6 +46,15 @@ export class RunOptimizationDto {
   @IsEnum(OptimizationAlgorithm)
   algorithm?: string;
 
+  @ApiPropertyOptional({
+    description: 'Modo de operação: urban (Urbano) ou charter (Fretamento)',
+    default: 'urban',
+    enum: ['urban', 'charter'],
+  })
+  @IsOptional()
+  @IsEnum(['urban', 'charter'])
+  operationMode?: 'urban' | 'charter';
+
   @ApiPropertyOptional({ description: 'Parâmetros do VSP' })
   @IsOptional()
   @IsObject()
