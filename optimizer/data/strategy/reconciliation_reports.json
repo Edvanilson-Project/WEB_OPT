@@ -1,5 +1,5 @@
 {
-  "last_id": 170,
+  "last_id": 181,
   "items": [
     {
       "id": 1,
@@ -4379,6 +4379,292 @@
     {
       "id": 170,
       "created_at": "2026-04-10T13:32:38.817418+00:00",
+      "report": {
+        "kpis": {
+          "planned_trips": 2,
+          "actual_trips": 2,
+          "missing_actual": 0,
+          "ghost_bus_count": 1,
+          "gps_invalid_count": 1,
+          "avg_start_delay_minutes": 10.5,
+          "p95_start_delay_minutes": 6.0
+        },
+        "alerts": [
+          "GHOST_BUS_DETECTED count=1",
+          "GPS_INVALID count=1"
+        ],
+        "recommendations": [
+          "Integrar feed AVL/GTFS-RT contínuo e bloquear alocação sem confirmação de terminal.",
+          "Aplicar validação de telemetria por veículo e fallback de posicionamento por terminal."
+        ],
+        "scenario_id": 3,
+        "scenario_name": "inbox-auto-2026-03-31",
+        "source_snapshot_id": 3
+      }
+    },
+    {
+      "id": 171,
+      "created_at": "2026-04-10T14:18:23.714631+00:00",
+      "report": {
+        "kpis": {
+          "planned_trips": 2,
+          "actual_trips": 2,
+          "missing_actual": 0,
+          "ghost_bus_count": 1,
+          "gps_invalid_count": 1,
+          "avg_start_delay_minutes": 10.5,
+          "p95_start_delay_minutes": 6.0
+        },
+        "alerts": [
+          "GHOST_BUS_DETECTED count=1",
+          "GPS_INVALID count=1"
+        ],
+        "recommendations": [
+          "Integrar feed AVL/GTFS-RT contínuo e bloquear alocação sem confirmação de terminal.",
+          "Aplicar validação de telemetria por veículo e fallback de posicionamento por terminal."
+        ],
+        "scenario_id": 3,
+        "scenario_name": "inbox-auto-2026-03-31",
+        "source_snapshot_id": 3
+      }
+    },
+    {
+      "id": 172,
+      "created_at": "2026-04-10T14:19:26.527975+00:00",
+      "report": {
+        "kpis": {
+          "planned_trips": 2,
+          "actual_trips": 2,
+          "missing_actual": 0,
+          "ghost_bus_count": 1,
+          "gps_invalid_count": 1,
+          "avg_start_delay_minutes": 10.5,
+          "p95_start_delay_minutes": 6.0
+        },
+        "alerts": [
+          "GHOST_BUS_DETECTED count=1",
+          "GPS_INVALID count=1"
+        ],
+        "recommendations": [
+          "Integrar feed AVL/GTFS-RT contínuo e bloquear alocação sem confirmação de terminal.",
+          "Aplicar validação de telemetria por veículo e fallback de posicionamento por terminal."
+        ],
+        "scenario_id": 3,
+        "scenario_name": "inbox-auto-2026-03-31",
+        "source_snapshot_id": 3
+      }
+    },
+    {
+      "id": 173,
+      "created_at": "2026-04-10T14:19:51.405985+00:00",
+      "report": {
+        "kpis": {
+          "planned_trips": 2,
+          "actual_trips": 2,
+          "missing_actual": 0,
+          "ghost_bus_count": 1,
+          "gps_invalid_count": 1,
+          "avg_start_delay_minutes": 10.5,
+          "p95_start_delay_minutes": 6.0
+        },
+        "alerts": [
+          "GHOST_BUS_DETECTED count=1",
+          "GPS_INVALID count=1"
+        ],
+        "recommendations": [
+          "Integrar feed AVL/GTFS-RT contínuo e bloquear alocação sem confirmação de terminal.",
+          "Aplicar validação de telemetria por veículo e fallback de posicionamento por terminal."
+        ],
+        "scenario_id": 3,
+        "scenario_name": "inbox-auto-2026-03-31",
+        "source_snapshot_id": 3
+      }
+    },
+    {
+      "id": 174,
+      "created_at": "2026-04-10T15:30:43.385018+00:00",
+      "report": {
+        "kpis": {
+          "planned_trips": 2,
+          "actual_trips": 2,
+          "missing_actual": 0,
+          "ghost_bus_count": 1,
+          "gps_invalid_count": 1,
+          "avg_start_delay_minutes": 10.5,
+          "p95_start_delay_minutes": 6.0
+        },
+        "alerts": [
+          "GHOST_BUS_DETECTED count=1",
+          "GPS_INVALID count=1"
+        ],
+        "recommendations": [
+          "Integrar feed AVL/GTFS-RT contínuo e bloquear alocação sem confirmação de terminal.",
+          "Aplicar validação de telemetria por veículo e fallback de posicionamento por terminal."
+        ],
+        "scenario_id": 3,
+        "scenario_name": "inbox-auto-2026-03-31",
+        "source_snapshot_id": 3
+      }
+    },
+    {
+      "id": 175,
+      "created_at": "2026-04-10T15:31:05.034174+00:00",
+      "report": {
+        "kpis": {
+          "planned_trips": 2,
+          "actual_trips": 2,
+          "missing_actual": 0,
+          "ghost_bus_count": 1,
+          "gps_invalid_count": 1,
+          "avg_start_delay_minutes": 10.5,
+          "p95_start_delay_minutes": 6.0
+        },
+        "alerts": [
+          "GHOST_BUS_DETECTED count=1",
+          "GPS_INVALID count=1"
+        ],
+        "recommendations": [
+          "Integrar feed AVL/GTFS-RT contínuo e bloquear alocação sem confirmação de terminal.",
+          "Aplicar validação de telemetria por veículo e fallback de posicionamento por terminal."
+        ],
+        "scenario_id": 3,
+        "scenario_name": "inbox-auto-2026-03-31",
+        "source_snapshot_id": 3
+      }
+    },
+    {
+      "id": 176,
+      "created_at": "2026-04-10T15:31:25.447134+00:00",
+      "report": {
+        "kpis": {
+          "planned_trips": 2,
+          "actual_trips": 2,
+          "missing_actual": 0,
+          "ghost_bus_count": 1,
+          "gps_invalid_count": 1,
+          "avg_start_delay_minutes": 10.5,
+          "p95_start_delay_minutes": 6.0
+        },
+        "alerts": [
+          "GHOST_BUS_DETECTED count=1",
+          "GPS_INVALID count=1"
+        ],
+        "recommendations": [
+          "Integrar feed AVL/GTFS-RT contínuo e bloquear alocação sem confirmação de terminal.",
+          "Aplicar validação de telemetria por veículo e fallback de posicionamento por terminal."
+        ],
+        "scenario_id": 3,
+        "scenario_name": "inbox-auto-2026-03-31",
+        "source_snapshot_id": 3
+      }
+    },
+    {
+      "id": 177,
+      "created_at": "2026-04-10T15:36:18.031505+00:00",
+      "report": {
+        "kpis": {
+          "planned_trips": 2,
+          "actual_trips": 2,
+          "missing_actual": 0,
+          "ghost_bus_count": 1,
+          "gps_invalid_count": 1,
+          "avg_start_delay_minutes": 10.5,
+          "p95_start_delay_minutes": 6.0
+        },
+        "alerts": [
+          "GHOST_BUS_DETECTED count=1",
+          "GPS_INVALID count=1"
+        ],
+        "recommendations": [
+          "Integrar feed AVL/GTFS-RT contínuo e bloquear alocação sem confirmação de terminal.",
+          "Aplicar validação de telemetria por veículo e fallback de posicionamento por terminal."
+        ],
+        "scenario_id": 3,
+        "scenario_name": "inbox-auto-2026-03-31",
+        "source_snapshot_id": 3
+      }
+    },
+    {
+      "id": 178,
+      "created_at": "2026-04-10T15:36:46.102539+00:00",
+      "report": {
+        "kpis": {
+          "planned_trips": 2,
+          "actual_trips": 2,
+          "missing_actual": 0,
+          "ghost_bus_count": 1,
+          "gps_invalid_count": 1,
+          "avg_start_delay_minutes": 10.5,
+          "p95_start_delay_minutes": 6.0
+        },
+        "alerts": [
+          "GHOST_BUS_DETECTED count=1",
+          "GPS_INVALID count=1"
+        ],
+        "recommendations": [
+          "Integrar feed AVL/GTFS-RT contínuo e bloquear alocação sem confirmação de terminal.",
+          "Aplicar validação de telemetria por veículo e fallback de posicionamento por terminal."
+        ],
+        "scenario_id": 3,
+        "scenario_name": "inbox-auto-2026-03-31",
+        "source_snapshot_id": 3
+      }
+    },
+    {
+      "id": 179,
+      "created_at": "2026-04-10T19:06:00.098671+00:00",
+      "report": {
+        "kpis": {
+          "planned_trips": 2,
+          "actual_trips": 2,
+          "missing_actual": 0,
+          "ghost_bus_count": 1,
+          "gps_invalid_count": 1,
+          "avg_start_delay_minutes": 10.5,
+          "p95_start_delay_minutes": 6.0
+        },
+        "alerts": [
+          "GHOST_BUS_DETECTED count=1",
+          "GPS_INVALID count=1"
+        ],
+        "recommendations": [
+          "Integrar feed AVL/GTFS-RT contínuo e bloquear alocação sem confirmação de terminal.",
+          "Aplicar validação de telemetria por veículo e fallback de posicionamento por terminal."
+        ],
+        "scenario_id": 3,
+        "scenario_name": "inbox-auto-2026-03-31",
+        "source_snapshot_id": 3
+      }
+    },
+    {
+      "id": 180,
+      "created_at": "2026-04-10T20:36:29.219817+00:00",
+      "report": {
+        "kpis": {
+          "planned_trips": 2,
+          "actual_trips": 2,
+          "missing_actual": 0,
+          "ghost_bus_count": 1,
+          "gps_invalid_count": 1,
+          "avg_start_delay_minutes": 10.5,
+          "p95_start_delay_minutes": 6.0
+        },
+        "alerts": [
+          "GHOST_BUS_DETECTED count=1",
+          "GPS_INVALID count=1"
+        ],
+        "recommendations": [
+          "Integrar feed AVL/GTFS-RT contínuo e bloquear alocação sem confirmação de terminal.",
+          "Aplicar validação de telemetria por veículo e fallback de posicionamento por terminal."
+        ],
+        "scenario_id": 3,
+        "scenario_name": "inbox-auto-2026-03-31",
+        "source_snapshot_id": 3
+      }
+    },
+    {
+      "id": 181,
+      "created_at": "2026-04-10T21:04:26.850289+00:00",
       "report": {
         "kpis": {
           "planned_trips": 2,

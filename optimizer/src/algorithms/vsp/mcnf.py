@@ -61,6 +61,7 @@ class MCNFVSP(BaseAlgorithm, IVSPAlgorithm):
         min_layover = int(self._p("min_layover_minutes", 8))
         max_shift = int(self._p("max_vehicle_shift_minutes", 960))
         allow_multi = bool(self._p("allow_multi_line_block", True))
+        connection_tolerance = int(self._p("connection_tolerance_minutes", 0))
         
         # Custo Infinito para matriz de penalização
         INF = 1e9
@@ -88,8 +89,8 @@ class MCNFVSP(BaseAlgorithm, IVSPAlgorithm):
                 gap = trips_sorted[j].start_time - trips_sorted[i].end_time
                 dh = max(min_layover, int(trips_sorted[i].deadhead_times.get(trips_sorted[j].origin_id, 0)))
                 
-                # É fisicamente impossível de alcançar
-                if gap < dh:
+                # É fisicamente impossível de alcançar (com tolerância)
+                if gap + connection_tolerance < dh:
                     continue
                 
                 # Excede a ociosidade segura máxima definida

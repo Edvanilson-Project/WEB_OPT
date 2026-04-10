@@ -2,17 +2,14 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Box, Grid, Typography, Button, Paper, Stack, Skeleton, Tooltip, IconButton,
-  TableContainer, Table, TableHead, TableBody, TableRow, TableCell,
   Dialog, DialogTitle, DialogContent, DialogActions, TextField,
-  Switch, FormControlLabel, InputAdornment, useTheme,
+  Switch, FormControlLabel, InputAdornment, useTheme, Card, CardContent, Divider
 } from '@mui/material';
 import {
   IconPlus, IconEdit, IconTrash, IconSearch, IconRefresh, IconBus,
-  IconCurrencyDollar,
+  IconCurrencyDollar, IconUsers
 } from '@tabler/icons-react';
 import PageContainer from '@/app/components/container/PageContainer';
-import DashboardCard from '@/app/components/shared/DashboardCard';
-import KpiCard from '../_components/KpiCard';
 import ConfirmDialog from '../_components/ConfirmDialog';
 import StatusChip from '../_components/StatusChip';
 import { NotifyProvider, useNotify } from '../_components/Notify';
@@ -43,15 +40,14 @@ function VehiclesInner() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await vehicleTypesApi.getAll();
-      setItems(extractArray(data));
+      setItems(extractArray(await vehicleTypesApi.getAll()));
     } catch { notify.error('Falha ao carregar tipos de veículo.'); }
     finally { setLoading(false); }
   }, [notify]);
 
   useEffect(() => { load(); }, [load]);
 
-  const filtered = items.filter((t) => t.name.toLowerCase().includes(search.toLowerCase()));
+  const filtered = items.filter((t) => t.name.toLowerCase().includes(search.toLowerCase()) || (t.code?.toLowerCase() || '').includes(search.toLowerCase()));
 
   const openCreate = () => { setEditTarget(null); setForm(EMPTY); setDialogOpen(true); };
   const openEdit = (t: VehicleType) => {
@@ -62,15 +58,14 @@ function VehiclesInner() {
   };
 
   const handleSave = async () => {
-    if (!form.name.trim() || !form.passengerCapacity) { notify.warning('Nome e capacidade são obrigatórios.'); return; }
+    if (!form.name.trim() || !form.passengerCapacity) return notify.warning('Nome e capacidade são obrigatórios.');
     setSaving(true);
     try {
-      const user = getSessionUser();
       const payload = {
-        companyId: user?.companyId ?? 1,
+        companyId: getSessionUser()?.companyId ?? 1,
         name: form.name.trim(),
         code: form.code.trim().toUpperCase() || undefined,
-        passengerCapacity: parseInt(form.passengerCapacity),
+        passengerCapacity: parseInt(form.passengerCapacity) || 0,
         costPerKm: parseFloat(form.costPerKm) || 0,
         costPerHour: parseFloat(form.costPerHour) || 0,
         fixedCost: parseFloat(form.fixedCost) || 0,
@@ -79,7 +74,7 @@ function VehiclesInner() {
       if (editTarget) { await vehicleTypesApi.update(editTarget.id, payload); notify.success('Tipo atualizado!'); }
       else { await vehicleTypesApi.create(payload); notify.success('Tipo criado!'); }
       setDialogOpen(false); load();
-    } catch (e: any) { notify.error(e?.response?.data?.message ?? 'Erro ao salvar.'); }
+    } catch { notify.error('Erro ao salvar.'); }
     finally { setSaving(false); }
   };
 
@@ -88,7 +83,7 @@ function VehiclesInner() {
     try {
       await vehicleTypesApi.delete(deleteTarget.id);
       notify.success('Tipo de veículo excluído!'); setDeleteTarget(null); load();
-    } catch (e: any) { notify.error(e?.response?.data?.message ?? 'Erro ao excluir.'); }
+    } catch { notify.error('Erro ao excluir.'); }
     finally { setDeleting(false); }
   };
 
@@ -97,116 +92,138 @@ function VehiclesInner() {
 
   const active = items.filter((i) => i.isActive);
   const avgCapacity = items.length ? Math.round(items.reduce((s, i) => s + i.passengerCapacity, 0) / items.length) : 0;
-  const avgCost = items.length ? items.reduce((s, i) => s + i.costPerKm, 0) / items.length : 0;
-
+  
   return (
-    <PageContainer title="Frota — OTIMIZ" description="Tipos de veículos">
-      <Box>
-      <Stack direction="row" justifyContent="space-between" alignItems="center" mb={3}>
+    <PageContainer title="Frota Enterprise — OTIMIZ" description="Catálogo de frotas operacionais">
+      <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" alignItems={{ xs: 'flex-start', md: 'center' }} gap={2} mb={4} pt={2}>
         <Box>
-          <Typography variant="h4" fontWeight={700} lineHeight={1}>Frota</Typography>
-          <Typography variant="body2" color="text.secondary" mt={0.5}>Tipos de veículos, capacidades e estrutura de custos</Typography>
+          <Typography variant="overline" sx={{ letterSpacing: 1.6, color: 'primary.main', fontWeight: 800 }}>
+            FLEET ASSETS
+          </Typography>
+          <Typography variant="h3" fontWeight={800} mt={0.5}>Frotas e Costing</Typography>
+          <Typography variant="body1" color="text.secondary" mt={1}>Gerenciamento dos chassis e perfis de custo para otimização.</Typography>
         </Box>
-        <Stack direction="row" gap={1}>
-          <Tooltip title="Recarregar"><IconButton onClick={load} disabled={loading} size="small"><IconRefresh size={18} /></IconButton></Tooltip>
-          <Button variant="contained" startIcon={<IconPlus size={18} />} onClick={openCreate}>Novo Tipo</Button>
+        <Stack direction="row" gap={2}>
+          <Tooltip title="Recarregar">
+            <IconButton onClick={load} sx={{ bgcolor: 'background.paper', border: '1px solid', borderColor: 'divider' }}>
+              <IconRefresh size={20} color={theme.palette.primary.main} />
+            </IconButton>
+          </Tooltip>
+          <Button variant="contained" size="large" startIcon={<IconPlus />} onClick={openCreate} sx={{ borderRadius: 2 }}>
+            Novo Chassi
+          </Button>
         </Stack>
       </Stack>
 
       {!loading && items.length > 0 && (
-        <Grid container spacing={3} mb={3}>
-          {[
-            { title: 'Total de Tipos', value: items.length, subtitle: 'cadastrados', icon: <IconBus size={26} />, color: theme.palette.primary.main },
-            { title: 'Tipos Ativos', value: active.length, subtitle: `${items.length - active.length} inativos`, icon: <IconBus size={26} />, color: '#13DEB9' },
-            { title: 'Capacidade Média', value: `${avgCapacity}`, subtitle: 'passageiros', icon: <IconBus size={26} />, color: '#FFAE1F' },
-            { title: 'Custo Médio/km', value: fmtR(avgCost), subtitle: 'por quilômetro', icon: <IconCurrencyDollar size={26} />, color: '#FA896B' },
-          ].map((c) => (
-            <Grid item xs={12} sm={6} md={3} key={c.title}>
-              <KpiCard {...c} />
-            </Grid>
-          ))}
-        </Grid>
+         <Grid container spacing={3} mb={4}>
+           {[
+             { title: 'Catálogo de Frota', value: items.length, color: 'primary.main' },
+             { title: 'Chassis Ativos', value: active.length, color: 'success.main' },
+             { title: 'Lotação Média', value: avgCapacity, color: 'warning.main' },
+           ].map((c) => (
+             <Grid item xs={12} md={4} key={c.title}>
+               <Card variant="outlined" sx={{ borderRadius: 3, borderLeft: `6px solid`, borderLeftColor: c.color }}>
+                 <CardContent>
+                   <Typography variant="caption" color="text.secondary">{c.title}</Typography>
+                   <Typography variant="h4" fontWeight={800} mt={1}>{c.value}</Typography>
+                 </CardContent>
+               </Card>
+             </Grid>
+           ))}
+         </Grid>
       )}
 
-      <Paper elevation={0} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 2, p: 2, mb: 2 }}>
-        <Stack direction="row" gap={2} alignItems="center">
-          <TextField size="small" placeholder="Buscar por nome..." value={search} onChange={(e) => setSearch(e.target.value)} sx={{ width: 320 }}
-            InputProps={{ startAdornment: <InputAdornment position="start"><IconSearch size={16} /></InputAdornment> }} />
-          <Typography variant="caption" color="text.secondary" ml="auto">{filtered.length} tipo{filtered.length !== 1 ? 's' : ''}</Typography>
+      <Paper variant="outlined" sx={{ borderRadius: 3, p: 2, mb: 4 }}>
+        <Stack direction="row" gap={2} alignItems="center" flexWrap="wrap">
+          <TextField size="small" placeholder="Localizar modelo ou código..." value={search} onChange={(e) => setSearch(e.target.value)} fullWidth sx={{ maxWidth: { md: 400 } }} InputProps={{ startAdornment: <InputAdornment position="start"><IconSearch size={16} /></InputAdornment> }} />
+          <Typography variant="subtitle2" fontWeight={700} color="primary.main" ml="auto">{filtered.length} chassis cadastrados</Typography>
         </Stack>
       </Paper>
 
-      <DashboardCard title="">
-        {loading ? <Box>{[...Array(5)].map((_, i) => <Skeleton key={i} variant="rectangular" height={44} sx={{ mb: 0.5, borderRadius: 1 }} />)}</Box> : (
-          <TableContainer>
-            <Table size="small">
-              <TableHead>
-                <TableRow>
-                  <TableCell sx={{ fontWeight: 600 }}>Nome</TableCell>
-                  <TableCell align="center" sx={{ fontWeight: 600 }}>Capacidade</TableCell>
-                  <TableCell align="right" sx={{ fontWeight: 600 }}>Custo/km</TableCell>
-                  <TableCell align="right" sx={{ fontWeight: 600 }}>Custo/hora</TableCell>
-                  <TableCell align="right" sx={{ fontWeight: 600 }}>Custo Fixo/dia</TableCell>
-                  <TableCell align="center" sx={{ fontWeight: 600 }}>Status</TableCell>
-                  <TableCell align="right" sx={{ fontWeight: 600 }}>Ações</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {filtered.length === 0 ? (
-                  <TableRow><TableCell colSpan={7} align="center" sx={{ py: 6 }}>
-                    <IconBus size={40} color={theme.palette.grey[400]} />
-                    <Typography variant="body2" color="text.secondary" mt={1}>Nenhum tipo de veículo encontrado.</Typography>
-                  </TableCell></TableRow>
-                ) : filtered.map((t) => (
-                  <TableRow key={t.id} hover>
-                    <TableCell><Typography variant="body2" fontWeight={500}>{t.name}</Typography></TableCell>
-                    <TableCell align="center"><Typography variant="body2">{t.passengerCapacity} pass.</Typography></TableCell>
-                    <TableCell align="right"><Typography variant="body2">{fmtR(t.costPerKm)}</Typography></TableCell>
-                    <TableCell align="right"><Typography variant="body2">{fmtR(t.costPerHour)}</Typography></TableCell>
-                    <TableCell align="right"><Typography variant="body2">{fmtR(t.fixedCost)}</Typography></TableCell>
-                    <TableCell align="center"><StatusChip type="status" value={t.isActive ? 'active' : 'inactive'} /></TableCell>
-                    <TableCell align="right">
-                      <Tooltip title="Editar"><IconButton size="small" onClick={() => openEdit(t)}><IconEdit size={16} /></IconButton></Tooltip>
-                      <Tooltip title="Excluir"><IconButton size="small" color="error" onClick={() => setDeleteTarget(t)}><IconTrash size={16} /></IconButton></Tooltip>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </TableContainer>
-        )}
-      </DashboardCard>
+      {loading ? (
+        <Grid container spacing={2}>
+           {[...Array(6)].map((_, i) => <Grid item xs={12} sm={6} md={4} key={i}><Skeleton variant="rounded" height={160} /></Grid>)}
+        </Grid>
+      ) : filtered.length === 0 ? (
+        <Box textAlign="center" py={12} bgcolor="grey.50" borderRadius={3} border="1px dashed" borderColor="divider">
+          <IconBus size={64} color="#BDBDBD" />
+          <Typography variant="h6" color="text.secondary" mt={2}>Nenhum chassi encontrado nesse filtro.</Typography>
+        </Box>
+      ) : (
+        <Grid container spacing={2}>
+           {filtered.map((t) => (
+             <Grid item xs={12} sm={6} md={4} key={t.id}>
+                <Card variant="outlined" sx={{ borderRadius: 3, transition: '0.2s', '&:hover': { borderColor: 'primary.main', boxShadow: '0 8px 16px rgba(0,0,0,0.05)' }}}>
+                   <CardContent sx={{ p: '20px !important' }}>
+                      <Stack direction="row" justifyContent="space-between" mb={1}>
+                         <Box sx={{ p: 1, borderRadius: 2, bgcolor: 'primary.lighter', color: 'primary.dark' }}>
+                            <IconBus size={24} />
+                         </Box>
+                         <Stack direction="row" spacing={0.5}>
+                            <IconButton size="small" onClick={() => openEdit(t)} sx={{ bgcolor: 'grey.50'}}><IconEdit size={16} /></IconButton>
+                            <IconButton size="small" onClick={() => setDeleteTarget(t)} sx={{ bgcolor: 'error.lighter', color: 'error.main' }}><IconTrash size={16} /></IconButton>
+                         </Stack>
+                      </Stack>
+                      <Typography variant="caption" fontFamily="monospace" fontWeight={700} color="text.secondary">{t.code ?? 'S/N'}</Typography>
+                      <Typography variant="h6" fontWeight={800} noWrap>{t.name}</Typography>
+                      
+                      <Stack direction="row" gap={3} mt={2} mb={2}>
+                         <Box>
+                           <Typography variant="caption" color="text.secondary" display="block">Capacidade</Typography>
+                           <Stack direction="row" alignItems="center" gap={0.5}>
+                             <IconUsers size={14} color={theme.palette.text.disabled}/>
+                             <Typography variant="body2" fontWeight={700}>{t.passengerCapacity}</Typography>
+                           </Stack>
+                         </Box>
+                         <Box>
+                           <Typography variant="caption" color="text.secondary" display="block">Custo Diário</Typography>
+                           <Stack direction="row" alignItems="center" gap={0.5}>
+                             <IconCurrencyDollar size={14} color={theme.palette.text.disabled}/>
+                             <Typography variant="body2" fontWeight={700}>{fmtR(t.fixedCost)}</Typography>
+                           </Stack>
+                         </Box>
+                      </Stack>
+                      <Divider sx={{ mb: 2 }} />
+                      <Stack direction="row" justifyContent="space-between" alignItems="center">
+                         <Typography variant="caption" color="text.secondary">Rodagem: {fmtR(t.costPerKm)}/km</Typography>
+                         <StatusChip type="status" value={t.isActive ? 'active' : 'inactive'} />
+                      </Stack>
+                   </CardContent>
+                </Card>
+             </Grid>
+           ))}
+        </Grid>
+      )}
 
-      <Dialog open={dialogOpen} onClose={() => !saving && setDialogOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle sx={{ fontWeight: 700 }}>{editTarget ? 'Editar Tipo de Veículo' : 'Novo Tipo de Veículo'}</DialogTitle>
+      <Dialog open={dialogOpen} onClose={() => !saving && setDialogOpen(false)} maxWidth="sm" fullWidth PaperProps={{ sx: { borderRadius: 3 } }}>
+        <DialogTitle sx={{ fontWeight: 800 }}>{editTarget ? 'Editar Chassi' : 'Novo Chassi Operacional'}</DialogTitle>
         <DialogContent dividers>
-          <Stack spacing={2.5} sx={{ pt: 0.5 }}>
-            <TextField label="Nome do Tipo" required fullWidth placeholder="Ex: Ônibus Padrão, Articulado" value={form.name} onChange={vf('name')} />
-            <Stack direction="row" spacing={2}>
-              <TextField label="Código" sx={{ width: 140 }} value={form.code} onChange={vf('code')} inputProps={{ maxLength: 20, style: { textTransform: 'uppercase' } }} />
-              <TextField label="Capacidade de Passageiros" required fullWidth type="number" value={numVal(form.passengerCapacity)} onChange={vf('passengerCapacity')}
-                InputProps={{ endAdornment: <InputAdornment position="end">pass.</InputAdornment> }} />
+          <Stack spacing={3} sx={{ pt: 1 }}>
+            <TextField label="Modelo do Veículo" required fullWidth placeholder="Ex: Ônibus Articulado" value={form.name} onChange={vf('name')} />
+            <Stack direction="row" spacing={2} flexWrap="wrap">
+              <TextField label="Código Frota" sx={{ flex: 1, minWidth: 140 }} value={form.code} onChange={vf('code')} inputProps={{ maxLength: 20, style: { textTransform: 'uppercase' } }} />
+              <TextField label="Capacidade Física" required type="number" sx={{ flex: 1, minWidth: 140 }} value={numVal(form.passengerCapacity)} onChange={vf('passengerCapacity')} InputProps={{ endAdornment: <InputAdornment position="end">pass.</InputAdornment> }} />
             </Stack>
-            <Stack direction="row" spacing={2}>
-              <TextField label="Custo por km" fullWidth type="number" value={numVal(form.costPerKm)} onChange={vf('costPerKm')}
-                InputProps={{ startAdornment: <InputAdornment position="start">R$</InputAdornment> }} inputProps={{ step: 0.01 }} />
-              <TextField label="Custo por hora" fullWidth type="number" value={numVal(form.costPerHour)} onChange={vf('costPerHour')}
-                InputProps={{ startAdornment: <InputAdornment position="start">R$</InputAdornment> }} inputProps={{ step: 0.01 }} />
+            
+            <Typography variant="subtitle2" fontWeight={700} color="text.secondary" mt={2}>Matriz de Custos para Otimização</Typography>
+            <Stack direction="row" spacing={2} bgcolor="grey.50" p={2} borderRadius={2}>
+              <TextField label="Variável (por km)" fullWidth type="number" value={numVal(form.costPerKm)} onChange={vf('costPerKm')} InputProps={{ startAdornment: <InputAdornment position="start">R$</InputAdornment> }} inputProps={{ step: 0.01 }} />
+              <TextField label="Variável (por hora)" fullWidth type="number" value={numVal(form.costPerHour)} onChange={vf('costPerHour')} InputProps={{ startAdornment: <InputAdornment position="start">R$</InputAdornment> }} inputProps={{ step: 0.01 }} />
             </Stack>
-            <TextField label="Custo Fixo Diário" fullWidth type="number" value={numVal(form.fixedCost)} onChange={vf('fixedCost')}
-              InputProps={{ startAdornment: <InputAdornment position="start">R$</InputAdornment> }} inputProps={{ step: 0.01 }} />
-            <FormControlLabel control={<Switch checked={form.isActive} onChange={(e) => setForm((p) => ({ ...p, isActive: e.target.checked }))} />} label="Tipo ativo" />
+            <TextField label="Custo Fixo (Diário base)" fullWidth type="number" value={numVal(form.fixedCost)} onChange={vf('fixedCost')} InputProps={{ startAdornment: <InputAdornment position="start">R$</InputAdornment> }} inputProps={{ step: 0.01 }} />
+            
+            <FormControlLabel control={<Switch checked={form.isActive} onChange={(e) => setForm((p) => ({ ...p, isActive: e.target.checked }))} color="primary" />} label="Habilitado para uso no Solver" />
           </Stack>
         </DialogContent>
-        <DialogActions sx={{ px: 3, pb: 2.5 }}>
-          <Button onClick={() => setDialogOpen(false)} disabled={saving}>Cancelar</Button>
-          <Button variant="contained" onClick={handleSave} disabled={saving || !form.name || !form.passengerCapacity}>{saving ? 'Salvando...' : 'Salvar'}</Button>
+        <DialogActions sx={{ px: 3, py: 2 }}>
+          <Button onClick={() => setDialogOpen(false)} disabled={saving} color="inherit">Ignorar</Button>
+          <Button variant="contained" onClick={handleSave} disabled={saving || !form.name || !form.passengerCapacity} sx={{ borderRadius: 2 }}>{saving ? 'Registrando...' : 'Gravar na Base'}</Button>
         </DialogActions>
       </Dialog>
 
-      <ConfirmDialog open={!!deleteTarget} title="Excluir Tipo de Veículo" message={`Excluir "${deleteTarget?.name}"? Esta ação não pode ser desfeita.`}
-        confirmLabel="Excluir" loading={deleting} onConfirm={handleDelete} onCancel={() => setDeleteTarget(null)} />
-      </Box>
+      <ConfirmDialog open={!!deleteTarget} title="Desativar Frota" message={`Atenção: remover "${deleteTarget?.name}" pode invalidar resultados de otimização antigos que usaram este chassi.`}
+        confirmLabel="Remover" loading={deleting} onConfirm={handleDelete} onCancel={() => setDeleteTarget(null)} />
     </PageContainer>
   );
 }

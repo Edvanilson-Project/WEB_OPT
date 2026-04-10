@@ -32,6 +32,10 @@ class HybridPipeline(BaseAlgorithm):
         self.cct_params = cct_params or {}
         self.vsp_params = dict(vsp_params or {})
 
+        # Propagar connection_tolerance para VSP se definido no CCT mas não no VSP
+        if "connection_tolerance_minutes" not in self.vsp_params and self.cct_params.get("connection_tolerance_minutes"):
+            self.vsp_params["connection_tolerance_minutes"] = self.cct_params["connection_tolerance_minutes"]
+
         # NÃO injetar crew_block_limit no VSP.
         # O limite de jornada do TRIPULANTE (CSP) não deve restringir o turno do VEÍCULO (VSP).
         # Veículos podem operar o dia inteiro; o CSP faz run-cutting e troca de operadores.

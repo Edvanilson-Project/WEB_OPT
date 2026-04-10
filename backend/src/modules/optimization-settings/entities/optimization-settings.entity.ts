@@ -6,40 +6,6 @@ export class OptimizationSettingsEntity extends BaseCompanyEntity {
   @Column({ name: 'algorithm_type', default: 'hybrid_pipeline' })
   algorithmType: string;
 
-  // Genetic Algorithm
-  @Column({ name: 'ga_population_size', default: 50 })
-  gaPopulationSize: number;
-
-  @Column({ name: 'ga_generations', default: 100 })
-  gaGenerations: number;
-
-  @Column({ name: 'ga_mutation_rate', type: 'float', default: 0.1 })
-  gaMutationRate: number;
-
-  @Column({ name: 'ga_crossover_rate', type: 'float', default: 0.8 })
-  gaCrossoverRate: number;
-
-  // Simulated Annealing
-  @Column({ name: 'sa_initial_temperature', type: 'float', default: 1000.0 })
-  saInitialTemperature: number;
-
-  @Column({ name: 'sa_cooling_rate', type: 'float', default: 0.95 })
-  saCoolingRate: number;
-
-  @Column({ name: 'sa_min_temperature', type: 'float', default: 0.01 })
-  saMinTemperature: number;
-
-  // Tabu Search
-  @Column({ name: 'ts_tabu_size', default: 10 })
-  tsTabuSize: number;
-
-  @Column({ name: 'ts_max_iterations', default: 500 })
-  tsMaxIterations: number;
-
-  // ILP / Set Partitioning
-  @Column({ name: 'ilp_timeout_seconds', default: 60 })
-  ilpTimeoutSeconds: number;
-
   // General
   @Column({ name: 'time_budget_seconds', default: 300 })
   timeBudgetSeconds: number;
@@ -59,9 +25,6 @@ export class OptimizationSettingsEntity extends BaseCompanyEntity {
 
   @Column({ name: 'cct_min_layover_minutes', default: 8 })
   cctMinLayoverMinutes: number; // pausa mínima no terminal mesmo bloco — padrão 8min
-
-  @Column({ name: 'cct_max_duties_per_day', default: 1 })
-  cctMaxDutiesPerDay: number;
 
   @Column({ name: 'apply_cct', default: true })
   applyCct: boolean; // se false, ignora restrições CCT (modo só custo)
@@ -108,6 +71,9 @@ export class OptimizationSettingsEntity extends BaseCompanyEntity {
   @Column({ name: 'allow_vehicle_split_shifts', default: true })
   allowVehicleSplitShifts: boolean;
 
+  @Column({ name: 'allow_multi_line_block', default: true })
+  allowMultiLineBlock: boolean;
+
   // Relief Points (mid-route driver change)
   @Column({ name: 'allow_relief_points', default: false })
   allowReliefPoints: boolean;
@@ -120,6 +86,9 @@ export class OptimizationSettingsEntity extends BaseCompanyEntity {
 
   @Column({ nullable: true })
   description: string;
+
+  @Column({ name: 'connection_tolerance_minutes', default: 2 })
+  connectionToleranceMinutes: number;
 
   // Novos campos CCT/CLT (sessão 2026) ──────────────────────────────────────────
 

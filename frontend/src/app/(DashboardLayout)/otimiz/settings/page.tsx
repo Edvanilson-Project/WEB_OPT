@@ -306,25 +306,7 @@ function SettingsInner() {
               <Alert severity="info" sx={{ borderRadius: 2 }}>
                 Este perfil controla o solver ativo, as restrições CCT/Lei 13.103, os parâmetros de EV e o modelo set covering/pricing.
               </Alert>
-              <Stack direction={{ xs: 'column', md: 'row' }} spacing={2}>
-                <TextField
-                  label="Nome do perfil"
-                  size="small"
-                  fullWidth
-                  value={form.name || ''}
-                  onChange={(e) => setField('name', e.target.value)}
-                  placeholder="Ex: Operação multi-linha produção"
-                />
-                <TextField
-                  label="Descrição"
-                  size="small"
-                  fullWidth
-                  value={form.description || ''}
-                  onChange={(e) => setField('description', e.target.value)}
-                  placeholder="Resumo operacional e objetivo do perfil"
-                />
-              </Stack>
-              <OptimizationSettingsEditor value={form} onChange={setField} />
+              <OptimizationSettingsEditor value={form} onChange={setField} isNew={!editTarget} />
             </Stack>
           </Box>
         </DialogContent>

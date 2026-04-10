@@ -311,6 +311,10 @@ export class OptimizationService {
             operator_single_vehicle_only: (cctOverride as any)
               .operatorSingleVehicleOnly,
           }),
+          ...((cctOverride as any).connectionToleranceMinutes !== undefined && {
+            connection_tolerance_minutes: (cctOverride as any)
+              .connectionToleranceMinutes,
+          }),
         };
         const fairnessOverride = normalizeWeight(
           (cctOverride as any).fairnessWeight,
@@ -339,7 +343,7 @@ export class OptimizationService {
           same_depot_required: activeSettings?.sameDepotRequired ?? false,
           preserve_preferred_pairs:
             activeSettings?.preservePreferredPairs ?? false,
-          allow_multi_line_block: true,
+          allow_multi_line_block: activeSettings?.allowMultiLineBlock ?? true,
           allow_vehicle_split_shifts:
             activeSettings?.allowVehicleSplitShifts ?? true,
           split_shift_min_gap_minutes: 120,

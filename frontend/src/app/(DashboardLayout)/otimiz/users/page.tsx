@@ -1,14 +1,13 @@
 'use client';
 import React, { useState, useEffect, useCallback } from 'react';
+import { alpha } from '@mui/material/styles';
 import {
   Box, Avatar, Typography, Button, Paper, Stack, Skeleton, Tooltip, IconButton,
-  TableContainer, Table, TableHead, TableBody, TableRow, TableCell,
   Dialog, DialogTitle, DialogContent, DialogActions, TextField,
-  MenuItem, InputAdornment, useTheme,
+  MenuItem, InputAdornment, useTheme, Card, CardContent, Grid, Divider
 } from '@mui/material';
 import { IconPlus, IconEdit, IconTrash, IconSearch, IconRefresh, IconUsers, IconEye, IconEyeOff } from '@tabler/icons-react';
 import PageContainer from '@/app/components/container/PageContainer';
-import DashboardCard from '@/app/components/shared/DashboardCard';
 import ConfirmDialog from '../_components/ConfirmDialog';
 import StatusChip from '../_components/StatusChip';
 import { NotifyProvider, useNotify } from '../_components/Notify';
@@ -75,8 +74,8 @@ function UsersInner() {
   };
 
   const handleSave = async () => {
-    if (!form.name.trim() || !form.email.trim()) { notify.warning('Nome e e-mail são obrigatórios.'); return; }
-    if (!editTarget && !form.password) { notify.warning('Senha é obrigatória para novo usuário.'); return; }
+    if (!form.name.trim() || !form.email.trim()) return notify.warning('Nome e e-mail são obrigatórios.');
+    if (!editTarget && !form.password) return notify.warning('Senha é obrigatória para novo usuário.');
     setSaving(true);
     try {
       const p: any = { name: form.name.trim(), email: form.email.trim(), role: form.role, status: form.status };
@@ -84,102 +83,104 @@ function UsersInner() {
       if (editTarget) { await usersApi.update(editTarget.id, p); notify.success('Usuário atualizado!'); }
       else { await usersApi.create(p); notify.success('Usuário criado!'); }
       setDialogOpen(false); load();
-    } catch (e: any) { notify.error(e?.response?.data?.message ?? 'Erro ao salvar.'); }
+    } catch { notify.error('Erro ao salvar.'); }
     finally { setSaving(false); }
   };
 
   const handleDelete = async () => {
     if (!deleteTarget) return; setDeleting(true);
     try { await usersApi.delete(deleteTarget.id); notify.success('Usuário excluído!'); setDeleteTarget(null); load(); }
-    catch (e: any) { notify.error(e?.response?.data?.message ?? 'Erro ao excluir.'); }
+    catch { notify.error('Erro ao excluir.'); }
     finally { setDeleting(false); }
   };
 
   const uf = (k: keyof UserForm) => (e: React.ChangeEvent<HTMLInputElement>) => setForm((p) => ({ ...p, [k]: e.target.value }));
 
   return (
-    <PageContainer title="Usuários — OTIMIZ" description="Gestão de usuários do sistema">
-      <Stack direction="row" justifyContent="space-between" alignItems="center" mb={3}>
+    <PageContainer title="Usuários — OTIMIZ" description="Controle de Acesso Enterprise">
+      <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" alignItems={{ xs: 'flex-start', md: 'center' }} gap={2} mb={4} pt={2}>
         <Box>
-          <Typography variant="h4" fontWeight={700} lineHeight={1}>Usuários</Typography>
-          <Typography variant="body2" color="text.secondary" mt={0.5}>Gerencie o acesso e perfis dos usuários do sistema</Typography>
+          <Typography variant="overline" sx={{ letterSpacing: 1.6, color: 'primary.main', fontWeight: 800 }}>
+            ACCESS CONTROL
+          </Typography>
+          <Typography variant="h3" fontWeight={800} mt={0.5}>Usuários e Credenciais</Typography>
+          <Typography variant="body1" color="text.secondary" mt={1}>Visão simplificada do organograma de acesso da sua plataforma operatória OTIMIZ.</Typography>
         </Box>
-        <Stack direction="row" gap={1}>
-          <Tooltip title="Recarregar"><IconButton onClick={load} disabled={loading} size="small"><IconRefresh size={18} /></IconButton></Tooltip>
-          <Button variant="contained" startIcon={<IconPlus size={18} />} onClick={openCreate}>Novo Usuário</Button>
+        <Stack direction="row" gap={2}>
+          <Tooltip title="Recarregar">
+            <IconButton onClick={load} sx={{ bgcolor: 'background.paper', border: '1px solid', borderColor: 'divider' }}>
+              <IconRefresh size={20} color={theme.palette.primary.main} />
+            </IconButton>
+          </Tooltip>
+          <Button variant="contained" size="large" startIcon={<IconPlus />} onClick={openCreate} sx={{ borderRadius: 2 }}>
+            Convidar Usuário
+          </Button>
         </Stack>
       </Stack>
 
-      <Paper elevation={0} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 2, p: 2, mb: 2 }}>
-        <Stack direction="row" gap={2} alignItems="center" flexWrap="wrap">
-          <TextField size="small" placeholder="Buscar por nome ou e-mail..." value={search} onChange={(e) => setSearch(e.target.value)} sx={{ width: 320 }}
-            InputProps={{ startAdornment: <InputAdornment position="start"><IconSearch size={16} /></InputAdornment> }} />
-          <TextField size="small" select label="Perfil" value={roleFilter} onChange={(e) => setRoleFilter(e.target.value as UserRole | '')} sx={{ width: 160 }}>
+      <Paper variant="outlined" sx={{ borderRadius: 3, p: 2, mb: 4, background: `linear-gradient(180deg, ${alpha(theme.palette.background.paper, 0.98)} 0%, ${alpha(theme.palette.primary.light, 0.05)} 100%)` }}>
+        <Stack direction={{ xs: 'column', md: 'row' }} gap={2}>
+          <TextField size="small" placeholder="Localizar credenciais (nome ou e-mail)..." value={search} onChange={(e) => setSearch(e.target.value)} fullWidth sx={{ maxWidth: { md: 400 } }} InputProps={{ startAdornment: <InputAdornment position="start"><IconSearch size={16} /></InputAdornment> }} />
+          <TextField size="small" select label="Filtro de Perfil" value={roleFilter} onChange={(e) => setRoleFilter(e.target.value as UserRole | '')} sx={{ minWidth: 200 }}>
             <MenuItem value="">Todos os perfis</MenuItem>
             {ROLES.map((r) => <MenuItem key={r.value} value={r.value}>{r.label}</MenuItem>)}
           </TextField>
-          <Typography variant="caption" color="text.secondary" ml="auto">{filtered.length} usuário{filtered.length !== 1 ? 's' : ''}</Typography>
+          <Box display="flex" alignItems="center" ml="auto">
+            <Typography variant="subtitle2" fontWeight={700} color="primary.main">{filtered.length} credenciais ativas</Typography>
+          </Box>
         </Stack>
       </Paper>
 
-      <DashboardCard title="">
-        {loading ? <Box>{[...Array(5)].map((_, i) => <Skeleton key={i} variant="rectangular" height={52} sx={{ mb: 0.5, borderRadius: 1 }} />)}</Box> : (
-          <TableContainer>
-            <Table size="small">
-              <TableHead>
-                <TableRow>
-                  <TableCell sx={{ fontWeight: 600 }}>Usuário</TableCell>
-                  <TableCell sx={{ fontWeight: 600 }}>E-mail</TableCell>
-                  <TableCell align="center" sx={{ fontWeight: 600 }}>Perfil</TableCell>
-                  <TableCell align="center" sx={{ fontWeight: 600 }}>Status</TableCell>
-                  <TableCell align="center" sx={{ fontWeight: 600 }}>Último Acesso</TableCell>
-                  <TableCell align="right" sx={{ fontWeight: 600 }}>Ações</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {filtered.length === 0 ? (
-                  <TableRow><TableCell colSpan={6} align="center" sx={{ py: 6 }}>
-                    <IconUsers size={40} color={theme.palette.grey[400]} />
-                    <Typography variant="body2" color="text.secondary" mt={1}>Nenhum usuário encontrado.</Typography>
-                  </TableCell></TableRow>
-                ) : filtered.map((u) => (
-                  <TableRow key={u.id} hover>
-                    <TableCell>
-                      <Stack direction="row" alignItems="center" gap={1.5}>
-                        <Avatar sx={{ width: 34, height: 34, bgcolor: stringToColor(u.name), fontSize: 14 }}>{u.name[0].toUpperCase()}</Avatar>
-                        <Typography variant="body2" fontWeight={600}>{u.name}</Typography>
-                      </Stack>
-                    </TableCell>
-                    <TableCell><Typography variant="body2">{u.email}</Typography></TableCell>
-                    <TableCell align="center"><StatusChip type="role" value={u.role} /></TableCell>
-                    <TableCell align="center"><StatusChip type="status" value={u.status} /></TableCell>
-                    <TableCell align="center"><Typography variant="body2" color="text.secondary">{fmtDate(u.lastLoginAt)}</Typography></TableCell>
-                    <TableCell align="right">
-                      <Tooltip title="Editar"><IconButton size="small" onClick={() => openEdit(u)}><IconEdit size={16} /></IconButton></Tooltip>
-                      <Tooltip title="Excluir"><IconButton size="small" color="error" onClick={() => setDeleteTarget(u)}><IconTrash size={16} /></IconButton></Tooltip>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </TableContainer>
-        )}
-      </DashboardCard>
+      {loading ? (
+        <Grid container spacing={2}>
+          {[...Array(6)].map((_, i) => <Grid item xs={12} sm={6} md={4} key={i}><Skeleton variant="rounded" height={140} /></Grid>)}
+        </Grid>
+      ) : filtered.length === 0 ? (
+        <Box textAlign="center" py={12} bgcolor="grey.50" borderRadius={3} border="1px dashed" borderColor="divider">
+          <IconUsers size={64} color="#BDBDBD" />
+          <Typography variant="h6" color="text.secondary" mt={2}>Nenhum usuário encontrado na busca.</Typography>
+        </Box>
+      ) : (
+        <Grid container spacing={2}>
+          {filtered.map((u) => (
+            <Grid item xs={12} sm={6} md={4} key={u.id}>
+              <Card variant="outlined" sx={{ borderRadius: 3, transition: '0.2s', '&:hover': { borderColor: 'primary.main', boxShadow: '0 8px 24px rgba(15,23,42,0.06)' } }}>
+                <CardContent sx={{ p: '24px !important' }}>
+                  <Stack direction="row" justifyContent="space-between" alignItems="flex-start" mb={2}>
+                    <Avatar sx={{ width: 56, height: 56, bgcolor: stringToColor(u.name), fontSize: 22, fontWeight: 700 }}>{u.name[0].toUpperCase()}</Avatar>
+                    <Stack direction="row" spacing={0.5}>
+                      <IconButton size="small" onClick={() => openEdit(u)} sx={{ bgcolor: 'grey.50' }}><IconEdit size={16} /></IconButton>
+                      <IconButton size="small" onClick={() => setDeleteTarget(u)} sx={{ bgcolor: 'error.lighter', color: 'error.main' }}><IconTrash size={16} /></IconButton>
+                    </Stack>
+                  </Stack>
+                  <Typography variant="h6" fontWeight={800} noWrap>{u.name}</Typography>
+                  <Typography variant="body2" color="text.secondary" noWrap mb={2}>{u.email}</Typography>
+                  <Divider sx={{ mb: 2 }} />
+                  <Stack direction="row" justifyContent="space-between" alignItems="center">
+                    <StatusChip type="role" value={u.role} />
+                    <StatusChip type="status" value={u.status} />
+                  </Stack>
+                </CardContent>
+              </Card>
+            </Grid>
+          ))}
+        </Grid>
+      )}
 
-      <Dialog open={dialogOpen} onClose={() => !saving && setDialogOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle sx={{ fontWeight: 700 }}>{editTarget ? 'Editar Usuário' : 'Novo Usuário'}</DialogTitle>
+      <Dialog open={dialogOpen} onClose={() => !saving && setDialogOpen(false)} maxWidth="sm" fullWidth PaperProps={{ sx: { borderRadius: 3 } }}>
+        <DialogTitle sx={{ fontWeight: 800 }}>{editTarget ? 'Editar Credenciais' : 'Nova Credencial'}</DialogTitle>
         <DialogContent dividers>
-          <Stack spacing={2.5} sx={{ pt: 0.5 }}>
+          <Stack spacing={3} sx={{ pt: 1 }}>
             <TextField label="Nome Completo" required fullWidth value={form.name} onChange={uf('name')} />
-            <TextField label="E-mail" required fullWidth type="email" value={form.email} onChange={uf('email')} />
+            <TextField label="E-mail Operacional" required fullWidth type="email" value={form.email} onChange={uf('email')} />
             <TextField
-              label={editTarget ? 'Nova Senha' : 'Senha'}
+              label={editTarget ? 'Redefinir Senha' : 'Senha de Acesso'}
               required={!editTarget}
               fullWidth
               type={showPwd ? 'text' : 'password'}
               value={form.password}
               onChange={uf('password')}
-              helperText={editTarget ? 'Deixe em branco para manter a senha atual.' : undefined}
+              helperText={editTarget ? 'Deixe em branco para manter a senha atual inviolável.' : undefined}
               InputProps={{
                 endAdornment: (
                   <InputAdornment position="end">
@@ -190,25 +191,27 @@ function UsersInner() {
                 ),
               }}
             />
-            <Stack direction="row" spacing={2}>
-              <TextField label="Perfil" select fullWidth value={form.role} onChange={uf('role')}>
+            <Stack direction="row" spacing={2} flexWrap="wrap">
+              <TextField label="Perfil de Acesso" select fullWidth value={form.role} onChange={uf('role')} sx={{ flex: 1, minWidth: 200 }}>
                 {ROLES.map((r) => <MenuItem key={r.value} value={r.value}>{r.label}</MenuItem>)}
               </TextField>
-              <TextField label="Status" select fullWidth value={form.status} onChange={uf('status')}>
-                <MenuItem value="active">Ativo</MenuItem>
-                <MenuItem value="inactive">Inativo</MenuItem>
+              <TextField label="Acesso" select fullWidth value={form.status} onChange={uf('status')} sx={{ flex: 1, minWidth: 200 }}>
+                <MenuItem value="active">Permitido</MenuItem>
+                <MenuItem value="inactive">Bloqueado</MenuItem>
               </TextField>
             </Stack>
           </Stack>
         </DialogContent>
-        <DialogActions sx={{ px: 3, pb: 2.5 }}>
-          <Button onClick={() => setDialogOpen(false)} disabled={saving}>Cancelar</Button>
-          <Button variant="contained" onClick={handleSave} disabled={saving || !form.name || !form.email}>{saving ? 'Salvando...' : 'Salvar'}</Button>
+        <DialogActions sx={{ px: 3, py: 2 }}>
+          <Button onClick={() => setDialogOpen(false)} disabled={saving} color="inherit">Cancelar Operação</Button>
+          <Button variant="contained" onClick={handleSave} disabled={saving || !form.name || !form.email} sx={{ borderRadius: 2 }}>
+            {saving ? 'Registrando...' : 'Confirmar Registro'}
+          </Button>
         </DialogActions>
       </Dialog>
 
-      <ConfirmDialog open={!!deleteTarget} title="Excluir Usuário" message={`Excluir "${deleteTarget?.name}"? O acesso ao sistema será removido imediatamente.`}
-        confirmLabel="Excluir" loading={deleting} onConfirm={handleDelete} onCancel={() => setDeleteTarget(null)} />
+      <ConfirmDialog open={!!deleteTarget} title="Remover Acesso" message={`Remover bloqueia "${deleteTarget?.name}" permanentemente. Continuar?`}
+        confirmLabel="Remover" loading={deleting} onConfirm={handleDelete} onCancel={() => setDeleteTarget(null)} />
     </PageContainer>
   );
 }

@@ -535,24 +535,12 @@ export interface OptimizationSettings {
   name?: string;
   description?: string;
   algorithmType: string;
-  // Meta-heurísticas (armazenados no perfil, lidos da config Python)
-  gaPopulationSize: number;
-  gaGenerations: number;
-  gaMutationRate: number;
-  gaCrossoverRate: number;
-  saInitialTemperature: number;
-  saCoolingRate: number;
-  saMinTemperature: number;
-  tsTabuSize: number;
-  tsMaxIterations: number;
-  ilpTimeoutSeconds: number;
   // Tempo e budget
   timeBudgetSeconds: number;
   // CCT/CLT — jornada base
   cctMaxShiftMinutes: number;
   cctMaxDrivingMinutes: number;
   cctMinBreakMinutes: number;
-  cctMaxDutiesPerDay: number;
   allowReliefPoints: boolean;
   cctMaxWorkMinutes: number;
   cctMinWorkMinutes?: number;
@@ -576,8 +564,6 @@ export interface OptimizationSettings {
   // CCT/CLT — descansos
   cctInterShiftRestMinutes?: number;
   cctWeeklyRestMinutes?: number;
-  cctReducedWeeklyRestMinutes?: number;
-  cctAllowReducedWeeklyRest?: boolean;
   // CCT/CLT — limites de direção
   cctDailyDrivingLimitMinutes?: number;
   cctExtendedDailyDrivingLimitMinutes?: number;
@@ -596,6 +582,7 @@ export interface OptimizationSettings {
   // Constraints operacionais
   enforceSameDepotStartEnd?: boolean;
   enforceSingleLineDuty?: boolean;
+  allowMultiLineBlock?: boolean;
   // Objetivos
   fairnessWeight?: number;
   sundayOffWeight?: number;
@@ -620,6 +607,7 @@ export interface OptimizationSettings {
   maxGeneratedColumns?: number;
   maxPricingIterations?: number;
   maxPricingAdditions?: number;
+  connectionToleranceMinutes?: number;
   isActive: boolean;
   createdAt: string;
   updatedAt: string;

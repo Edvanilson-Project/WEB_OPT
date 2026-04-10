@@ -294,7 +294,20 @@ class OptimizationResult:
             "blocks": [
                 {
                     "block_id": b.id,
-                    "trips": [t.id for t in b.trips],
+                    "trips": [
+                        {
+                            "id": t.id,
+                            "start_time": t.start_time,
+                            "end_time": t.end_time,
+                            "origin_id": t.origin_id,
+                            "destination_id": t.destination_id,
+                            "line_id": t.line_id,
+                            "is_pull_out": t.is_pull_out,
+                            "is_pull_back": t.is_pull_back,
+                            "duration": t.duration,
+                        }
+                        for t in b.trips
+                    ],
                     "num_trips": len(b.trips),
                     "start_time": b.start_time,
                     "end_time": b.end_time,
@@ -316,6 +329,20 @@ class OptimizationResult:
                     "duty_id": d.id,
                     "blocks": list(dict.fromkeys(int(b.meta.get("source_block_id", b.id)) for b in d.tasks)),
                     "trip_ids": list(dict.fromkeys(int(tid) for tid in d.meta.get("covered_trip_ids", []))),
+                    "trips": [
+                        {
+                            "id": t.id,
+                            "start_time": t.start_time,
+                            "end_time": t.end_time,
+                            "origin_id": t.origin_id,
+                            "destination_id": t.destination_id,
+                            "line_id": t.line_id,
+                            "is_pull_out": t.is_pull_out,
+                            "is_pull_back": t.is_pull_back,
+                            "duration": t.duration,
+                        }
+                        for t in d.all_trips
+                    ],
                     "work_time": d.work_time,
                     "spread_time": d.spread_time,
                     "rest_violations": d.rest_violations,

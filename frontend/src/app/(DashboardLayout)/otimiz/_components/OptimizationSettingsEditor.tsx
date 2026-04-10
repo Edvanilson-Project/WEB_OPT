@@ -49,7 +49,7 @@ type HelpMeta = {
   effect?: FieldEffect;
 };
 
-const PERCENT_UI_FIELDS: PercentLikeField[] = ['cctWaitingTimePayPct', 'holidayExtraPct'];
+const PERCENT_UI_FIELDS: PercentLikeField[] = ['cctWaitingTimePayPct', 'holidayExtraPct', 'cctNocturnalExtraPct'];
 const NON_NUMERIC_FORM_FIELDS = new Set<keyof SettingsFormValues>([
   'name',
   'description',
@@ -57,6 +57,7 @@ const NON_NUMERIC_FORM_FIELDS = new Set<keyof SettingsFormValues>([
   'isActive',
   'applyCct',
   'allowReliefPoints',
+  'allowMultiLineBlock',
   'enforceSameDepotStartEnd',
   'enforceSingleLineDuty',
   'sameDepotRequired',
@@ -77,7 +78,7 @@ const EFFECT_LABEL: Record<FieldEffect, string> = {
 };
 
 // ── FIELD_HELP ── Explicacao dupla (analogia + tecnica) para TODOS os campos ativos ──
-const FIELD_HELP: Partial<Record<HelpFieldKey, HelpMeta>> = {
+const FIELD_HELP: Record<string, HelpMeta> = {
   /* ── Estrategia ──────────────────────────────────────────────────────── */
   algorithmType: {
     title: 'Algoritmo principal',
@@ -201,6 +202,13 @@ const FIELD_HELP: Partial<Record<HelpFieldKey, HelpMeta>> = {
     technical: 'Min gap entre trips no mesmo block/duty. Garante conexao fisicamente viavel (manobra, embarque). Usado pelo block_is_feasible().',
     effect: 'ativo',
   },
+  connectionToleranceMinutes: {
+    title: 'Tolerancia de conexao',
+    short: 'Perdoa pequenos gaps entre viagens. Ex: se uma viagem termina as 10:00 e a proxima comeca as 10:02, com tolerancia de 3 min o solver aceita. Sem isso, 2 min de atraso pode desperdicar um veiculo inteiro.',
+    technical: 'connection_tolerance_minutes: valor adicionado ao gap antes de comparar com deadhead minimo. Propaga-se para VSP (MCNF, Greedy) e CSP. Ideal para compensar imprecisoes de carta horaria.',
+    example: 'Valor 5 = aceita conexoes com ate 5 min de folga negativa.',
+    effect: 'ativo',
+  },
   cctMinGuaranteedWorkMinutes: {
     title: 'Horas minimas garantidas',
     short: 'Mesmo que trabalhe menos, recebe como se tivesse trabalhado pelo menos esse tanto. "Piso salarial de horas."',
@@ -244,12 +252,6 @@ const FIELD_HELP: Partial<Record<HelpFieldKey, HelpMeta>> = {
     short: 'Folga semanal minima obrigatoria. Geralmente 24h (1440 min), preferencialmente aos domingos.',
     technical: 'Weekly rest: CLT art. 67 exige 24h consecutivas de repouso. 1440 min = 24h. Usado no rostering multi-dia.',
     effect: 'ativo',
-  },
-  cctReducedWeeklyRestMinutes: {
-    title: 'Descanso semanal reduzido',
-    short: 'Em situacoes excepcionais, a folga semanal pode ser menor. Precisa compensar depois.',
-    technical: 'Permite reduced_weekly_rest ao inves de weekly_rest no rostering multi-dia. Regra EU 561/2006. Reservado.',
-    effect: 'parcial',
   },
   cctDailyDrivingLimitMinutes: {
     title: 'Limite diario de direcao',
@@ -317,6 +319,12 @@ const FIELD_HELP: Partial<Record<HelpFieldKey, HelpMeta>> = {
     title: 'Custo de ociosidade',
     short: 'O custo por minuto com o onibus parado esperando. "Tempo parado tambem custa dinheiro."',
     technical: 'idle_cost_per_minute: penalidade por minuto de gap no bloco. Usado na funcao de custo do SA/Tabu/GA (quick_cost_sorted).',
+    effect: 'ativo',
+  },
+  allowMultiLineBlock: {
+    title: 'Permitir blocos multlinha',
+    short: 'Permite que o mesmo veiculo faca viagens de linhas diferentes no mesmo dia. "Um onibus pode rodar na Linha A de manha e na Linha B a tarde."',
+    technical: 'allow_multi_line_block: quando true, o VSP (Greedy e MCNF) permite conexoes entre trips de line_id distintos. Se false, cada bloco fica restrito a uma única linha.',
     effect: 'ativo',
   },
   allowVehicleSplitShifts: {
@@ -481,38 +489,18 @@ export function notifyOptimizationSettingsUpdated() {
 }
 
 export const ALGORITHM_OPTIONS = [
-  { value: 'full_pipeline', label: 'Pipeline Completo (VSP -> CSP)' },
-  { value: 'hybrid_pipeline', label: 'Pipeline Hibrido (Greedy -> SA -> Tabu -> GA -> ILP)' },
-  { value: 'greedy', label: 'Greedy (Guloso Rapido)' },
-  { value: 'vsp_only', label: 'Apenas VSP' },
-  { value: 'csp_only', label: 'Apenas CSP' },
-  { value: 'genetic', label: 'Algoritmo Genetico (GA)' },
-  { value: 'simulated_annealing', label: 'Simulated Annealing (SA)' },
-  { value: 'tabu_search', label: 'Tabu Search (TS)' },
-  { value: 'set_partitioning', label: 'Set Covering / Partitioning' },
-  { value: 'joint_solver', label: 'Solucionador Conjunto (VSP + CSP)' },
+  { value: 'full_pipeline', label: 'Estrategia Industrial (VSP + CSP)' },
+  { value: 'hybrid_pipeline', label: 'Estrategia Hibrida (Legado Estavel)' },
+  { value: 'greedy', label: 'Guloso Rapido (MCNF/Greedy)' },
 ];
 
 export const DEFAULT_SETTINGS_FORM: SettingsFormValues = {
   name: '',
   description: '',
   algorithmType: 'full_pipeline',
-  // Estes campos permanecem no DTO/entity para API compat, mas nao aparecem na UI
-  gaPopulationSize: 50,
-  gaGenerations: 100,
-  gaMutationRate: 0.1,
-  gaCrossoverRate: 0.8,
-  saInitialTemperature: 1000,
-  saCoolingRate: 0.95,
-  saMinTemperature: 0.01,
-  tsTabuSize: 10,
-  tsMaxIterations: 500,
-  ilpTimeoutSeconds: 60,
-  cctMaxDutiesPerDay: 1,
-  sundayOffWeight: 0,
-  cctAllowReducedWeeklyRest: false,
   // Budget
   timeBudgetSeconds: 300,
+  connectionToleranceMinutes: 2,
   // CCT jornada
   cctMaxShiftMinutes: 480,
   cctMaxWorkMinutes: 440,
@@ -532,7 +520,6 @@ export const DEFAULT_SETTINGS_FORM: SettingsFormValues = {
   // Descansos
   cctInterShiftRestMinutes: 660,
   cctWeeklyRestMinutes: 1440,
-  cctReducedWeeklyRestMinutes: 2160,
   // Limites de direcao
   cctDailyDrivingLimitMinutes: 540,
   cctExtendedDailyDrivingLimitMinutes: 600,
@@ -820,11 +807,13 @@ export function OptimizationSettingsEditor({
   onChange,
   dense = false,
   showActivation = true,
+  isNew = false,
 }: {
   value: SettingsFormValues;
   onChange: <K extends keyof SettingsFormValues>(key: K, nextValue: SettingsFormValues[K]) => void;
   dense?: boolean;
   showActivation?: boolean;
+  isNew?: boolean;
 }) {
   const grid = dense ? 1.5 : 2;
 
@@ -842,9 +831,11 @@ export function OptimizationSettingsEditor({
         <Stack spacing={1.25}>
           <Stack direction="row" alignItems="center" gap={1}>
             <IconSparkles size={18} />
-            <Typography variant="subtitle2" fontWeight={700}>Resumo da estrategia ativa</Typography>
+            <Typography variant="subtitle2" fontWeight={700}>
+              {isNew ? 'Identificacao do Novo Perfil' : 'Resumo da estrategia ativa'}
+            </Typography>
           </Stack>
-          <OptimizationSettingsHighlights settings={value} compact={dense} />
+          {!isNew && <OptimizationSettingsHighlights settings={value} compact={dense} />}
           <Grid container spacing={grid} sx={{ mt: 0.5 }}>
             <Grid item xs={12} sm={6}>
               <TextField label="Nome do perfil" size="small" fullWidth value={value.name ?? ''} onChange={(e) => onChange('name', e.target.value)} helperText="Identifique este perfil de configuracao (ex: 'Padrao DU', 'Pico Verao')" />
@@ -934,6 +925,7 @@ export function OptimizationSettingsEditor({
           <Grid item xs={12} sm={6} md={3}><NumberField label="Horas garantidas" fieldKey="cctMinGuaranteedWorkMinutes" value={value.cctMinGuaranteedWorkMinutes ?? 360} onChange={(next) => onChange('cctMinGuaranteedWorkMinutes', next)} min={0} max={900} unit="min" dense={dense} /></Grid>
           <Grid item xs={12} sm={6} md={3}><NumberField label="Espera remunerada" fieldKey="cctWaitingTimePayPct" value={value.cctWaitingTimePayPct ?? 30} onChange={(next) => onChange('cctWaitingTimePayPct', next)} min={0} max={100} unit="%" dense={dense} /></Grid>
           <Grid item xs={12} md={4}><SwitchField fieldKey="cctIdleTimeIsPaid" checked={value.cctIdleTimeIsPaid ?? true} onChange={(checked) => onChange('cctIdleTimeIsPaid', checked)} label="Tempo ocioso e pago" /></Grid>
+          <Grid item xs={12} sm={6} md={3}><NumberField label="Tolerancia de conexao" fieldKey={"connectionToleranceMinutes" as any} value={(value as any).connectionToleranceMinutes ?? 0} onChange={(next) => onChange('connectionToleranceMinutes' as any, next)} min={0} max={30} unit="min" dense={dense} helperText="Perdoa gaps pequenos entre viagens (ex: 2-5 min)" /></Grid>
         </Grid>
       </SectionPanel>
 
@@ -948,7 +940,6 @@ export function OptimizationSettingsEditor({
           <Grid item xs={12} sm={6} md={3}><NumberField label="Fracionamento 2a parte" fieldKey="cctSplitBreakSecondMinutes" value={value.cctSplitBreakSecondMinutes ?? 30} onChange={(next) => onChange('cctSplitBreakSecondMinutes', next)} min={0} max={180} unit="min" dense={dense} /></Grid>
           <Grid item xs={12} sm={6} md={3}><NumberField label="Descanso entre jornadas" fieldKey="cctInterShiftRestMinutes" value={value.cctInterShiftRestMinutes ?? 660} onChange={(next) => onChange('cctInterShiftRestMinutes', next)} min={0} max={1440} unit="min" dense={dense} helperText="CLT: 11h (660 min)" /></Grid>
           <Grid item xs={12} sm={6} md={3}><NumberField label="Descanso semanal" fieldKey="cctWeeklyRestMinutes" value={value.cctWeeklyRestMinutes ?? 1440} onChange={(next) => onChange('cctWeeklyRestMinutes', next)} min={0} max={4320} unit="min" dense={dense} helperText="CLT: 24h (1440 min)" /></Grid>
-          <Grid item xs={12} sm={6} md={3}><NumberField label="Descanso semanal reduzido" fieldKey="cctReducedWeeklyRestMinutes" value={value.cctReducedWeeklyRestMinutes ?? 2160} onChange={(next) => onChange('cctReducedWeeklyRestMinutes', next)} min={0} max={10080} unit="min" dense={dense} /></Grid>
           <Grid item xs={12} sm={6} md={3}><NumberField label="Limite diario direcao" fieldKey="cctDailyDrivingLimitMinutes" value={value.cctDailyDrivingLimitMinutes ?? 540} onChange={(next) => onChange('cctDailyDrivingLimitMinutes', next)} min={60} max={900} unit="min" dense={dense} /></Grid>
           <Grid item xs={12} sm={6} md={3}><NumberField label="Limite diario estendido" fieldKey="cctExtendedDailyDrivingLimitMinutes" value={value.cctExtendedDailyDrivingLimitMinutes ?? 600} onChange={(next) => onChange('cctExtendedDailyDrivingLimitMinutes', next)} min={60} max={900} unit="min" dense={dense} /></Grid>
           <Grid item xs={12} sm={6} md={3}><NumberField label="Dias estendidos/semana" fieldKey="cctMaxExtendedDrivingDaysPerWeek" value={value.cctMaxExtendedDrivingDaysPerWeek ?? 2} onChange={(next) => onChange('cctMaxExtendedDrivingDaysPerWeek', next)} min={0} max={7} dense={dense} /></Grid>
@@ -977,6 +968,7 @@ export function OptimizationSettingsEditor({
           <Grid item xs={12} sm={6} md={3}><NumberField label="Energia fora pico" fieldKey="offpeakEnergyCostPerKwh" value={value.offpeakEnergyCostPerKwh ?? 0} onChange={(next) => onChange('offpeakEnergyCostPerKwh', next)} min={0} max={50} step={0.1} unit="R$/kWh" dense={dense} /></Grid>
           <Grid item xs={12} md={4}><SwitchField fieldKey="sameDepotRequired" checked={!!value.sameDepotRequired} onChange={(checked) => onChange('sameDepotRequired', checked)} label="Mesmo deposito para bloco" /></Grid>
           <Grid item xs={12} md={4}><SwitchField fieldKey="allowVehicleSplitShifts" checked={value.allowVehicleSplitShifts ?? true} onChange={(checked) => onChange('allowVehicleSplitShifts', checked)} label="Permitir turno partido" /></Grid>
+          <Grid item xs={12} md={4}><SwitchField fieldKey="allowMultiLineBlock" checked={(value as any).allowMultiLineBlock ?? true} onChange={(checked) => onChange('allowMultiLineBlock' as any, checked)} label="Permitir blocos multlinha" /></Grid>
         </Grid>
         <Alert severity="info" icon={<IconBatteryCharging size={16} />} sx={{ mt: 1.5, borderRadius: 2 }}>
           Custos de energia e carregadores influenciam a heuristica VSP para veiculos eletricos.

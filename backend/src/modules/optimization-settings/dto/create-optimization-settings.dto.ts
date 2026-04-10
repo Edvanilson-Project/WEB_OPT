@@ -21,62 +21,6 @@ export class CreateOptimizationSettingsDto {
 
   @IsNumber()
   @IsOptional()
-  @Min(10)
-  @Max(500)
-  gaPopulationSize?: number;
-
-  @IsNumber()
-  @IsOptional()
-  @Min(10)
-  @Max(1000)
-  gaGenerations?: number;
-
-  @IsNumber()
-  @IsOptional()
-  @Min(0)
-  @Max(1)
-  gaMutationRate?: number;
-
-  @IsNumber()
-  @IsOptional()
-  @Min(0)
-  @Max(1)
-  gaCrossoverRate?: number;
-
-  @IsNumber()
-  @IsOptional()
-  saInitialTemperature?: number;
-
-  @IsNumber()
-  @IsOptional()
-  @Min(0)
-  @Max(1)
-  saCoolingRate?: number;
-
-  @IsNumber()
-  @IsOptional()
-  saMinTemperature?: number;
-
-  @IsNumber()
-  @IsOptional()
-  @Min(1)
-  @Max(100)
-  tsTabuSize?: number;
-
-  @IsNumber()
-  @IsOptional()
-  @Min(10)
-  @Max(5000)
-  tsMaxIterations?: number;
-
-  @IsNumber()
-  @IsOptional()
-  @Min(10)
-  @Max(600)
-  ilpTimeoutSeconds?: number;
-
-  @IsNumber()
-  @IsOptional()
   @Min(30)
   @Max(3600)
   timeBudgetSeconds?: number;
@@ -176,6 +120,10 @@ export class CreateOptimizationSettingsDto {
   @IsBoolean()
   @IsOptional()
   allowVehicleSplitShifts?: boolean;
+
+  @IsBoolean()
+  @IsOptional()
+  allowMultiLineBlock?: boolean;
 
   // ── Novos parâmetros CCT/CLT (2026) ─────────────────────────────────────────
 
@@ -344,7 +292,14 @@ export class CreateOptimizationSettingsDto {
   @Max(1.0)
   cctNocturnalFactor?: number;
 
+  @IsNumber()
+  @IsOptional()
+  @Min(0)
+  @Max(30)
+  connectionToleranceMinutes?: number;
+
   /** Adicional noturno percentual — CLT art.73 §2 */
+  @Transform(normalizePercentLike)
   @IsNumber()
   @IsOptional()
   @Min(0)
