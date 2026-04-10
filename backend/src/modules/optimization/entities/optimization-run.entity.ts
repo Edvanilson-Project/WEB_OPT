@@ -24,6 +24,7 @@ export enum OptimizationAlgorithm {
   SET_PARTITIONING = 'set_partitioning',
   JOINT_SOLVER = 'joint_solver',
   GREEDY = 'greedy',
+  MCNF = 'mcnf',
 }
 
 @Entity('optimization_runs')
@@ -49,7 +50,7 @@ export class OptimizationRunEntity extends BaseCompanyEntity {
   @Column({
     type: 'enum',
     enum: OptimizationAlgorithm,
-    default: OptimizationAlgorithm.FULL_PIPELINE,
+    default: OptimizationAlgorithm.HYBRID_PIPELINE,
   })
   algorithm: OptimizationAlgorithm;
 

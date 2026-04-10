@@ -73,10 +73,10 @@ export class OptimizationService {
       (dto.lineIds?.length ?? 0) > 1 ? dto.lineIds : null;
 
     const algStr = (dto.algorithm ??
-      OptimizationAlgorithm.FULL_PIPELINE) as any;
+      OptimizationAlgorithm.HYBRID_PIPELINE) as any;
     const algEnum = Object.values(OptimizationAlgorithm).includes(algStr)
       ? (algStr as OptimizationAlgorithm)
-      : OptimizationAlgorithm.FULL_PIPELINE;
+      : OptimizationAlgorithm.HYBRID_PIPELINE;
 
     const run = this.runRepo.create({
       lineId: effectiveLineId,

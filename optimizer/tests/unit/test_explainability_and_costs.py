@@ -299,4 +299,4 @@ def test_same_random_seed_produces_same_hybrid_solution_signature():
     assert result_a.meta["reproducibility"]["deterministic_replay_possible"] is True
     assert result_a.meta["solver_version"]
     assert "phase_timings_ms" in result_a.meta.get("performance", {})
-    assert result_a.meta["performance"]["phase_timings_ms"].get("vsp_greedy_ms") is not None
+    assert result_a.meta["performance"]["phase_timings_ms"].get("vsp_mcnf_ms") is not None

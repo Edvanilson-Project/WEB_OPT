@@ -39,7 +39,7 @@ export class RunOptimizationDto {
 
   @ApiPropertyOptional({
     description: 'Algoritmo a usar',
-    default: OptimizationAlgorithm.FULL_PIPELINE,
+    default: OptimizationAlgorithm.HYBRID_PIPELINE,
     enum: OptimizationAlgorithm,
   })
   @IsOptional()

@@ -3,7 +3,7 @@ import { BaseCompanyEntity } from '../../../common/entities/base.entity';
 
 @Entity('optimization_settings')
 export class OptimizationSettingsEntity extends BaseCompanyEntity {
-  @Column({ name: 'algorithm_type', default: 'full_pipeline' })
+  @Column({ name: 'algorithm_type', default: 'hybrid_pipeline' })
   algorithmType: string;
 
   // Genetic Algorithm
