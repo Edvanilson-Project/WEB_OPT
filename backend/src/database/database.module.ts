@@ -14,7 +14,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
         username: config.get('DB_USERNAME', 'postgres'),
         password: config.get('DB_PASSWORD', 'postgres'),
         database: config.get('DB_DATABASE', 'otmiz_new'),
-        synchronize: config.get('DB_SYNCHRONIZE', 'true') === 'true',
+        synchronize: config.get('DB_SYNCHRONIZE', 'false') === 'true',
         logging: config.get('DB_LOGGING', 'false') === 'true',
         autoLoadEntities: true,
         entities: [__dirname + '/../**/*.entity{.ts,.js}'],

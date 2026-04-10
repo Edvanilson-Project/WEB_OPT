@@ -150,7 +150,7 @@ export default function Login() {
               subtitle={
                 <Box mt={3} textAlign="center">
                   <Typography variant="caption" color="text.disabled">
-                    admin@otimiz.com · 123456
+                    Sistema de Otimização de Transporte
                   </Typography>
                 </Box>
               }

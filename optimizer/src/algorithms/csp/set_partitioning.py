@@ -12,12 +12,16 @@ jornada, aproximando melhor a formulação clássica de set covering.
 """
 from __future__ import annotations
 
+import logging
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from ...core.config import get_settings
+
+_log = logging.getLogger(__name__)
 from ...domain.interfaces import ICSPAlgorithm
 from ...domain.models import Block, CSPSolution, Duty, Trip
 from ..base import BaseAlgorithm
+from ..evaluator import _DEFAULT_CREW_COST_PER_HOUR
 from .greedy import GreedyCSP
 
 settings = get_settings()
@@ -80,16 +84,16 @@ class SetPartitioningCSP(BaseAlgorithm, ICSPAlgorithm):
 
     def _piece_cost(self, combo: Sequence[Block]) -> float:
         work = sum(self.greedy._block_drive(block) for block in combo)
-        spread = combo[-1].end_time - combo[0].start_time + self.greedy.pullout + self.greedy.pullback
+        spread = self.greedy._duty_spread_minutes(combo)
         gaps = [max(0, combo[index + 1].start_time - combo[index].end_time) for index in range(len(combo) - 1)]
         passive = 0
         for index in range(len(combo) - 1):
             passive += max(0, self.greedy._transfer_needed(combo[index], combo[index + 1]) - self.greedy.min_layover)
 
-        cost = 50.0 + work / 60.0 * 25.0 + sum(gaps) * 0.1 + passive * self.goal_weights.get("passive_transfer", 0.25)
+        cost = 50.0 + work / 60.0 * _DEFAULT_CREW_COST_PER_HOUR + sum(gaps) * 0.1 + passive * self.goal_weights.get("passive_transfer", 0.25)
         target_work = max(self.greedy.min_work, min(self.greedy.max_work, int(self.goal_weights.get("target_work_minutes", self.greedy.max_work * 0.85))))
         target_spread = min(self.greedy.max_shift, int(self.goal_weights.get("target_spread_minutes", self.greedy.max_shift * 0.9)))
-        overtime_dev = max(0, work - self.greedy.max_work)
+        overtime_dev = max(0, spread - self.greedy.max_work)
         underwork_dev = max(0, target_work - work)
         spread_dev = max(0, spread - target_spread)
         fairness_dev = abs(work - target_work)
@@ -173,7 +177,7 @@ class SetPartitioningCSP(BaseAlgorithm, ICSPAlgorithm):
             if signature in existing:
                 continue
             reduced = cost - sum(duals.get(block.id, 0.0) for block in combo)
-            if reduced < -1e-6:
+            if reduced < -1e-5:
                 additions.append((combo, cost))
                 if len(additions) >= self.max_pricing_additions:
                     break
@@ -185,6 +189,7 @@ class SetPartitioningCSP(BaseAlgorithm, ICSPAlgorithm):
         trips: Optional[List[Trip]] = None,
     ) -> CSPSolution:
         self._start_timer()
+        self.greedy.time_budget_s = max(1.0, float(self.time_budget_s))
         if not blocks:
             return CSPSolution(algorithm=self.name, meta={"roster_count": 0})
         if not _PULP_AVAILABLE:
@@ -198,13 +203,15 @@ class SetPartitioningCSP(BaseAlgorithm, ICSPAlgorithm):
         task_ids = [task.id for task in tasks]
 
         pricing_rounds = self.max_pricing_iterations if self.pricing_enabled else 0
+        total_time_limit_s = max(1, int(max(1.0, float(self.time_budget_s))))
+        pricing_time_limit_s = max(1, min(total_time_limit_s, int(max(1.0, float(self.time_budget_s) / 3.0))))
         for _ in range(pricing_rounds):
             lp = pulp.LpProblem("CSP_Pricing", pulp.LpMinimize)
             y = [pulp.LpVariable(f"y_{index}", lowBound=0) for index in range(len(columns))]
             lp += pulp.lpSum(cost * y[index] for index, (_, cost) in enumerate(columns))
             for task_id in task_ids:
                 lp += pulp.lpSum(y[index] for index, (combo, _) in enumerate(columns) if any(task.id == task_id for task in combo)) >= 1, f"cover_{task_id}"
-            lp.solve(pulp.PULP_CBC_CMD(timeLimit=max(5, int(self.time_budget_s // 3)), msg=0, mip=False))
+            lp.solve(pulp.PULP_CBC_CMD(timeLimit=pricing_time_limit_s, msg=0, mip=False, keepFiles=False))
             duals = {
                 task_id: float(lp.constraints[f"cover_{task_id}"].pi or 0.0)
                 for task_id in task_ids
@@ -223,7 +230,17 @@ class SetPartitioningCSP(BaseAlgorithm, ICSPAlgorithm):
         prob += pulp.lpSum(cost * x[index] for index, (_, cost) in enumerate(columns))
         for task_id in task_ids:
             prob += pulp.lpSum(x[index] for index, (combo, _) in enumerate(columns) if any(task.id == task_id for task in combo)) >= 1
-        prob.solve(pulp.PULP_CBC_CMD(timeLimit=int(self.time_budget_s), msg=0))
+        prob.solve(pulp.PULP_CBC_CMD(timeLimit=total_time_limit_s, msg=0, keepFiles=False))
+
+        if prob.status != pulp.constants.LpStatusOptimal:
+            _log.warning("ILP solver status: %s — falling back to greedy CSP", pulp.LpStatus[prob.status])
+            fallback = self.greedy.solve(blocks, trips)
+            fallback.meta["workpieces_generated"] = len(columns)
+            fallback.meta["column_generation"] = {
+                "max_generated_columns": self.max_columns,
+                "fallback": True,
+            }
+            return fallback
 
         duties: List[Duty] = []
         covered_tasks: set[int] = set()

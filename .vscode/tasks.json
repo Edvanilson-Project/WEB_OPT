@@ -1,0 +1,104 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "frontend:dev",
+      "type": "shell",
+      "command": "./scripts/start-frontend.sh",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "isBackground": true,
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "group": "stack"
+      },
+      "problemMatcher": {
+        "owner": "custom",
+        "pattern": {
+          "regexp": ".*"
+        },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": ".*",
+          "endsPattern": "Ready in|ready - started server on|Local:|already listening on :3000"
+        }
+      }
+    },
+    {
+      "label": "backend:dev",
+      "type": "shell",
+      "command": "./scripts/start-backend.sh",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "isBackground": true,
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "group": "stack"
+      },
+      "problemMatcher": {
+        "owner": "custom",
+        "pattern": {
+          "regexp": ".*"
+        },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": ".*",
+          "endsPattern": "Found [0-9]+ errors?\\. Watching for file changes\\.|Nest application successfully started|already listening on :3001"
+        }
+      }
+    },
+    {
+      "label": "optimizer:dev",
+      "type": "shell",
+      "command": "./scripts/start-optimizer.sh",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "isBackground": true,
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "group": "stack"
+      },
+      "problemMatcher": {
+        "owner": "custom",
+        "pattern": {
+          "regexp": ".*"
+        },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": ".*",
+          "endsPattern": "Uvicorn running on|Application startup complete|already listening on :8000"
+        }
+      }
+    },
+    {
+      "label": "stack:start",
+      "dependsOrder": "parallel",
+      "dependsOn": ["frontend:dev", "backend:dev", "optimizer:dev"],
+      "problemMatcher": []
+    },
+    {
+      "label": "stack:status",
+      "type": "shell",
+      "command": "./scripts/stack-status.sh",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "qa:mega",
+      "type": "shell",
+      "command": "./test_mega_qa.sh",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    }
+  ]
+}

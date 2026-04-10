@@ -11,12 +11,12 @@ import {
 } from '@mui/material';
 import { IconMail, IconUser, IconSettings, IconPower } from '@tabler/icons-react';
 import { Stack } from '@mui/system';
-import { getSessionUser, clearSession } from '@/lib/api';
+import { getSessionUser, clearSession, type SessionUser } from '@/lib/api';
 import Link from 'next/link';
 
 const Profile = () => {
   const [anchorEl2, setAnchorEl2] = useState(null);
-  const [user, setUser] = useState<{ name?: string; email?: string } | null>(null);
+  const [user, setUser] = useState<SessionUser | null>(null);
 
   useEffect(() => {
     const u = getSessionUser();
@@ -82,7 +82,7 @@ const Profile = () => {
               {user?.name ?? 'Usuário'}
             </Typography>
             <Typography variant="caption" color="textSecondary">
-              Operador
+              {user?.role === 'super_admin' ? 'Super Admin' : user?.role === 'company_admin' ? 'Administrador' : user?.role === 'analyst' ? 'Analista' : 'Operador'}
             </Typography>
             {user?.email && (
               <Typography variant="caption" color="textSecondary" display="flex" alignItems="center" gap={0.5}>

@@ -26,22 +26,46 @@ from ..base import BaseAlgorithm
 settings = get_settings()
 
 _DEF_MAX_SHIFT = getattr(settings, "cct_max_shift_minutes", 560)
-_DEF_MAX_WORK = 480
+_DEF_MAX_WORK = getattr(settings, "cct_max_work_minutes", 480)
 _DEF_MAX_DRIVING = getattr(settings, "cct_max_driving_minutes", 270)
 _DEF_MIN_BREAK = getattr(settings, "cct_min_break_minutes", 30)
 
 
 def _nocturnal_overlap(start: int, end: int, noct_start_h: int, noct_end_h: int) -> int:
+    """Calcula minutos noturnos entre start e end (minutos absolutos).
+    Suporta janela noturna com wrap de meia-noite (ex: 22h-5h) e sem wrap (ex: 1h-6h)."""
+    if start >= end:
+        return 0
+    start_noct = noct_start_h * 60
+    end_noct = noct_end_h * 60
+    wraps_midnight = noct_start_h > noct_end_h  # e.g. 22h-5h
+
     total = 0
-    t = start
-    while t < end:
-        minute_of_day = t % 1440
-        start_noct = noct_start_h * 60
-        end_noct = noct_end_h * 60
-        in_window = minute_of_day >= start_noct or minute_of_day < end_noct
-        if in_window:
-            total += 1
-        t += 1
+    # Iterar dia a dia coberto pelo intervalo
+    day_start = (start // 1440) * 1440
+    day_end = ((end - 1) // 1440) * 1440
+
+    for day_base in range(day_start, day_end + 1440, 1440):
+        if wraps_midnight:
+            # Janela noturna: [day_base+start_noct, day_base+1440) + [day_base+1440, day_base+1440+end_noct)
+            win_a_start = day_base + start_noct
+            win_a_end = day_base + 1440
+            win_b_start = day_base + 1440
+            win_b_end = day_base + 1440 + end_noct
+            for ws, we in [(win_a_start, win_a_end), (win_b_start, win_b_end)]:
+                ov_start = max(start, ws)
+                ov_end = min(end, we)
+                if ov_end > ov_start:
+                    total += ov_end - ov_start
+        else:
+            # Janela contígua: [day_base+start_noct, day_base+end_noct)
+            ws = day_base + start_noct
+            we = day_base + end_noct
+            ov_start = max(start, ws)
+            ov_end = min(end, we)
+            if ov_end > ov_start:
+                total += ov_end - ov_start
+
     return total
 
 
@@ -74,6 +98,7 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
         self.overtime_limit = int(params.get("overtime_limit_minutes", 120))
         self.max_driving = min(int(params.get("max_driving_minutes", _DEF_MAX_DRIVING)), self.legal_max_continuous_driving)
         self.min_break = int(params.get("min_break_minutes", _DEF_MIN_BREAK))
+        self.connection_tolerance = max(0, int(params.get("connection_tolerance_minutes", 0)))
         self.mandatory_break_after = min(int(params.get("mandatory_break_after_minutes", self.max_driving)), self.legal_max_continuous_driving)
         self.split_break_first = int(params.get("split_break_first_minutes", 15))
         self.split_break_second = int(params.get("split_break_second_minutes", max(self.min_break, 30)))
@@ -119,12 +144,22 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
         self.operator_change_terminals_only = bool(params.get("operator_change_terminals_only", True))
         self.strict_union_rules = bool(params.get("strict_union_rules", True))
         self.operator_profiles = list(params.get("operator_profiles") or [])
+        self.trip_group_keep_bonus = float(params.get("trip_group_keep_bonus", 180.0))
+        self.trip_group_split_penalty = float(
+            params.get("trip_group_split_penalty", max(self.trip_group_keep_bonus * 1.5, 240.0))
+        )
+        self._extension_diagnostics = self._empty_extension_diagnostics()
 
     def _block_drive(self, block: Block) -> int:
         return sum(t.duration for t in block.trips)
 
     def _service_day(self, block: Block) -> int:
         return block.start_time // 1440
+
+    def _regular_overtime_minutes(self, spread_minutes: int) -> int:
+        if self.max_work <= 0:
+            return 0
+        return max(0, int(spread_minutes) - self.max_work)
 
     def _transfer_needed(self, a: Block, b: Block) -> int:
         last = a.trips[-1]
@@ -134,22 +169,36 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
         )
         return max(self.min_layover, deadhead_needed)
 
-    def _break_resets(self, state: Dict[str, Any], gap: int) -> Tuple[bool, Dict[str, Any]]:
+    def _effective_gap(self, gap: int) -> int:
+        return gap + self.connection_tolerance
+
+    def _adjustment_needed(self, gap: int, required: int) -> int:
+        if gap >= required:
+            return 0
+        deficit = required - gap
+        return deficit if deficit <= self.connection_tolerance else 0
+
+    def _break_resets(self, state: Dict[str, Any], gap: int) -> Tuple[bool, Dict[str, Any], int]:
         state = {"credit": int(state.get("credit", 0)), "has_long": bool(state.get("has_long", False))}
-        if gap >= self.min_break:
+        effective_gap = self._effective_gap(gap)
+        if effective_gap >= self.min_break:
             state["credit"] = 0
             state["has_long"] = False
-            return True, state
+            return True, state, self._adjustment_needed(gap, self.min_break)
 
-        if gap >= self.split_break_first:
-            state["credit"] += gap
-        if gap >= self.split_break_second:
+        first_adjustment = 0
+        second_adjustment = 0
+        if effective_gap >= self.split_break_first:
+            state["credit"] += effective_gap
+            first_adjustment = self._adjustment_needed(gap, self.split_break_first)
+        if effective_gap >= self.split_break_second:
             state["has_long"] = True
+            second_adjustment = self._adjustment_needed(gap, self.split_break_second)
         if state["credit"] >= self.split_break_first + self.split_break_second and state["has_long"]:
             state["credit"] = 0
             state["has_long"] = False
-            return True, state
-        return False, state
+            return True, state, max(first_adjustment, second_adjustment)
+        return False, state, max(first_adjustment, second_adjustment)
 
     def _is_relief_boundary(self, current: Trip, nxt: Trip) -> bool:
         if current.destination_id == nxt.origin_id:
@@ -186,7 +235,90 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
         exceeded = max(0, deviation - self.fairness_tolerance)
         return (exceeded / 60.0) * self.fairness_weight
 
+    def _trip_group_score(self, duty: Duty, task_group_ids: set[int], duties: Sequence[Duty]) -> float:
+        if not task_group_ids:
+            return 0.0
+        duty_groups = {int(item) for item in duty.meta.get("covered_trip_group_ids", [])}
+        shared_groups = duty_groups & task_group_ids
+        if shared_groups:
+            return -self.trip_group_keep_bonus * len(shared_groups)
+
+        external_matches = 0
+        for other in duties:
+            if other.id == duty.id:
+                continue
+            other_groups = {int(item) for item in other.meta.get("covered_trip_group_ids", [])}
+            external_matches += len(other_groups & task_group_ids)
+
+        if external_matches > 0:
+            return self.trip_group_split_penalty * external_matches
+        return 0.0
+
+    def _boundary_idle_minutes(self, trip: Optional[Trip], *, start: bool) -> int:
+        if trip is None:
+            return 0
+
+        idle_name = "idle_before_minutes" if start else "idle_after_minutes"
+        default_idle = self.pullout if start else self.pullback
+        explicit_idle = max(0, int(getattr(trip, idle_name, 0) or 0))
+        return explicit_idle if explicit_idle > 0 else default_idle
+
+    def _annotate_source_block_boundaries(self, blocks: Sequence[Block]) -> None:
+        for block in blocks:
+            ordered = sorted(block.trips, key=lambda trip: (trip.start_time, trip.id))
+            if not ordered:
+                continue
+
+            first_trip = ordered[0]
+            last_trip = ordered[-1]
+            start_buffer = self._boundary_idle_minutes(first_trip, start=True)
+            end_buffer = self._boundary_idle_minutes(last_trip, start=False)
+
+            block.meta.setdefault("source_block_id", block.id)
+            block.meta["vehicle_first_trip_id"] = int(first_trip.id)
+            block.meta["vehicle_last_trip_id"] = int(last_trip.id)
+            block.meta["start_buffer_minutes"] = start_buffer
+            block.meta["end_buffer_minutes"] = end_buffer
+            block.meta["operational_start_minutes"] = int(first_trip.start_time) - start_buffer
+            block.meta["operational_end_minutes"] = int(last_trip.end_time) + end_buffer
+
+    def _duty_span_bounds(self, tasks: Sequence[Block]) -> Tuple[int, int, int, int]:
+        ordered_tasks = sorted(
+            (task for task in tasks if task.trips),
+            key=lambda item: (item.start_time, item.id),
+        )
+        if not ordered_tasks:
+            return 0, 0, 0, 0
+
+        first_task = ordered_tasks[0]
+        last_task = ordered_tasks[-1]
+        first_trip = first_task.trips[0]
+        last_trip = last_task.trips[-1]
+        start_buffer = first_task.meta.get("task_start_buffer_minutes")
+        end_buffer = last_task.meta.get("task_end_buffer_minutes")
+        start_buffer = max(
+            0,
+            int(start_buffer if start_buffer is not None else self._boundary_idle_minutes(first_trip, start=True)),
+        )
+        end_buffer = max(
+            0,
+            int(end_buffer if end_buffer is not None else self._boundary_idle_minutes(last_trip, start=False)),
+        )
+        duty_start = int(first_trip.start_time) - start_buffer
+        duty_end = int(last_trip.end_time) + end_buffer
+        return start_buffer, end_buffer, duty_start, duty_end
+
+    def _duty_spread_minutes(self, tasks: Sequence[Block]) -> int:
+        _, _, duty_start, duty_end = self._duty_span_bounds(tasks)
+        return max(0, duty_end - duty_start)
+
     def _make_task(self, source_block: Block, trips: Sequence[Trip], task_id: int) -> Block:
+        source_start_buffer = max(0, int(source_block.meta.get("start_buffer_minutes", 0) or 0))
+        source_end_buffer = max(0, int(source_block.meta.get("end_buffer_minutes", 0) or 0))
+        first_trip_id = int(source_block.meta.get("vehicle_first_trip_id", trips[0].id if trips else 0))
+        last_trip_id = int(source_block.meta.get("vehicle_last_trip_id", trips[-1].id if trips else 0))
+        is_source_block_start = bool(trips) and int(trips[0].id) == first_trip_id
+        is_source_block_end = bool(trips) and int(trips[-1].id) == last_trip_id
         task = Block(id=task_id, trips=list(trips), vehicle_type_id=source_block.vehicle_type_id)
         task.meta.update(
             {
@@ -195,12 +327,19 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
                 "relief_start_id": trips[0].origin_id if trips else None,
                 "relief_end_id": trips[-1].destination_id if trips else None,
                 "task_drive_minutes": sum(t.duration for t in trips),
+                "is_source_block_start": is_source_block_start,
+                "is_source_block_end": is_source_block_end,
+                "task_start_buffer_minutes": source_start_buffer if is_source_block_start else 0,
+                "task_end_buffer_minutes": source_end_buffer if is_source_block_end else 0,
+                "source_start_buffer_minutes": source_start_buffer,
+                "source_end_buffer_minutes": source_end_buffer,
             }
         )
         return task
 
     def prepare_tasks(self, blocks: List[Block]) -> Tuple[List[Block], Dict[str, Any]]:
         """Executa run-cutting sobre blocos VSP para gerar tarefas de CSP."""
+        self._annotate_source_block_boundaries(blocks)
         tasks: List[Block] = []
         relief_cuts = 0
         max_chunk_drive = max(60, min(self.max_work, self.mandatory_break_after, self.daily_driving_limit))
@@ -229,6 +368,24 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
                     and trip.trip_group_id == nxt.trip_group_id
                     and trip.line_id == nxt.line_id
                 )
+
+                if (
+                    pair_guard
+                    and boundary
+                    and len(current) > 1
+                    and (
+                        current_drive + next_duration > max_chunk_drive
+                        or (self.meal_break_minutes > 0 and current_drive + next_duration > meal_trigger)
+                    )
+                ):
+                    task = self._make_task(block, current[:-1], self._next_block_id())
+                    task.meta["relief_cut"] = True
+                    task.meta["split_reason"] = "pre_pair_guard"
+                    tasks.append(task)
+                    relief_cuts += 1
+                    current = [current[-1]]
+                    current_drive = current[-1].duration
+
                 should_cut = False
 
                 if gap >= self.min_break:
@@ -272,19 +429,37 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
         if not duty.tasks:
             return True, "", {}
 
-        last = duty.tasks[-1]
-        if self._service_day(last) != self._service_day(block):
-            return False, "different_service_day", {}
+        # Check for duplicate trips
+        covered_trip_ids = set(duty.meta.get("covered_trip_ids", []))
+        block_trip_ids = {int(trip.id) for trip in block.trips}
+        duplicate_trip_ids = sorted(block_trip_ids & covered_trip_ids)
+        if duplicate_trip_ids:
+            return False, "duplicate_trip", {"duplicate_trip_ids": duplicate_trip_ids}
 
+        last = duty.tasks[-1]
         gap = block.start_time - last.end_time
+        effective_gap = self._effective_gap(gap)
         if gap < 0:
             return False, "overlap", {}
+
+        last_service_day = self._service_day(last)
+        block_service_day = self._service_day(block)
+        if block_service_day < last_service_day:
+            return False, "service_day_regression", {
+                "last_service_day": last_service_day,
+                "next_service_day": block_service_day,
+            }
+        if block_service_day > last_service_day + 1:
+            return False, "different_service_day", {
+                "last_service_day": last_service_day,
+                "next_service_day": block_service_day,
+            }
 
         if self.max_unpaid_break is not None and gap > self.max_unpaid_break:
             return False, "max_unpaid_break_exceeded", {"gap": gap, "max_unpaid_break": self.max_unpaid_break}
 
         transfer_needed = self._transfer_needed(last, block)
-        if gap < transfer_needed:
+        if effective_gap < transfer_needed:
             return False, "transfer_insufficient", {"gap": gap, "transfer_needed": transfer_needed}
 
         passive_transfer = max(0, transfer_needed - self.min_layover)
@@ -309,21 +484,22 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
             if covered_sources and source_block_id not in covered_sources:
                 return False, "operator_single_vehicle_only", {}
 
-        new_spread = (block.end_time - duty.tasks[0].start_time) + self.pullout + self.pullback
+        new_spread = self._duty_spread_minutes([*duty.tasks, block])
         if new_spread > self.max_shift:
             return False, "spread_exceeded", {"new_spread": new_spread}
 
         block_drive = self._block_drive(block)
         new_work = duty.work_time + block_drive
-        if new_work > self.max_work + self.overtime_limit:
-            return False, "overtime_hard", {"new_work": new_work}
+        overtime_minutes = self._regular_overtime_minutes(new_spread)
+        if overtime_minutes > self.overtime_limit:
+            return False, "overtime_hard", {"new_spread": new_spread, "overtime_minutes": overtime_minutes}
 
         start_depot = duty.meta.get("start_depot_id")
         candidate_end_depot = block.trips[-1].depot_id
         if self.enforce_same_depot and start_depot is not None and candidate_end_depot is not None and candidate_end_depot != start_depot:
             return False, "same_depot_required", {}
 
-        had_break, break_state = self._break_resets(duty.meta.get("break_state", {}), gap)
+        had_break, break_state, break_adjustment = self._break_resets(duty.meta.get("break_state", {}), gap)
         current_cont = int(duty.meta.get("continuous_drive", 0))
         new_cont = block_drive if had_break else current_cont + block_drive
         if new_cont > self.max_driving or new_cont > self.mandatory_break_after:
@@ -336,9 +512,16 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
         if daily_drive > self.daily_driving_limit and extended_days_used >= self.max_extended_days:
             return False, "daily_extension_quota_exceeded", {"daily_drive": daily_drive}
 
+        transfer_adjustment = self._adjustment_needed(gap, transfer_needed)
+        connection_adjustment = max(transfer_adjustment, break_adjustment)
+
         return True, "", {
             "gap": gap,
+            "effective_gap": effective_gap,
             "transfer_needed": transfer_needed,
+            "last_service_day": last_service_day,
+            "next_service_day": block_service_day,
+            "service_day_transition": block_service_day != last_service_day,
             "had_break": had_break,
             "new_spread": new_spread,
             "new_work": new_work,
@@ -347,29 +530,71 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
             "extended_days_used": extended_days_used + (1 if daily_drive > self.daily_driving_limit else 0),
             "passive_transfer": passive_transfer,
             "break_state": break_state,
+            "connection_adjustment_minutes": connection_adjustment,
+            "previous_task_id": int(last.id),
+            "next_task_id": int(block.id),
         }
 
     def _apply_block(self, duty: Duty, block: Block, data: Dict[str, Any]) -> None:
+        previous_last_service_day = int(
+            duty.meta.get("last_service_day", duty.meta.get("service_day", self._service_day(block)))
+        )
         duty.add_task(block)
+        start_buffer, end_buffer, duty_start, duty_end = self._duty_span_bounds(duty.tasks)
         duty.work_time = int(data.get("new_work", self._block_drive(block)))
-        duty.spread_time = int(data.get("new_spread", block.total_duration + self.pullout + self.pullback))
+        duty.spread_time = max(0, duty_end - duty_start)
         gap = int(data.get("gap", 0))
         duty.meta["continuous_drive"] = int(data.get("new_cont", self._block_drive(block)))
         duty.meta["daily_driving"] = int(data.get("daily_drive", self._block_drive(block)))
         duty.meta["extended_days_used"] = int(data.get("extended_days_used", 0))
         duty.meta["break_state"] = dict(data.get("break_state", duty.meta.get("break_state", {"credit": 0, "has_long": False})))
+        duty.meta["duty_start_minutes"] = duty_start
+        duty.meta["duty_end_minutes"] = duty_end
+        duty.meta["start_buffer_minutes"] = start_buffer
+        duty.meta["end_buffer_minutes"] = end_buffer
         duty.meta["waiting_minutes"] = int(duty.meta.get("waiting_minutes", 0)) + max(0, gap - int(data.get("transfer_needed", 0)))
         duty.meta["passive_transfer_minutes"] = int(duty.meta.get("passive_transfer_minutes", 0)) + int(data.get("passive_transfer", 0))
+        duty.meta["connection_tolerance_minutes"] = self.connection_tolerance
         duty.meta.setdefault("service_day", self._service_day(block))
+        current_service_day = int(data.get("next_service_day", self._service_day(block)))
+        duty.meta["last_service_day"] = current_service_day
+        if len(duty.tasks) > 1 and current_service_day != previous_last_service_day:
+            duty.meta["crosses_service_day"] = True
+            duty.meta["service_day_transition_count"] = int(duty.meta.get("service_day_transition_count", 0)) + 1
+            duty.meta.setdefault("service_day_transitions", []).append(
+                {
+                    "from_service_day": previous_last_service_day,
+                    "to_service_day": current_service_day,
+                    "task_id": int(block.id),
+                    "gap": gap,
+                }
+            )
         duty.meta.setdefault("start_depot_id", block.trips[0].depot_id)
         duty.meta["end_depot_id"] = block.trips[-1].depot_id
+        adjustment_used = int(data.get("connection_adjustment_minutes", 0))
+        if adjustment_used > 0:
+            duty.meta["connection_tolerance_used_minutes"] = int(duty.meta.get("connection_tolerance_used_minutes", 0)) + adjustment_used
+            duty.meta["connection_tolerance_uses"] = int(duty.meta.get("connection_tolerance_uses", 0)) + 1
+            duty.meta.setdefault("adjusted_connections", []).append({
+                "from_task_id": int(data.get("previous_task_id", 0)),
+                "to_task_id": int(data.get("next_task_id", block.id)),
+                "gap": gap,
+                "effective_gap": int(data.get("effective_gap", gap)),
+                "transfer_needed": int(data.get("transfer_needed", 0)),
+                "adjustment_minutes": adjustment_used,
+            })
         duty.meta.setdefault("line_ids", [])
         for line_id in [t.line_id for t in block.trips]:
             if line_id not in duty.meta["line_ids"]:
                 duty.meta["line_ids"].append(line_id)
         duty.meta.setdefault("task_ids", []).append(block.meta.get("task_id", block.id))
         duty.meta.setdefault("source_block_ids", []).append(block.meta.get("source_block_id", block.id))
-        duty.meta.setdefault("covered_trip_ids", []).extend(t.id for t in block.trips)
+        duty.meta.setdefault("covered_trip_ids", [])
+        for t in block.trips:
+            if t.id not in duty.meta["covered_trip_ids"]:
+                duty.meta["covered_trip_ids"].append(t.id)
+            else:
+                raise ValueError(f"Trip {t.id} already in duty {duty.id} covered_trip_ids")
         duty.meta.setdefault("covered_trip_group_ids", [])
         for trip in block.trips:
             group_id = getattr(trip, "trip_group_id", None)
@@ -377,6 +602,88 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
                 continue
             if group_id not in duty.meta["covered_trip_group_ids"]:
                 duty.meta["covered_trip_group_ids"].append(group_id)
+
+    def _empty_extension_phase(self) -> Dict[str, Any]:
+        return {
+            "attempts": 0,
+            "accepted": 0,
+            "rejections": 0,
+            "cross_day_extensions": 0,
+            "reasons": {},
+            "samples": [],
+        }
+
+    def _empty_extension_diagnostics(self) -> Dict[str, Any]:
+        return {
+            "duty_build": self._empty_extension_phase(),
+            "same_vehicle_merge": self._empty_extension_phase(),
+            "cross_vehicle_short_merge": self._empty_extension_phase(),
+        }
+
+    def _record_extension_attempt(
+        self,
+        phase: str,
+        duty: Duty,
+        block: Block,
+        ok: bool,
+        reason: str,
+        data: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        phase_state = self._extension_diagnostics.setdefault(phase, self._empty_extension_phase())
+        phase_state["attempts"] = int(phase_state.get("attempts", 0)) + 1
+        data = data or {}
+
+        if ok:
+            phase_state["accepted"] = int(phase_state.get("accepted", 0)) + 1
+            if data.get("service_day_transition"):
+                phase_state["cross_day_extensions"] = int(phase_state.get("cross_day_extensions", 0)) + 1
+            return
+
+        phase_state["rejections"] = int(phase_state.get("rejections", 0)) + 1
+        if reason:
+            reasons = phase_state.setdefault("reasons", {})
+            reasons[reason] = int(reasons.get(reason, 0)) + 1
+
+        samples = phase_state.setdefault("samples", [])
+        if len(samples) >= 25:
+            return
+
+        last_trip = duty.tasks[-1].trips[-1] if duty.tasks and duty.tasks[-1].trips else None
+        next_trip = block.trips[0] if block.trips else None
+        samples.append(
+            {
+                "duty_id": int(duty.id),
+                "task_id": int(block.id),
+                "reason": reason,
+                "gap": int(data.get("gap", next_trip.start_time - last_trip.end_time if last_trip and next_trip else 0)),
+                "last_service_day": int(data.get("last_service_day", self._service_day(duty.tasks[-1]) if duty.tasks else 0)),
+                "next_service_day": int(data.get("next_service_day", self._service_day(block))),
+                "last_trip_id": int(last_trip.id) if last_trip is not None else None,
+                "next_trip_id": int(next_trip.id) if next_trip is not None else None,
+                "last_destination_id": int(last_trip.destination_id) if last_trip is not None else None,
+                "next_origin_id": int(next_trip.origin_id) if next_trip is not None else None,
+                "duty_source_block_ids": [int(item) for item in duty.meta.get("source_block_ids", []) if item is not None],
+                "candidate_source_block_id": int(block.meta.get("source_block_id", block.id)),
+            }
+        )
+
+    def _extension_diagnostics_snapshot(self) -> Dict[str, Any]:
+        snapshot: Dict[str, Any] = {}
+        for phase, state in self._extension_diagnostics.items():
+            snapshot[phase] = {
+                "attempts": int(state.get("attempts", 0)),
+                "accepted": int(state.get("accepted", 0)),
+                "rejections": int(state.get("rejections", 0)),
+                "cross_day_extensions": int(state.get("cross_day_extensions", 0)),
+                "reasons": dict(
+                    sorted(
+                        ((str(name), int(count)) for name, count in (state.get("reasons") or {}).items()),
+                        key=lambda item: (-item[1], item[0]),
+                    )
+                ),
+                "samples": list(state.get("samples", [])),
+            }
+        return snapshot
 
     def _continuous_drive_stats(self, duty: Duty) -> Tuple[int, bool]:
         max_continuous = 0
@@ -395,9 +702,10 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
                 continuous = trip.duration
             else:
                 gap = trip.start_time - previous_end
-                if gap >= self.meal_break_minutes > 0:
+                effective_gap = self._effective_gap(gap)
+                if effective_gap >= self.meal_break_minutes > 0:
                     meal_break_found = True
-                if gap >= self.min_break:
+                if effective_gap >= self.min_break:
                     continuous = trip.duration
                 else:
                     continuous += trip.duration
@@ -420,7 +728,7 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
         previous_end = None
         for trip in all_trips:
             if previous_end is not None:
-                if trip.start_time - previous_end >= self.meal_break_minutes:
+                if self._effective_gap(trip.start_time - previous_end) >= self.meal_break_minutes:
                     return True
             previous_end = trip.end_time
         return False
@@ -495,7 +803,7 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
                 })
                 continue
 
-            available = [profile for profile in available if int(profile.get("id")) != int(chosen.get("id"))]
+            available = [profile for profile in available if int(profile.get("id", 0)) != int(chosen.get("id", -1))]
             assignment = {
                 "roster_id": roster["id"],
                 "operator_id": int(chosen.get("id")),
@@ -541,13 +849,14 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
                 _nocturnal_overlap(t.start_time, t.end_time, self.nocturnal_start_hour, self.nocturnal_end_hour)
                 for block in duty.tasks for t in block.trips
             )
-            duty.overtime_minutes = max(0, duty.work_time - self.max_work)
+            duty.overtime_minutes = self._regular_overtime_minutes(duty.spread_time)
             waiting_minutes = int(duty.meta.get("waiting_minutes", max(0, duty.spread_time - duty.work_time)))
             unpaid_total = max(0, duty.spread_time - duty.work_time)
             paid_waiting = int(round(waiting_minutes * self.waiting_time_pay_pct)) if self.idle_time_is_paid else 0
             guaranteed = max(self.min_guaranteed_work, duty.work_time)
             duty.paid_minutes = guaranteed + paid_waiting
             duty.meta["guaranteed_minutes"] = guaranteed
+            duty.meta["overtime_extra_pct"] = float(self.params.get("overtime_extra_pct", 0.50))
             duty.meta["nocturnal_extra_pct"] = self.nocturnal_extra_pct
             duty.meta["passive_transfer_minutes"] = int(duty.meta.get("passive_transfer_minutes", 0))
             duty.meta["unpaid_break_total_minutes"] = unpaid_total
@@ -598,6 +907,12 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
                 duty.warnings.append("Uso de extensão diária de condução")
             if duty.nocturnal_minutes > 0:
                 duty.warnings.append(f"Período noturno aplicado: {duty.nocturnal_minutes}min")
+            adjustment_used = int(duty.meta.get("connection_tolerance_used_minutes", 0))
+            adjustment_uses = int(duty.meta.get("connection_tolerance_uses", 0))
+            if adjustment_used > 0:
+                duty.warnings.append(
+                    f"Ajuste fino de conexão aplicado: {adjustment_used}min em {adjustment_uses} conexão(ões)"
+                )
             if any(t.is_holiday for b in duty.tasks for t in b.trips):
                 duty.meta["holiday_extra_pct"] = self.holiday_extra_pct
             if self.enforce_same_depot and duty.meta.get("start_depot_id") is not None and duty.meta.get("end_depot_id") is not None and duty.meta["start_depot_id"] != duty.meta["end_depot_id"]:
@@ -608,35 +923,58 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
         roster_state: List[Dict[str, Any]] = []
         group_to_roster: Dict[int, int] = {}
         for duty in sorted(duties, key=lambda item: (item.tasks[0].start_time if item.tasks else 0, item.id)):
-            duty_start = duty.tasks[0].start_time if duty.tasks else 0
-            duty_end = duty.tasks[-1].end_time if duty.tasks else 0
+            duty_start = int(duty.meta.get("duty_start_minutes", duty.tasks[0].start_time if duty.tasks else 0))
+            duty_end = int(duty.meta.get("duty_end_minutes", duty.tasks[-1].end_time if duty.tasks else 0))
             daily_drive = int(duty.meta.get("daily_driving", duty.work_time))
             duty_groups = [int(item) for item in duty.meta.get("covered_trip_group_ids", [])]
             preferred_roster = next((group_to_roster[group_id] for group_id in duty_groups if group_id in group_to_roster), None)
             assigned_roster: Optional[Dict[str, Any]] = None
-            for roster in sorted(roster_state, key=lambda item: item["last_end"], reverse=True):
-                if preferred_roster is not None and roster["id"] != preferred_roster:
-                    continue
-                if roster["last_end"] + self.inter_shift_rest > duty_start:
-                    continue
-                week = duty_start // (7 * 1440)
-                fortnight = duty_start // (14 * 1440)
-                month = duty_start // (30 * 1440)
-                week_drive = roster["week_drive"].get(week, 0) + daily_drive
-                fortnight_drive = roster["fortnight_drive"].get(fortnight, 0) + daily_drive
-                month_drive = roster["month_drive"].get(month, 0) + daily_drive
-                if week_drive > self.weekly_driving_limit or fortnight_drive > self.fortnight_driving_limit:
-                    continue
-                assigned_roster = roster
-                roster["last_end"] = duty_end
-                roster["week_drive"][week] = week_drive
-                roster["fortnight_drive"][fortnight] = fortnight_drive
-                roster["month_drive"][month] = month_drive
-                roster["duties"].append(duty.id)
-                break
+            sorted_rosters = sorted(roster_state, key=lambda item: item["last_end"], reverse=True)
+            # First pass: try preferred roster only
+            if preferred_roster is not None:
+                for roster in sorted_rosters:
+                    if roster["id"] != preferred_roster:
+                        continue
+                    if roster["last_end"] + self.inter_shift_rest > duty_start:
+                        continue
+                    week = duty_start // (7 * 1440)
+                    fortnight = duty_start // (14 * 1440)
+                    month = duty_start // (30 * 1440)
+                    week_drive = roster["week_drive"].get(week, 0) + daily_drive
+                    fortnight_drive = roster["fortnight_drive"].get(fortnight, 0) + daily_drive
+                    month_drive = roster["month_drive"].get(month, 0) + daily_drive
+                    if week_drive > self.weekly_driving_limit or fortnight_drive > self.fortnight_driving_limit:
+                        continue
+                    assigned_roster = roster
+                    break
+            # Second pass: try any compatible roster
             if assigned_roster is None:
                 if preferred_roster is not None:
                     warnings.append(f"PAIR_GROUP_ROSTER_SPLIT D{duty.id} expected_roster={preferred_roster}")
+                for roster in sorted_rosters:
+                    if roster["last_end"] + self.inter_shift_rest > duty_start:
+                        continue
+                    week = duty_start // (7 * 1440)
+                    fortnight = duty_start // (14 * 1440)
+                    month = duty_start // (30 * 1440)
+                    week_drive = roster["week_drive"].get(week, 0) + daily_drive
+                    fortnight_drive = roster["fortnight_drive"].get(fortnight, 0) + daily_drive
+                    month_drive = roster["month_drive"].get(month, 0) + daily_drive
+                    if week_drive > self.weekly_driving_limit or fortnight_drive > self.fortnight_driving_limit:
+                        continue
+                    assigned_roster = roster
+                    break
+            if assigned_roster is not None:
+                roster = assigned_roster
+                week = duty_start // (7 * 1440)
+                fortnight = duty_start // (14 * 1440)
+                month = duty_start // (30 * 1440)
+                roster["last_end"] = duty_end
+                roster["week_drive"][week] = roster["week_drive"].get(week, 0) + daily_drive
+                roster["fortnight_drive"][fortnight] = roster["fortnight_drive"].get(fortnight, 0) + daily_drive
+                roster["month_drive"][month] = roster["month_drive"].get(month, 0) + daily_drive
+                roster["duties"].append(duty.id)
+            if assigned_roster is None:
                 roster_id = len(roster_state) + 1
                 assigned_roster = {
                     "id": roster_id,
@@ -683,12 +1021,28 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
         trips: Optional[List[Trip]] = None,
     ) -> CSPSolution:
         self._start_timer()
+        self._extension_diagnostics = self._empty_extension_diagnostics()
         if not blocks:
             return CSPSolution(algorithm=self.name, meta={"roster_count": 0})
 
         tasks, run_cut_meta = self.prepare_tasks(blocks)
         duties: List[Duty] = []
+        covered_trip_ids: set[int] = set()
+        duplicate_task_skips = 0
         for task in sorted(tasks, key=lambda item: (item.start_time, item.id)):
+            task_trip_ids = {
+                int(trip.id)
+                for trip in task.trips
+            }
+            duplicated_trip_ids = sorted(task_trip_ids & covered_trip_ids)
+            if duplicated_trip_ids:
+                duplicate_task_skips += 1
+                _log.warning(
+                    "[CSP-GREEDY] Skipping duplicated task %s because trips %s are already covered",
+                    task.id,
+                    duplicated_trip_ids,
+                )
+                continue
             source_block_id = int(task.meta.get("source_block_id", task.id))
             task_group_ids = {
                 int(trip.trip_group_id)
@@ -710,7 +1064,8 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
                 ),
             )
             for duty in ordered_duties:
-                ok, _, data = self._can_extend(duty, task)
+                ok, reason, data = self._can_extend(duty, task)
+                self._record_extension_attempt("duty_build", duty, task, ok, reason, data)
                 if not ok:
                     continue
                 projected_work = int(data.get("new_work", duty.work_time + self._block_drive(task)))
@@ -723,11 +1078,20 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
                     new_spread = float(data.get("new_spread", 0))
                     if new_spread >= 360 and not self._would_have_meal_break(duty, task):
                         meal_penalty = 200.0
-                candidate_score = gap + float(data.get("passive_transfer", 0)) + fairness_penalty + long_gap_penalty + meal_penalty
+                trip_group_score = self._trip_group_score(duty, task_group_ids, duties)
+                candidate_score = (
+                    gap
+                    + float(data.get("passive_transfer", 0))
+                    + fairness_penalty
+                    + long_gap_penalty
+                    + meal_penalty
+                    + trip_group_score
+                )
                 feasible_candidates.append((candidate_score, duty, data))
             if feasible_candidates:
                 _, duty, data = min(feasible_candidates, key=lambda item: (item[0], item[1].id))
                 self._apply_block(duty, task, data)
+                covered_trip_ids.update(task_trip_ids)
                 assigned = True
             if assigned:
                 continue
@@ -738,18 +1102,21 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
                 task,
                 {
                     "new_work": self._block_drive(task),
-                    "new_spread": task.total_duration + self.pullout + self.pullback,
+                    "new_spread": self._duty_spread_minutes([task]),
                     "new_cont": self._block_drive(task),
                     "daily_drive": self._block_drive(task),
                     "extended_days_used": 1 if self._block_drive(task) > self.daily_driving_limit else 0,
                 },
             )
+            covered_trip_ids.update(task_trip_ids)
             duties.append(duty)
 
         duties = self._merge_small_duties(duties)
 
         sol = self.finalize_selected_duties(duties, original_blocks=blocks)
+        run_cut_meta["duplicate_task_skips"] = duplicate_task_skips
         sol.meta.update(run_cut_meta)
+        sol.meta["duty_merge_diagnostics"] = self._extension_diagnostics_snapshot()
         _log.info(
             "[CSP-GREEDY] %d duties (roster_count=%s), avg_work=%d, short(<120)=%d",
             len(duties),
@@ -789,16 +1156,14 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
                 if not b.tasks or not a.tasks:
                     i += 1
                     continue
-                combined_spread = (
-                    b.tasks[-1].end_time - a.tasks[0].start_time
-                ) + self.pullout + self.pullback
+                combined_spread = self._duty_spread_minutes([*a.tasks, *b.tasks])
                 combined_work = a.work_time + sum(
                     self._block_drive(t) for t in b.tasks
                 )
                 if combined_spread > self.max_shift:
                     i += 1
                     continue
-                if combined_work > self.max_work + self.overtime_limit:
+                if self._regular_overtime_minutes(combined_spread) > self.overtime_limit:
                     i += 1
                     continue
 
@@ -806,7 +1171,8 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
                 sim = copy.deepcopy(a)
                 can_merge = True
                 for task in b.tasks:
-                    ok, _, data = self._can_extend(sim, task)
+                    ok, reason, data = self._can_extend(sim, task)
+                    self._record_extension_attempt("same_vehicle_merge", sim, task, ok, reason, data)
                     if not ok:
                         can_merge = False
                         break
@@ -832,4 +1198,133 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
         after = len(duties)
         if before != after:
             _log.info("[CSP-MERGE] Merged %d duties: %d → %d", before - after, before, after)
+
+        # --- Phase 2: cross-vehicle merge for short duties ---
+        if self.min_work > 0:
+            duties = self._cross_vehicle_merge(duties)
+
+        return duties
+
+    def _cross_vehicle_merge(self, duties: List[Duty]) -> List[Duty]:
+        """Tenta mesclar jornadas curtas (< min_work) com outra jornada
+        próxima temporalmente, respeitando _can_extend para compatibilidade."""
+        threshold = self.min_work
+        short = [d for d in duties if d.work_time < threshold and d.tasks]
+        normal = [d for d in duties if d.work_time >= threshold and d.tasks]
+        _log.info("[CSP-CROSS-MERGE] %d short duties (<%dmin), %d normal", len(short), threshold, len(normal))
+        if not short:
+            return duties
+
+        # Consider merging two shorts together too
+        all_candidates = normal + short
+
+        short.sort(key=lambda d: d.tasks[0].start_time)
+
+        merged_ids: set[int] = set()
+        for sd in short:
+            if sd.id in merged_ids:
+                continue
+            best_target = None
+            best_gap = float("inf")
+            best_mode = "append"
+            reject_reasons: Dict[str, int] = {}
+
+            for nd in all_candidates:
+                if nd.id == sd.id or nd.id in merged_ids:
+                    continue
+                if not nd.tasks:
+                    continue
+
+                # Determine order: which comes first?
+                # mode='append': sd comes after nd → append sd tasks to nd
+                # mode='prepend': sd comes before nd → use sd as base, append nd tasks
+                mode = None
+                if sd.tasks[0].start_time >= nd.tasks[-1].end_time:
+                    mode = "append"
+                    gap = sd.tasks[0].start_time - nd.tasks[-1].end_time
+                elif nd.tasks[0].start_time >= sd.tasks[-1].end_time:
+                    mode = "prepend"
+                    gap = nd.tasks[0].start_time - sd.tasks[-1].end_time
+                else:
+                    reject_reasons["overlap"] = reject_reasons.get("overlap", 0) + 1
+                    continue
+
+                # Quick feasibility
+                combined_work = nd.work_time + sd.work_time
+                combined_tasks = [*nd.tasks, *sd.tasks] if mode == "append" else [*sd.tasks, *nd.tasks]
+                combined_spread = self._duty_spread_minutes(combined_tasks)
+                if combined_spread > self.max_shift:
+                    reject_reasons["spread"] = reject_reasons.get("spread", 0) + 1
+                    continue
+                if self._regular_overtime_minutes(combined_spread) > self.overtime_limit:
+                    reject_reasons["overtime"] = reject_reasons.get("overtime", 0) + 1
+                    continue
+
+                if mode == "append":
+                    # Try _can_extend for each task in sd appended to nd
+                    sim = copy.deepcopy(nd)
+                    can_merge = True
+                    tasks_to_add = sorted(sd.tasks, key=lambda t: t.start_time)
+                    for task in tasks_to_add:
+                        ok, reason, data = self._can_extend(sim, task)
+                        self._record_extension_attempt("cross_vehicle_short_merge", sim, task, ok, reason, data)
+                        if not ok:
+                            can_merge = False
+                            reject_reasons[reason] = reject_reasons.get(reason, 0) + 1
+                            break
+                        self._apply_block(sim, task, data)
+                else:
+                    # prepend: build from sd then append nd tasks
+                    sim = copy.deepcopy(sd)
+                    can_merge = True
+                    tasks_to_add = sorted(nd.tasks, key=lambda t: t.start_time)
+                    for task in tasks_to_add:
+                        ok, reason, data = self._can_extend(sim, task)
+                        self._record_extension_attempt("cross_vehicle_short_merge", sim, task, ok, reason, data)
+                        if not ok:
+                            can_merge = False
+                            reject_reasons[reason] = reject_reasons.get(reason, 0) + 1
+                            break
+                        self._apply_block(sim, task, data)
+
+                if can_merge and gap < best_gap:
+                    best_gap = gap
+                    best_target = nd
+                    best_mode = mode
+
+            if best_target is not None:
+                if best_mode == "append":
+                    # Append sd tasks to nd
+                    tasks_to_add = sorted(sd.tasks, key=lambda t: t.start_time)
+                    for task in tasks_to_add:
+                        ok, _, data = self._can_extend(best_target, task)
+                        if ok:
+                            self._apply_block(best_target, task, data)
+                else:
+                    # Prepend: rebuild from sd + nd tasks
+                    tasks_to_add = sorted(best_target.tasks, key=lambda t: t.start_time)
+                    # Reset sd to receive nd tasks
+                    for task in tasks_to_add:
+                        ok, _, data = self._can_extend(sd, task)
+                        if ok:
+                            self._apply_block(sd, task, data)
+                    # Replace best_target contents with merged sd
+                    best_target.tasks = sd.tasks
+                    best_target.work_time = sd.work_time
+                    best_target.spread_time = sd.spread_time
+                    best_target.meta = sd.meta
+                merged_ids.add(sd.id)
+                _log.info(
+                    "[CSP-CROSS-MERGE] Merged short duty %d (%dmin) into duty %d via %s (now %dmin work)",
+                    sd.id, sd.work_time, best_target.id, best_mode, best_target.work_time,
+                )
+            else:
+                _log.info(
+                    "[CSP-CROSS-MERGE] Could not merge duty %d (%dmin): rejects=%s",
+                    sd.id, sd.work_time, reject_reasons,
+                )
+
+        if merged_ids:
+            duties = [d for d in duties if d.id not in merged_ids]
+            _log.info("[CSP-CROSS-MERGE] Absorbed %d short duties, %d remain", len(merged_ids), len(duties))
         return duties

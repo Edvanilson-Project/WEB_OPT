@@ -1,9 +1,11 @@
 import logging
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Optional, Tuple
 import copy
+from .evaluator import CostEvaluator
 from ..domain.models import CSPSolution, VSPSolution, Trip, Block, Duty
 
 logger = logging.getLogger(__name__)
+evaluator = CostEvaluator()
 
 def _try_merge_vsp_blocks(vsp_sol: VSPSolution, vsp_params: Dict[str, Any]) -> VSPSolution:
     """
@@ -65,6 +67,7 @@ def _try_merge_vsp_blocks(vsp_sol: VSPSolution, vsp_params: Dict[str, Any]) -> V
 
             if best_j is not None:
                 blocks[i].trips.extend(blocks[best_j].trips)
+                blocks[i].trips.sort(key=lambda t: t.start_time)
                 blocks.pop(best_j)
                 changed = True
                 total_merges += 1
@@ -84,6 +87,221 @@ def _try_merge_vsp_blocks(vsp_sol: VSPSolution, vsp_params: Dict[str, Any]) -> V
         return result
 
     return vsp_sol
+
+
+def _renumber_blocks(blocks: List[Block]) -> List[Block]:
+    ordered = [block for block in blocks if block.trips]
+    ordered.sort(key=lambda block: (block.start_time, block.id))
+    for idx, block in enumerate(ordered, start=1):
+        block.id = idx
+    return ordered
+
+
+def _vsp_signature(vsp_sol: VSPSolution) -> Tuple[Tuple[int, ...], ...]:
+    ordered_blocks = sorted(vsp_sol.blocks, key=lambda block: (block.start_time, block.id))
+    return tuple(tuple(int(trip.id) for trip in block.trips) for block in ordered_blocks)
+
+
+def _build_post_opt_metrics(csp_sol: CSPSolution, vsp_sol: VSPSolution, min_work: int) -> Dict[str, Any]:
+    duties = csp_sol.duties or []
+    short_duties = sum(1 for duty in duties if min_work > 0 and duty.work_time < min_work)
+    split_duties = 0
+    vehicle_switches = 0
+    waiting_minutes = 0
+    unpaid_break_minutes = 0
+    cross_day_duties = 0
+
+    for duty in duties:
+        unique_sources: List[int] = []
+        for source_block_id in duty.meta.get("source_block_ids", []):
+            if source_block_id is None:
+                continue
+            parsed_source = int(source_block_id)
+            if parsed_source not in unique_sources:
+                unique_sources.append(parsed_source)
+        switches = max(0, len(unique_sources) - 1)
+        vehicle_switches += switches
+        if switches > 0:
+            split_duties += 1
+
+        waiting_minutes += int(duty.meta.get("waiting_minutes", 0) or 0)
+        unpaid_break_minutes += int(
+            duty.meta.get("unpaid_break_total_minutes", max(0, duty.spread_time - duty.work_time)) or 0
+        )
+        if int(duty.meta.get("last_service_day", duty.meta.get("service_day", 0)) or 0) > int(
+            duty.meta.get("service_day", 0) or 0
+        ):
+            cross_day_duties += 1
+
+    fragmentation_score = (
+        len(duties) * 10000
+        + short_duties * 1000
+        + split_duties * 400
+        + vehicle_switches * 150
+        + waiting_minutes
+        + max(0, unpaid_break_minutes - waiting_minutes)
+    )
+
+    return {
+        "vehicles": len(vsp_sol.blocks),
+        "crew": csp_sol.num_crew,
+        "duties": len(duties),
+        "violations": int(csp_sol.cct_violations or 0),
+        "short_duties": short_duties,
+        "split_duties": split_duties,
+        "vehicle_switches": vehicle_switches,
+        "waiting_minutes": waiting_minutes,
+        "unpaid_break_minutes": unpaid_break_minutes,
+        "cross_day_duties": cross_day_duties,
+        "fragmentation_score": fragmentation_score,
+        "uncovered_blocks": len(csp_sol.uncovered_blocks or []),
+        "unassigned_trips": len(vsp_sol.unassigned_trips or []),
+        "csp_cost": round(evaluator.csp_cost(csp_sol), 2),
+    }
+
+
+def _is_better_post_opt_candidate(current: Dict[str, Any], candidate: Dict[str, Any]) -> bool:
+    if candidate["unassigned_trips"] > current["unassigned_trips"]:
+        return False
+    if candidate["uncovered_blocks"] > current["uncovered_blocks"]:
+        return False
+    if candidate["violations"] > current["violations"]:
+        return False
+    if candidate["vehicles"] > current["vehicles"]:
+        return False
+    if candidate["crew"] > current["crew"]:
+        return False
+
+    current_rank = (
+        current["violations"],
+        current["vehicles"],
+        current["crew"],
+        current["fragmentation_score"],
+        current["short_duties"],
+        current["split_duties"],
+        current["vehicle_switches"],
+        current["csp_cost"],
+    )
+    candidate_rank = (
+        candidate["violations"],
+        candidate["vehicles"],
+        candidate["crew"],
+        candidate["fragmentation_score"],
+        candidate["short_duties"],
+        candidate["split_duties"],
+        candidate["vehicle_switches"],
+        candidate["csp_cost"],
+    )
+    return candidate_rank < current_rank
+
+
+def _can_append_suffix(recipient: Block, suffix: List[Trip], vsp_params: Dict[str, Any]) -> Tuple[bool, str, Dict[str, Any]]:
+    if not recipient.trips or not suffix:
+        return False, "empty_block", {}
+
+    min_layover = int(vsp_params.get("min_layover_minutes", 8) or 8)
+    max_vehicle_shift = int(vsp_params.get("max_vehicle_shift_minutes", 960) or 960)
+    allow_multi_line = bool(vsp_params.get("allow_multi_line_block", True))
+    last_trip = recipient.trips[-1]
+    first_suffix_trip = suffix[0]
+    gap = first_suffix_trip.start_time - last_trip.end_time
+
+    if gap < 0:
+        return False, "overlap", {"gap": gap}
+
+    deadhead = int(last_trip.deadhead_times.get(first_suffix_trip.origin_id, 0))
+    transfer_needed = max(min_layover, deadhead)
+    if gap < transfer_needed:
+        return False, "transfer_insufficient", {"gap": gap, "transfer_needed": transfer_needed}
+
+    if not allow_multi_line:
+        recipient_lines = {int(trip.line_id) for trip in recipient.trips}
+        suffix_lines = {int(trip.line_id) for trip in suffix}
+        if recipient_lines and suffix_lines and recipient_lines != suffix_lines:
+            return False, "multi_line_disabled", {}
+
+    combined_duration = suffix[-1].end_time - recipient.trips[0].start_time
+    if max_vehicle_shift > 0 and combined_duration > max_vehicle_shift:
+        return False, "max_vehicle_shift_exceeded", {"combined_duration": combined_duration}
+
+    return True, "", {"gap": gap, "transfer_needed": transfer_needed}
+
+
+def _generate_tail_relocation_candidates(
+    vsp_sol: VSPSolution,
+    vsp_params: Dict[str, Any],
+    *,
+    limit: int = 16,
+    max_tail_trips: int = 4,
+) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    if limit <= 0 or max_tail_trips <= 0:
+        return [], {"considered": 0, "generated": 0, "reasons": {}}
+
+    base_blocks = sorted(copy.deepcopy(vsp_sol.blocks), key=lambda block: (block.start_time, block.id))
+    candidates: List[Dict[str, Any]] = []
+    stats: Dict[str, Any] = {"considered": 0, "generated": 0, "reasons": {}}
+    seen_signatures: set[Tuple[Tuple[int, ...], ...]] = set()
+
+    for recipient_idx, recipient in enumerate(base_blocks):
+        for donor_idx, donor in enumerate(base_blocks):
+            if recipient_idx == donor_idx:
+                continue
+
+            donor_trips = sorted(donor.trips, key=lambda trip: (trip.start_time, trip.id))
+            if len(donor_trips) < 2:
+                continue
+
+            tail_cap = min(max_tail_trips, len(donor_trips) - 1)
+            for tail_size in range(1, tail_cap + 1):
+                suffix = donor_trips[-tail_size:]
+                stats["considered"] = int(stats.get("considered", 0)) + 1
+                ok, reason, data = _can_append_suffix(recipient, suffix, vsp_params)
+                if not ok:
+                    reason_counts = stats.setdefault("reasons", {})
+                    reason_counts[reason] = int(reason_counts.get(reason, 0)) + 1
+                    continue
+
+                candidate_blocks = copy.deepcopy(base_blocks)
+                candidate_recipient = candidate_blocks[recipient_idx]
+                candidate_donor = candidate_blocks[donor_idx]
+                suffix_trip_ids = {int(trip.id) for trip in suffix}
+                candidate_tail = [copy.deepcopy(trip) for trip in suffix]
+                candidate_recipient.trips.extend(candidate_tail)
+                candidate_recipient.trips.sort(key=lambda trip: (trip.start_time, trip.id))
+                candidate_donor.trips = [trip for trip in candidate_donor.trips if int(trip.id) not in suffix_trip_ids]
+                candidate_blocks = _renumber_blocks(candidate_blocks)
+
+                candidate_vsp = copy.deepcopy(vsp_sol)
+                candidate_vsp.blocks = candidate_blocks
+                signature = _vsp_signature(candidate_vsp)
+                if signature in seen_signatures:
+                    continue
+                seen_signatures.add(signature)
+
+                candidates.append(
+                    {
+                        "phase": "tail_relocation",
+                        "vsp": candidate_vsp,
+                        "details": {
+                            "recipient_block_id": int(recipient.id),
+                            "donor_block_id": int(donor.id),
+                            "tail_trip_ids": [int(trip.id) for trip in suffix],
+                            "tail_size": tail_size,
+                            "gap": int(data.get("gap", 0)),
+                        },
+                    }
+                )
+                stats["generated"] = int(stats.get("generated", 0)) + 1
+
+    candidates.sort(
+        key=lambda item: (
+            int(item["details"].get("gap", 0)),
+            -int(item["details"].get("tail_size", 0)),
+            int(item["details"].get("recipient_block_id", 0)),
+            int(item["details"].get("donor_block_id", 0)),
+        )
+    )
+    return candidates[:limit], stats
 
 
 def joint_duty_vehicle_swap(
@@ -107,17 +325,20 @@ def joint_duty_vehicle_swap(
         if len(vsp_sol.blocks) < 2:
             return csp_sol, vsp_sol
 
-        vsp_params = dict(vsp_sol.meta) if vsp_sol.meta else {}
+        vsp_params = dict(kwargs.get("vsp_params", {})) if kwargs.get("vsp_params") else (dict(vsp_sol.meta) if vsp_sol.meta else {})
+        solver_kwargs = {key: value for key, value in kwargs.items() if key != "vsp_params"}
+        min_work = int(solver_kwargs.get("min_work_minutes", cct_params.get("min_work_minutes", 0)) or 0)
         original_vehicles = len(vsp_sol.blocks)
         original_crew = csp_sol.num_crew
+        baseline_metrics = _build_post_opt_metrics(csp_sol, vsp_sol, min_work)
 
         # ── Fase 1: Merge de blocos VSP ──────────────────────────────────────
         merged_vsp = _try_merge_vsp_blocks(vsp_sol, vsp_params)
         vsp_changed = len(merged_vsp.blocks) < original_vehicles
 
         # ── Fase 2: Swap de trips entre blocos (multi-pass) ──────────────────
-        operator_single_vehicle_only = bool(cct_params.get("operator_single_vehicle_only", False))
         max_unpaid_break = int(cct_params.get("max_unpaid_break_minutes", cct_params.get("max_unpaid_break", 180)))
+        max_vehicle_shift = int(vsp_params.get("max_vehicle_shift_minutes", 960))
 
         swap_vsp = copy.deepcopy(merged_vsp)
         blocks = swap_vsp.blocks
@@ -147,6 +368,11 @@ def joint_duty_vehicle_swap(
                     if gap < needed:
                         continue
 
+                    # Verificar max_vehicle_shift após swap
+                    combined_duration = first_b2.end_time - b1.trips[0].start_time
+                    if max_vehicle_shift > 0 and combined_duration > max_vehicle_shift:
+                        continue
+
                     # Mover primeira trip de b2 para b1
                     b1.trips.append(first_b2)
                     b2.trips.pop(0)
@@ -162,37 +388,145 @@ def joint_duty_vehicle_swap(
 
         swap_changed = total_swaps > 0
         if swap_changed:
-            swap_vsp.blocks = blocks
+            swap_vsp.blocks = _renumber_blocks(blocks)
 
-        # ── Fase 3: Recalcular CSP se houve qualquer mudança ────────────────
+        base_candidate_vsp = swap_vsp if swap_changed else merged_vsp if vsp_changed else vsp_sol
+        candidate_vsps: List[Dict[str, Any]] = []
         if vsp_changed or swap_changed:
-            final_vsp = swap_vsp if swap_changed else merged_vsp
             logger.info(
-                f"[POST-OPT] Veículos: {original_vehicles} → {len(final_vsp.blocks)}, "
+                f"[POST-OPT] Veículos: {original_vehicles} → {len(base_candidate_vsp.blocks)}, "
                 f"merges={original_vehicles - len(merged_vsp.blocks)}, swaps={total_swaps}"
             )
+            candidate_vsps.append(
+                {
+                    "phase": "joint_swap",
+                    "vsp": base_candidate_vsp,
+                    "details": {
+                        "merged_blocks": original_vehicles - len(merged_vsp.blocks),
+                        "swaps": total_swaps,
+                    },
+                }
+            )
 
-            csp = GreedyCSP(vsp_params=vsp_params, **kwargs)
-            new_csp = csp.solve(final_vsp.blocks, trips)
+        fragmentation_enabled = bool(vsp_params.get("enable_fragmentation_postopt", True))
+        tail_candidate_limit = int(vsp_params.get("fragmentation_candidate_limit", 16) or 16)
+        max_tail_trips = int(vsp_params.get("fragmentation_max_tail_trips", 4) or 4)
+        tail_candidates: List[Dict[str, Any]] = []
+        tail_stats: Dict[str, Any] = {"considered": 0, "generated": 0, "reasons": {}}
+        if fragmentation_enabled:
+            tail_seed_vsps = [vsp_sol]
+            if _vsp_signature(base_candidate_vsp) != _vsp_signature(vsp_sol):
+                tail_seed_vsps.append(base_candidate_vsp)
 
-            # Aceitar se não piorou violações E (melhorou veículos OU crew)
-            improved_vehicles = len(final_vsp.blocks) < original_vehicles
-            improved_crew = new_csp.num_crew <= original_crew
-            fewer_violations = new_csp.cct_violations <= csp_sol.cct_violations
-
-            if fewer_violations and (improved_vehicles or improved_crew):
-                logger.info(
-                    f"[POST-OPT] Aceito: Veículos {original_vehicles}→{len(final_vsp.blocks)}, "
-                    f"Crew {original_crew}→{new_csp.num_crew}, "
-                    f"Violações {csp_sol.cct_violations}→{new_csp.cct_violations}"
+            seen_tail_signatures: set[Tuple[Tuple[int, ...], ...]] = set()
+            expanded_limit = max(64, tail_candidate_limit * len(tail_seed_vsps) * 2)
+            for seed_index, seed_vsp in enumerate(tail_seed_vsps):
+                seed_candidates, seed_stats = _generate_tail_relocation_candidates(
+                    seed_vsp,
+                    vsp_params,
+                    limit=expanded_limit,
+                    max_tail_trips=max_tail_trips,
                 )
-                return new_csp, final_vsp
-            else:
-                logger.info(
-                    f"[POST-OPT] Rejeitado (pioria): Veículos {len(final_vsp.blocks)}, "
-                    f"Crew {new_csp.num_crew}, Violações {new_csp.cct_violations}"
+                tail_stats["considered"] = int(tail_stats.get("considered", 0)) + int(seed_stats.get("considered", 0))
+                tail_stats["generated"] = int(tail_stats.get("generated", 0)) + int(seed_stats.get("generated", 0))
+                tail_reasons = tail_stats.setdefault("reasons", {})
+                for reason, count in (seed_stats.get("reasons") or {}).items():
+                    tail_reasons[reason] = int(tail_reasons.get(reason, 0)) + int(count)
+
+                for candidate in seed_candidates:
+                    signature = _vsp_signature(candidate["vsp"])
+                    if signature in seen_tail_signatures:
+                        continue
+                    seen_tail_signatures.add(signature)
+                    candidate_details = dict(candidate.get("details") or {})
+                    candidate_details["source_seed"] = "original_vsp" if seed_index == 0 else "joint_swap_seed"
+                    tail_candidates.append(
+                        {
+                            **candidate,
+                            "details": candidate_details,
+                        }
+                    )
+
+            tail_candidates.sort(
+                key=lambda item: (
+                    int(item["details"].get("gap", 0)),
+                    -int(item["details"].get("tail_size", 0)),
+                    int(item["details"].get("recipient_block_id", 0)),
+                    int(item["details"].get("donor_block_id", 0)),
                 )
-                return csp_sol, vsp_sol
+            )
+            tail_candidates = tail_candidates[:tail_candidate_limit]
+            candidate_vsps.extend(tail_candidates)
+
+        best_csp = csp_sol
+        best_vsp = vsp_sol
+        best_metrics = baseline_metrics
+        best_candidate: Optional[Dict[str, Any]] = None
+        evaluated_signatures = {_vsp_signature(vsp_sol)}
+
+        for candidate in candidate_vsps:
+            candidate_vsp = candidate["vsp"]
+            signature = _vsp_signature(candidate_vsp)
+            if signature in evaluated_signatures:
+                continue
+            evaluated_signatures.add(signature)
+
+            csp_candidate = GreedyCSP(vsp_params=vsp_params, **solver_kwargs).solve(candidate_vsp.blocks, trips)
+            candidate_metrics = _build_post_opt_metrics(csp_candidate, candidate_vsp, min_work)
+            if _is_better_post_opt_candidate(best_metrics, candidate_metrics):
+                best_csp = csp_candidate
+                best_vsp = candidate_vsp
+                best_metrics = candidate_metrics
+                best_candidate = {
+                    "phase": candidate["phase"],
+                    "details": dict(candidate.get("details") or {}),
+                    "metrics": candidate_metrics,
+                }
+
+        if best_candidate is not None:
+            post_opt_meta = {
+                "baseline": baseline_metrics,
+                "selected_phase": best_candidate["phase"],
+                "selected_candidate": best_candidate["details"],
+                "selected_metrics": best_candidate["metrics"],
+                "joint_swap": {
+                    "merged_blocks": original_vehicles - len(merged_vsp.blocks),
+                    "swaps": total_swaps,
+                },
+                "tail_relocation": {
+                    "enabled": fragmentation_enabled,
+                    "candidate_limit": tail_candidate_limit,
+                    "max_tail_trips": max_tail_trips,
+                    "considered": int(tail_stats.get("considered", 0)),
+                    "generated": int(tail_stats.get("generated", 0)),
+                    "reasons": dict(tail_stats.get("reasons", {})),
+                },
+                "candidates_evaluated": len(evaluated_signatures) - 1,
+            }
+            best_csp.meta = {**(best_csp.meta or {}), "post_optimization": post_opt_meta}
+            best_vsp.meta = {**(best_vsp.meta or {}), "post_optimization": post_opt_meta}
+            logger.info(
+                "[POST-OPT] Aceito via %s: Veículos %d→%d, Crew %d→%d, Duties %d→%d, Frag %d→%d",
+                best_candidate["phase"],
+                baseline_metrics["vehicles"],
+                best_metrics["vehicles"],
+                original_crew,
+                best_metrics["crew"],
+                baseline_metrics["duties"],
+                best_metrics["duties"],
+                baseline_metrics["fragmentation_score"],
+                best_metrics["fragmentation_score"],
+            )
+            return best_csp, best_vsp
+
+        if candidate_vsps:
+            logger.info(
+                "[POST-OPT] Nenhuma melhoria aceita: Vehicles=%d Crew=%d Duties=%d Frag=%d",
+                baseline_metrics["vehicles"],
+                baseline_metrics["crew"],
+                baseline_metrics["duties"],
+                baseline_metrics["fragmentation_score"],
+            )
 
         return csp_sol, vsp_sol
 

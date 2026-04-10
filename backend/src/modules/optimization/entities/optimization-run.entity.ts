@@ -1,4 +1,4 @@
-import { Entity, Column } from 'typeorm';
+import { Entity, Column, Index } from 'typeorm';
 import { BaseCompanyEntity } from '../../../common/entities/base.entity';
 
 export enum OptimizationStatus {
@@ -28,6 +28,7 @@ export enum OptimizationAlgorithm {
 
 @Entity('optimization_runs')
 export class OptimizationRunEntity extends BaseCompanyEntity {
+  @Index()
   @Column({ name: 'line_id', nullable: true })
   lineId: number;
 

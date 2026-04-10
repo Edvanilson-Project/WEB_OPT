@@ -38,26 +38,46 @@ class JointSolver(BaseAlgorithm, IIntegratedSolver):
 
     def __init__(
         self,
+        time_budget_s: Optional[float] = None,
         vsp_algorithm: str = "tabu",
         csp_algorithm: str = "set_partitioning",
         max_rounds: int = 3,
         cct_params: Optional[Dict[str, Any]] = None,
         vsp_params: Optional[Dict[str, Any]] = None,
     ):
-        super().__init__(name="joint_solver", time_budget_s=settings.hybrid_time_budget_seconds)
+        merged_vsp_params = dict(vsp_params or {})
+        requested_budget = time_budget_s
+        if requested_budget is None:
+            raw_budget = merged_vsp_params.get("time_budget_s", settings.hybrid_time_budget_seconds)
+            try:
+                requested_budget = float(raw_budget)
+            except (TypeError, ValueError):
+                requested_budget = float(settings.hybrid_time_budget_seconds)
+        super().__init__(name="joint_solver", time_budget_s=requested_budget)
         self.vsp_algorithm = vsp_algorithm
         self.csp_algorithm = csp_algorithm
         self.max_rounds = max_rounds
-        self.cct_params = cct_params or {}
-        self.vsp_params = vsp_params or {}
+        self.cct_params = dict(cct_params or {})
+        self.vsp_params = merged_vsp_params
+
+    def _remaining_budget_s(self) -> float:
+        return max(0.0, float(self.time_budget_s) - self._elapsed())
+
+    def _configure_solver_budget(self, solver: Any, budget_s: float) -> float:
+        applied_budget = max(1.0, min(float(budget_s), self._remaining_budget_s()))
+        solver.time_budget_s = applied_budget
+        greedy = getattr(solver, "greedy", None)
+        if greedy is not None:
+            greedy.time_budget_s = applied_budget
+        return applied_budget
 
     # ── Seleção de algoritmos por nome ────────────────────────────────────────
 
     def _vsp_solver(self):
         mapping = {
             "greedy": lambda: GreedyVSP(vsp_params=self.vsp_params),
-            "sa": SimulatedAnnealingVSP,
-            "tabu": TabuSearchVSP,
+            "sa": lambda: SimulatedAnnealingVSP(vsp_params=self.vsp_params),
+            "tabu": lambda: TabuSearchVSP(vsp_params=self.vsp_params),
         }
         factory = mapping.get(self.vsp_algorithm, TabuSearchVSP)
         return factory() if callable(factory) else factory()
@@ -85,16 +105,25 @@ class JointSolver(BaseAlgorithm, IIntegratedSolver):
             if self._check_timeout():
                 break
 
+            rounds_left = max(1, self.max_rounds - round_n)
+            round_budget = max(1.0, self._remaining_budget_s() / rounds_left)
+            vsp_budget = max(1.0, round_budget * 0.45)
+            csp_budget = max(1.0, round_budget * 0.45)
+
             logger.info("joint_solver round=%d/%d", round_n + 1, self.max_rounds)
 
             # 1) VSP
-            vsp_sol = self._vsp_solver().solve(trips, vehicle_types, depot_id)
+            vsp_solver = self._vsp_solver()
+            self._configure_solver_budget(vsp_solver, vsp_budget)
+            vsp_sol = vsp_solver.solve(trips, vehicle_types, depot_id)
 
             if not vsp_sol.blocks:
                 continue
 
             # 2) CSP
-            csp_sol = self._csp_solver().solve(vsp_sol.blocks, trips)
+            csp_solver = self._csp_solver()
+            self._configure_solver_budget(csp_solver, csp_budget)
+            csp_sol = csp_solver.solve(vsp_sol.blocks, trips)
 
             # 3) Custo total
             result = OptimizationResult(

@@ -2,7 +2,8 @@
 import Box from "@mui/material/Box";
 import Container from "@mui/material/Container";
 import { styled, useTheme } from "@mui/material/styles";
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import Header from "./layout/vertical/header/Header";
 import Sidebar from "./layout/vertical/sidebar/Sidebar";
 import { useSelector } from "@/store/hooks";
@@ -31,6 +32,19 @@ export default function RootLayout({
 }) {
   const customizer = useSelector((state: AppState) => state.customizer);
   const theme = useTheme();
+  const router = useRouter();
+  const [authorized, setAuthorized] = useState(false);
+
+  useEffect(() => {
+    const token = typeof window !== 'undefined' ? localStorage.getItem('otimiz_token') : null;
+    if (!token) {
+      router.replace('/auth/auth1/login');
+    } else {
+      setAuthorized(true);
+    }
+  }, [router]);
+
+  if (!authorized) return null;
 
   return (
     <MainWrapper>

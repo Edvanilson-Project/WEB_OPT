@@ -47,9 +47,17 @@ export interface Line {
   originTerminal?: Terminal;
   destinationTerminal?: Terminal;
   distanceKm?: number;
+  returnDistanceKm?: number;
   avgTripDurationMinutes?: number;
   status: 'active' | 'inactive';
   colorHex?: string;
+  idleTerminalId?: number;
+  idleDistanceKm?: number;
+  idleReturnDistanceKm?: number;
+  garageTerminalId?: number;
+  garageDistanceKm?: number;
+  vehicleTypeId?: number;
+  operationMode?: 'roundtrip' | 'outbound_only' | 'return_only' | 'flexible';
   createdAt: string;
   updatedAt: string;
 }
@@ -130,6 +138,191 @@ export interface OptimizationRun {
   updatedAt: string;
 }
 
+export interface OptimizationComparisonMetric {
+  base: number;
+  other: number;
+  delta: number;
+  pctDelta: number;
+}
+
+export interface OptimizationCostBreakdownBucket {
+  total?: number;
+  activation?: number;
+  connection?: number;
+  distance?: number;
+  time?: number;
+  idle_cost?: number;
+  work_cost?: number;
+  guaranteed_cost?: number;
+  waiting_cost?: number;
+  overtime_cost?: number;
+  long_unpaid_break_penalty?: number;
+  nocturnal_extra?: number;
+  holiday_extra?: number;
+  cct_penalties?: number;
+  [key: string]: number | undefined;
+}
+
+export interface OptimizationCostBreakdown {
+  total?: number;
+  vsp?: OptimizationCostBreakdownBucket;
+  csp?: OptimizationCostBreakdownBucket;
+  [key: string]: unknown;
+}
+
+export interface OptimizationStructuredIssue {
+  raw?: string;
+  code?: string;
+  severity?: string;
+  phase?: string;
+  refs?: string[];
+  message?: string;
+}
+
+export interface OptimizationPhaseDominantComponent {
+  component?: string;
+  value?: number;
+  share?: number;
+}
+
+export interface OptimizationPhaseSummaryBucket {
+  vehicles?: number;
+  assigned_trips?: number;
+  unassigned_trips?: number;
+  warnings_count?: number;
+  cost?: number;
+  duties?: number;
+  crew?: number;
+  rosters?: number;
+  uncovered_blocks?: number;
+  cct_violations?: number;
+  dominant_cost_component?: OptimizationPhaseDominantComponent;
+  [key: string]: unknown;
+}
+
+export interface OptimizationPhaseSummary {
+  vsp?: OptimizationPhaseSummaryBucket;
+  csp?: OptimizationPhaseSummaryBucket;
+}
+
+export interface OptimizationTripGroupSplitSample {
+  trip_group_id?: number;
+  trip_ids?: number[];
+  block_ids?: number[];
+  duty_ids?: number[];
+  roster_ids?: number[];
+}
+
+export interface OptimizationTripGroupAudit {
+  groups_total?: number;
+  groups_fully_assigned?: number;
+  same_block_groups?: number;
+  same_duty_groups?: number;
+  same_roster_groups?: number;
+  split_groups?: number;
+  missing_groups?: number;
+  same_roster_ratio?: number;
+  sample_splits?: OptimizationTripGroupSplitSample[];
+}
+
+export interface OptimizationReproducibility {
+  algorithm?: string;
+  random_seed?: number | null;
+  stochastic_algorithm?: boolean;
+  deterministic_replay_possible?: boolean;
+  note?: string;
+}
+
+export interface OptimizationFailureDiagnostics {
+  code?: string;
+  userMessage?: string;
+  summary?: string;
+  hints?: string[];
+  currentSettings?: Record<string, unknown>;
+  optimizerDiagnostics?: Record<string, unknown> | null;
+}
+
+export interface OptimizationSolverExplanation {
+  status?: string;
+  headline?: string;
+  summary?: string[];
+  issues?: {
+    hard?: OptimizationStructuredIssue[];
+    soft?: OptimizationStructuredIssue[];
+  };
+  recommendations?: string[];
+  phase_summary?: OptimizationPhaseSummary;
+  trip_group_audit?: OptimizationTripGroupAudit;
+}
+
+export interface OptimizationRunAuditResult {
+  vehicles?: number;
+  crew?: number;
+  totalTrips?: number;
+  totalCost?: number;
+  cctViolations?: number;
+  warningsCount?: number;
+  tripDetailsCount?: number;
+  costBreakdown?: OptimizationCostBreakdown | null;
+  solverExplanation?: OptimizationSolverExplanation | null;
+  solverVersion?: string | null;
+  failureDiagnostics?: OptimizationFailureDiagnostics | null;
+  optimizerDiagnostics?: Record<string, unknown> | null;
+  performance?: Record<string, unknown> | null;
+  phaseSummary?: OptimizationPhaseSummary | null;
+  tripGroupAudit?: OptimizationTripGroupAudit | null;
+  hardConstraintReport?: Record<string, unknown> | null;
+}
+
+export interface OptimizationRunAudit {
+  runId: number;
+  companyId: number;
+  status: OptimizationStatus;
+  algorithm: OptimizationAlgorithm;
+  lineId?: number | null;
+  lineIds?: number[] | null;
+  createdAt?: string;
+  startedAt?: string;
+  finishedAt?: string;
+  durationMs?: number;
+  requestedParams?: Record<string, unknown> | null;
+  resolvedParams?: Record<string, unknown> | null;
+  settingsSnapshot?: Record<string, unknown> | null;
+  versioning?: Record<string, unknown> | null;
+  result: OptimizationRunAuditResult;
+}
+
+export interface OptimizationObjectDiff {
+  path: string;
+  base: string;
+  other: string;
+}
+
+export interface OptimizationRunComparison {
+  baseRunId: number;
+  otherRunId: number;
+  summary?: {
+    betterRunId?: number | null;
+    headline?: string;
+  };
+  algorithms?: {
+    base?: string;
+    other?: string;
+  };
+  metrics?: Record<string, OptimizationComparisonMetric>;
+  costBreakdown?: Record<string, OptimizationComparisonMetric>;
+  paramsDiff?: OptimizationObjectDiff[];
+  settingsDiff?: OptimizationObjectDiff[];
+  versioning?: {
+    base?: Record<string, unknown> | null;
+    other?: Record<string, unknown> | null;
+  };
+  constraints?: {
+    base?: Record<string, number>;
+    other?: Record<string, number>;
+  };
+}
+
 export interface DashboardStats {
   totalLines: number;
   totalTerminals: number;
@@ -182,6 +375,155 @@ export interface Trip {
   tripCode?: string;
   passengerCount?: number;
   vehicleTypeId?: number;
+  idleBeforeMinutes?: number;
+  idleAfterMinutes?: number;
+  isPullOut?: boolean;
+  isPullBack?: boolean;
+  timetableRuleId?: number;
+  scheduleGroupId?: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// ─── Time Band (Faixa Horária) ───────────────────────────────────────────────
+export interface TimeBand {
+  id: number;
+  companyId: number;
+  name: string;
+  startMinutes: number;
+  endMinutes: number;
+  isPeak: boolean;
+  displayOrder: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// ─── Line Trip Profile ───────────────────────────────────────────────────────
+export interface LineTripProfile {
+  id: number;
+  lineId: number;
+  line?: Line;
+  direction: TripDirection;
+  timeBandId: number;
+  timeBand?: TimeBand;
+  tripDurationMinutes: number;
+  distanceKm?: number;
+  passengerDemand?: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// ─── Schedule (Quadro Horário) ───────────────────────────────────────────────
+export type ScheduleType = 'weekday' | 'saturday' | 'sunday' | 'holiday';
+
+export interface Schedule {
+  id: number;
+  companyId: number;
+  lineId: number;
+  line?: Line;
+  name: string;
+  type: ScheduleType;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// ─── Timetable Rule ─────────────────────────────────────────────────────────
+export interface TimetableRule {
+  id: number;
+  scheduleId: number;
+  schedule?: Schedule;
+  timeBandId: number;
+  timeBand?: TimeBand;
+  headwayMinutes: number;
+  vehicleCount?: number;
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// ─── Schedule Group ──────────────────────────────────────────────────────────
+export type ScheduleGroupStatus = 'draft' | 'ready' | 'optimized';
+
+export interface ScheduleGroupItem {
+  id: number;
+  scheduleGroupId: number;
+  scheduleId: number;
+  schedule?: Schedule;
+}
+
+export interface ScheduleGroup {
+  id: number;
+  companyId: number;
+  name: string;
+  description?: string;
+  status: ScheduleGroupStatus;
+  items?: ScheduleGroupItem[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+// ─── Trip Time Config (Tempo de Viagem) ──────────────────────────────────────
+export interface TripTimeBand {
+  id: number;
+  configId: number;
+  startMinutes: number;
+  endMinutes: number;
+  tripDurationOutbound?: number;
+  tripDurationReturn?: number;
+  idleMinutesOutbound: number;
+  idleMinutesReturn: number;
+}
+
+export interface TripTimeConfig {
+  id: number;
+  companyId: number;
+  lineId: number;
+  description: string;
+  bandIntervalMinutes: number;
+  startHourMinutes?: number;
+  endHourMinutes?: number;
+  bands?: TripTimeBand[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+// ─── Passenger Config (Passageiros por Faixa) ───────────────────────────────
+export interface PassengerBand {
+  id: number;
+  configId: number;
+  startMinutes: number;
+  endMinutes: number;
+  passengersOutbound: number;
+  passengersReturn: number;
+}
+
+export interface PassengerConfig {
+  id: number;
+  companyId: number;
+  lineId: number;
+  description: string;
+  bandIntervalMinutes: number;
+  startHourMinutes?: number;
+  endHourMinutes?: number;
+  bands?: PassengerBand[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+// ─── Timetable (Carta Horária) ──────────────────────────────────────────────
+export interface Timetable {
+  id: number;
+  companyId: number;
+  lineId: number;
+  name: string;
+  description?: string;
+  tripTimeConfigId: number;
+  passengerConfigId: number;
+  vehicleTypeId?: number;
+  validityStart?: string;
+  validityEnd?: string;
+  status: 'draft' | 'active' | 'archived';
   createdAt: string;
   updatedAt: string;
 }
@@ -193,6 +535,7 @@ export interface OptimizationSettings {
   name?: string;
   description?: string;
   algorithmType: string;
+  // Meta-heurísticas (armazenados no perfil, lidos da config Python)
   gaPopulationSize: number;
   gaGenerations: number;
   gaMutationRate: number;
@@ -203,41 +546,66 @@ export interface OptimizationSettings {
   tsTabuSize: number;
   tsMaxIterations: number;
   ilpTimeoutSeconds: number;
+  // Tempo e budget
   timeBudgetSeconds: number;
+  // CCT/CLT — jornada base
   cctMaxShiftMinutes: number;
   cctMaxDrivingMinutes: number;
   cctMinBreakMinutes: number;
   cctMaxDutiesPerDay: number;
   allowReliefPoints: boolean;
-  // CCT estendido
   cctMaxWorkMinutes: number;
+  cctMinWorkMinutes?: number;
+  cctMinShiftMinutes?: number;
+  cctOvertimeLimitMinutes?: number;
   cctMinLayoverMinutes: number;
   applyCct: boolean;
   pulloutMinutes: number;
   pullbackMinutes: number;
   maxVehicleShiftMinutes: number;
+  fixedVehicleActivationCost?: number;
+  deadheadCostPerMinute?: number;
+  idleCostPerMinute?: number;
+  randomSeed?: number;
+  allowVehicleSplitShifts?: boolean;
+  // CCT/CLT — breaks e refeição
   cctMandatoryBreakAfterMinutes?: number;
   cctSplitBreakFirstMinutes?: number;
   cctSplitBreakSecondMinutes?: number;
   cctMealBreakMinutes?: number;
+  // CCT/CLT — descansos
+  cctInterShiftRestMinutes?: number;
+  cctWeeklyRestMinutes?: number;
   cctReducedWeeklyRestMinutes?: number;
   cctAllowReducedWeeklyRest?: boolean;
+  // CCT/CLT — limites de direção
   cctDailyDrivingLimitMinutes?: number;
   cctExtendedDailyDrivingLimitMinutes?: number;
   cctMaxExtendedDrivingDaysPerWeek?: number;
   cctWeeklyDrivingLimitMinutes?: number;
   cctFortnightDrivingLimitMinutes?: number;
+  // CCT/CLT — remuneração
   cctWaitingTimePayPct?: number;
   cctMinGuaranteedWorkMinutes?: number;
+  cctIdleTimeIsPaid?: boolean;
+  // CCT/CLT — noturno
+  cctNocturnalStartHour?: number;
+  cctNocturnalEndHour?: number;
+  cctNocturnalFactor?: number;
+  cctNocturnalExtraPct?: number;
+  // Constraints operacionais
   enforceSameDepotStartEnd?: boolean;
   enforceSingleLineDuty?: boolean;
+  // Objetivos
   fairnessWeight?: number;
   sundayOffWeight?: number;
   holidayExtraPct?: number;
   sameDepotRequired?: boolean;
+  // EV / elétricos
   maxSimultaneousChargers?: number;
   peakEnergyCostPerKwh?: number;
   offpeakEnergyCostPerKwh?: number;
+  // Column generation
   minWorkpieceMinutes?: number;
   maxWorkpieceMinutes?: number;
   minTripsPerPiece?: number;
@@ -245,6 +613,9 @@ export interface OptimizationSettings {
   pricingEnabled?: boolean;
   useSetCovering?: boolean;
   preservePreferredPairs?: boolean;
+  enforceTripGroupsHard?: boolean;
+  operatorChangeTerminalsOnly?: boolean;
+  operatorSingleVehicleOnly?: boolean;
   maxCandidateSuccessorsPerTask?: number;
   maxGeneratedColumns?: number;
   maxPricingIterations?: number;
@@ -266,4 +637,18 @@ export interface PaginatedResponse<T> {
 export function extractArray<T>(res: T[] | PaginatedResponse<T>): T[] {
   if (Array.isArray(res)) return res;
   return res.data ?? [];
+}
+
+/**
+ * Remove zeros à esquerda em campos numéricos.
+ * Uso: value={numVal(field)} em vez de value={field}
+ * Retorna string para TextField value.
+ */
+export function numVal(v: string | number | null | undefined): string {
+  if (v == null || v === '') return '';
+  const s = String(v);
+  // Se for só zeros, retorna '0'
+  if (/^0+$/.test(s)) return '0';
+  // Remove zeros à esquerda mantendo decimais (ex: "007" → "7", "0.5" → "0.5")
+  return s.replace(/^0+(?=\d)/, '');
 }

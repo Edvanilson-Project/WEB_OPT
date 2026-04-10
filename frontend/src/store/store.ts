@@ -1,9 +1,26 @@
 import { configureStore } from "@reduxjs/toolkit";
 import { persistReducer, persistStore } from "redux-persist";
-import storage from "redux-persist/lib/storage";
+import createWebStorage from "redux-persist/lib/storage/createWebStorage";
 import CustomizerReducer from "./customizer/CustomizerSlice";
 
-const persistConfig = { key: "root", storage };
+const createNoopStorage = () => ({
+  getItem() {
+    return Promise.resolve(null);
+  },
+  setItem(_key: string, value: string) {
+    return Promise.resolve(value);
+  },
+  removeItem() {
+    return Promise.resolve();
+  },
+});
+
+const storage =
+  typeof window !== "undefined"
+    ? createWebStorage("local")
+    : createNoopStorage();
+
+const persistConfig = { key: "customizer-v2", storage };
 
 export const store = configureStore({
   reducer: {
@@ -14,7 +31,8 @@ export const store = configureStore({
     getDefaultMiddleware({ serializableCheck: false, immutableCheck: false }),
 });
 
-export const persistor = persistStore(store);
+export const persistor =
+  typeof window !== "undefined" ? persistStore(store) : null;
 export type RootState = ReturnType<typeof store.getState>;
 export type AppDispatch = typeof store.dispatch;
 export type AppState = RootState;

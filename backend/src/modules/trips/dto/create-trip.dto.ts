@@ -3,7 +3,9 @@ import {
   IsEnum,
   IsOptional,
   IsString,
+  IsBoolean,
   Min,
+  Max,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { TripDirection } from '../entities/trip.entity';
@@ -32,11 +34,13 @@ export class CreateTripDto {
   })
   @IsInt()
   @Min(0)
+  @Max(2880)
   startTimeMinutes: number;
 
   @ApiProperty({ description: 'Duração em minutos' })
   @IsInt()
   @Min(1)
+  @Max(1440)
   durationMinutes: number;
 
   @ApiPropertyOptional()
@@ -52,6 +56,8 @@ export class CreateTripDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsInt()
+  @Min(0)
+  @Max(50000)
   passengerCount?: number;
 
   @ApiPropertyOptional()
@@ -68,4 +74,18 @@ export class CreateTripDto {
   @IsOptional()
   @IsString()
   tripCode?: string;
+
+  @ApiPropertyOptional({
+    description: 'Horário de término em minutos (recalculado pelo service)',
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(2880)
+  endTimeMinutes?: number;
+
+  @ApiPropertyOptional({ default: true })
+  @IsOptional()
+  @IsBoolean()
+  isActive?: boolean;
 }

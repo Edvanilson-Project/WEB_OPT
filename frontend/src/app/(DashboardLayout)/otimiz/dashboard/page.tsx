@@ -40,7 +40,7 @@ import DashboardCard from '@/app/components/shared/DashboardCard';
 import KpiCard from '../_components/KpiCard';
 import StatusChip from '../_components/StatusChip';
 import { NotifyProvider, useNotify } from '../_components/Notify';
-import { optimizationApi, reportsApi } from '@/lib/api';
+import { optimizationApi, reportsApi, getSessionUser } from '@/lib/api';
 import type { OptimizationRun, DashboardStats, KpiData } from '../_types';
 
 const Chart = dynamic(() => import('react-apexcharts'), { ssr: false });
@@ -198,7 +198,7 @@ function DashboardInner() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [firing, setFiring] = useState(false);
-  const companyId = 1;
+  const companyId = getSessionUser()?.companyId ?? 1;
 
   const load = useCallback(async () => {
     setLoading(true);

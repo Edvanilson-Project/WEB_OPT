@@ -1,0 +1,26 @@
+# Root workspace local artifacts
+/.venv/
+/node_modules/
+/.pytest_cache/
+/.mypy_cache/
+/.ruff_cache/
+/.coverage
+/.coverage.*
+/htmlcov/
+/.python-version
+
+# Shared runtime data
+/data/strategy/archive/
+/data/strategy/inbox/
+/data/strategy/*.tmp
+
+# Root temp and logs
+/*.log
+/*.tmp
+/*.pid
+
+# OS/editor noise
+/.DS_Store
+/Thumbs.db
+*.swp
+*.swo

@@ -1,3 +1,0 @@
-sed -i 's/max_spread_minutes: payload.cspParams.maxSpreadMinutes || 840/max_spread_minutes: payload.cspParams.maxSpreadMinutes || 960/' backend/src/modules/optimization/optimization.service.ts
-sed -i 's/max_unpaid_break_minutes: payload.cspParams.maxUnpaidBreakMinutes || 120/max_unpaid_break_minutes: payload.cspParams.maxUnpaidBreakMinutes || 360/' backend/src/modules/optimization/optimization.service.ts
-sed -i 's/max_total_unpaid_break_minutes: payload.cspParams.maxTotalUnpaidBreakMinutes || 180/max_total_unpaid_break_minutes: payload.cspParams.maxTotalUnpaidBreakMinutes || 480/' backend/src/modules/optimization/optimization.service.ts

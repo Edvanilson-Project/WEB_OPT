@@ -26,6 +26,8 @@ import {
   IconUsers,
   IconClock,
   IconSettings,
+  IconCalendarEvent,
+  IconLayoutGrid,
 } from "@tabler/icons-react";
 
 const Menuitems: MenuitemsType[] = [
@@ -68,6 +70,24 @@ const Menuitems: MenuitemsType[] = [
     title: "Viagens",
     icon: IconClock,
     href: "/otimiz/trips",
+  },
+  {
+    id: uniqueId(),
+    title: "Tempo de Viagem",
+    icon: IconClock,
+    href: "/otimiz/trip-times",
+  },
+  {
+    id: uniqueId(),
+    title: "Passageiros",
+    icon: IconUsers,
+    href: "/otimiz/passengers",
+  },
+  {
+    id: uniqueId(),
+    title: "Carta Horária",
+    icon: IconCalendarEvent,
+    href: "/otimiz/timetables",
   },
   {
     id: uniqueId(),

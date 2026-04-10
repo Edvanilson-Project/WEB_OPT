@@ -14,16 +14,16 @@ export class TerminalEntity extends BaseCompanyEntity {
 
   @Column({
     type: 'decimal',
-    precision: 10,
-    scale: 7,
+    precision: 12,
+    scale: 8,
     nullable: true,
   })
   latitude: number;
 
   @Column({
     type: 'decimal',
-    precision: 10,
-    scale: 7,
+    precision: 12,
+    scale: 8,
     nullable: true,
   })
   longitude: number;

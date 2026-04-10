@@ -1,3 +1,0 @@
-sed -i 's/max_work_minutes:     activeSettings?.cctMaxWorkMinutes     ?? 600/max_work_minutes:     activeSettings?.cctMaxWorkMinutes     ?? 560/g' backend/src/modules/optimization/optimization.service.ts
-sed -i 's/max_shift_minutes:    activeSettings?.cctMaxShiftMinutes    ?? 960/max_shift_minutes:    activeSettings?.cctMaxShiftMinutes    ?? 840/g' backend/src/modules/optimization/optimization.service.ts
-sed -i 's/max_unpaid_break_minutes: payload.cspParams.maxUnpaidBreakMinutes || 360/max_unpaid_break_minutes: payload.cspParams.maxUnpaidBreakMinutes || 240/g' backend/src/modules/optimization/optimization.service.ts

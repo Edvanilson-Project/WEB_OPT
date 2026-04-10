@@ -3,6 +3,7 @@ Classe base para todos os algoritmos com utilidades comuns.
 """
 from __future__ import annotations
 
+import itertools
 import logging
 import time
 from typing import List, Optional
@@ -13,6 +14,10 @@ from ..domain.models import Trip
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
+
+# Contadores globais thread-safe para evitar colisão de IDs entre algoritmos
+_global_block_counter = itertools.count(1)
+_global_duty_counter = itertools.count(1)
 
 
 class BaseAlgorithm:
@@ -28,8 +33,6 @@ class BaseAlgorithm:
         self.name = name
         self.time_budget_s = time_budget_s or settings.hybrid_time_budget_seconds
         self._start_time: float = 0.0
-        self._block_counter: int = 0
-        self._duty_counter: int = 0
 
     # ── Controle de tempo ─────────────────────────────────────────────────────
 
@@ -60,33 +63,7 @@ class BaseAlgorithm:
     # ── IDs ───────────────────────────────────────────────────────────────────
 
     def _next_block_id(self) -> int:
-        self._block_counter += 1
-        return self._block_counter
+        return next(_global_block_counter)
 
     def _next_duty_id(self) -> int:
-        self._duty_counter += 1
-        return self._duty_counter
-
-    # ── Compatibilidade de viagens ────────────────────────────────────────────
-
-    @staticmethod
-    def _compatible(a: Trip, b: Trip, buffer: int = 0) -> bool:
-        """
-        Verifica se a viagem `b` pode ser realizada logo após `a`
-        pelo mesmo veículo, considerando o tempo morto já embutido
-        em `a.deadhead_times` ou um buffer fixo.
-        """
-        gap = b.start_time - a.end_time
-        needed = a.deadhead_times.get(b.origin_id, buffer)
-        return gap >= needed
-
-    @staticmethod
-    def _build_compatibility_matrix(trips: List[Trip], buffer: int = 0) -> List[List[bool]]:
-        """Retorna matriz booleana n×n de compatibilidade entre viagens."""
-        n = len(trips)
-        matrix = [[False] * n for _ in range(n)]
-        for i in range(n):
-            for j in range(n):
-                if i != j:
-                    matrix[i][j] = BaseAlgorithm._compatible(trips[i], trips[j], buffer)
-        return matrix
+        return next(_global_duty_counter)

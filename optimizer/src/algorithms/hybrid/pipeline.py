@@ -13,9 +13,10 @@ from ..base import BaseAlgorithm
 from ..csp.greedy import GreedyCSP
 from ..csp.set_partitioning import SetPartitioningCSP
 from ..evaluator import CostEvaluator
-from ..utils import quick_cost_sorted
+from ..utils import preferred_pair_penalty, quick_cost_sorted
 from ..vsp.genetic import GeneticVSP
 from ..vsp.greedy import GreedyVSP, build_preferred_pairs
+from ..vsp.mcnf import MCNFVSP
 from ..vsp.simulated_annealing import SimulatedAnnealingVSP
 from ..vsp.tabu_search import TabuSearchVSP
 
@@ -43,8 +44,10 @@ class HybridPipeline(BaseAlgorithm):
     ) -> OptimizationResult:
         import random
         import time
-        # Injeta estocasticidade para explorar novos caminhos a cada run
-        random.seed(int(time.time() * 1000))
+        # Se houver seed explícita, prioriza replay reprodutível; caso contrário mantém exploração estocástica.
+        random_seed = self.vsp_params.get("random_seed")
+        random.seed(int(random_seed) if random_seed is not None else int(time.time() * 1000))
+        phase_timings_ms: dict[str, float] = {}
         
         # Removido: trips.sort(...) para não quebrar a vizinhança inicial do GreedyVSP.
 
@@ -54,7 +57,10 @@ class HybridPipeline(BaseAlgorithm):
 
         budget = self.time_budget_s
         n = len(trips)
-        best_vsp = GreedyVSP(vsp_params=self.vsp_params).solve(trips, vehicle_types, depot_id)
+        t_phase = time.perf_counter()
+        # MCNF gera a baseline matemática perfeita (Bipartite Matching)
+        best_vsp = MCNFVSP(vsp_params=self.vsp_params).solve(trips, vehicle_types, depot_id)
+        phase_timings_ms["vsp_mcnf_ms"] = round((time.perf_counter() - t_phase) * 1000, 2)
         best_cost = _vsp_cost(best_vsp, self.vsp_params)
         best_issues = _vsp_hard_issue_count(best_vsp, self.vsp_params)
         best_vehicles = len(best_vsp.blocks)
@@ -79,7 +85,9 @@ class HybridPipeline(BaseAlgorithm):
         sa = SimulatedAnnealingVSP(vsp_params=self.vsp_params)
         sa_budget = budget * 0.35
         sa.time_budget_s = sa_budget
+        t_phase = time.perf_counter()
         sa_sol = sa.solve(trips, vehicle_types, depot_id)
+        phase_timings_ms["vsp_sa_ms"] = round((time.perf_counter() - t_phase) * 1000, 2)
         sa_elapsed_s = (sa_sol.elapsed_ms or 0) / 1000.0
         sa_saved = max(0, sa_budget - sa_elapsed_s)
         sa_cost = _vsp_cost(sa_sol, self.vsp_params)
@@ -99,7 +107,9 @@ class HybridPipeline(BaseAlgorithm):
         ts = TabuSearchVSP(vsp_params=self.vsp_params)
         ts_budget = budget * 0.35 + sa_saved  # Realocar tempo não usado pelo SA
         ts.time_budget_s = ts_budget
+        t_phase = time.perf_counter()
         ts_sol = ts.solve(trips, vehicle_types, depot_id)
+        phase_timings_ms["vsp_tabu_ms"] = round((time.perf_counter() - t_phase) * 1000, 2)
         ts_elapsed_s = (ts_sol.elapsed_ms or 0) / 1000.0
         ts_saved = max(0, ts_budget - ts_elapsed_s)
         ts_cost = _vsp_cost(ts_sol, self.vsp_params)
@@ -118,7 +128,9 @@ class HybridPipeline(BaseAlgorithm):
         if n > 50:
             ga = GeneticVSP(vsp_params=self.vsp_params)
             ga.time_budget_s = budget * 0.20 + ts_saved  # Realocar tempo não usado pelo TS
+            t_phase = time.perf_counter()
             ga_sol = ga.solve(trips, vehicle_types, depot_id)
+            phase_timings_ms["vsp_genetic_ms"] = round((time.perf_counter() - t_phase) * 1000, 2)
             ga_cost = _vsp_cost(ga_sol, self.vsp_params)
             ga_issues = _vsp_hard_issue_count(ga_sol, self.vsp_params)
             logger.info(f"[PIPELINE] Genetic: {len(ga_sol.blocks)} veículos, cost={ga_cost:.0f}, issues={ga_issues}")
@@ -129,7 +141,7 @@ class HybridPipeline(BaseAlgorithm):
                 best_vehicles = len(ga_sol.blocks)
 
         logger.info(f"[PIPELINE] Selecionado: {best_vsp.algorithm} com {best_vehicles} veículos")
-        return self._finalize(best_vsp, trips, vehicle_types)
+        return self._finalize(best_vsp, trips, vehicle_types, phase_timings_ms)
 
     def _cct(self, key: str, default: int) -> int:
         return self.cct_params.get(key, default)
@@ -137,7 +149,9 @@ class HybridPipeline(BaseAlgorithm):
     def _solver_kwargs(self) -> dict:
         return {k: v for k, v in self.cct_params.items()}
 
-    def _finalize(self, vsp_sol, trips, vehicle_types) -> OptimizationResult:
+    def _finalize(self, vsp_sol, trips, vehicle_types, phase_timings_ms=None) -> OptimizationResult:
+        import time
+        phase_timings_ms = dict(phase_timings_ms or {})
         vsp_sol.meta.setdefault(
             "objective",
             {
@@ -160,23 +174,49 @@ class HybridPipeline(BaseAlgorithm):
                 total_elapsed_ms=self._elapsed_ms(),
             )
 
+        t_phase = time.perf_counter()
         csp_greedy = GreedyCSP(vsp_params=self.vsp_params, **kwargs).solve(vsp_sol.blocks, trips)
+        phase_timings_ms["csp_greedy_ms"] = round((time.perf_counter() - t_phase) * 1000, 2)
         # Dar mais budget ao ILP para gerar colunas melhores
         ilp_budget = max(60.0, self.time_budget_s * 0.25)
         if not self._check_timeout():
             ilp = SetPartitioningCSP(vsp_params=self.vsp_params, **kwargs)
             ilp.time_budget_s = ilp_budget
+            t_phase = time.perf_counter()
             csp_ilp = ilp.solve(vsp_sol.blocks, trips)
+            phase_timings_ms["csp_set_partitioning_ms"] = round((time.perf_counter() - t_phase) * 1000, 2)
             ilp_better = csp_ilp.cct_violations < csp_greedy.cct_violations
             ilp_tie_and_not_worse_crew = (
                 csp_ilp.cct_violations == csp_greedy.cct_violations
                 and csp_ilp.num_crew <= csp_greedy.num_crew
             )
-            csp_final = csp_ilp if csp_ilp.duties and (ilp_better or ilp_tie_and_not_worse_crew) else csp_greedy
+            # Also check short duty count: prefer solution with fewer shorts
+            min_work = int(kwargs.get("min_work_minutes", 0))
+            if min_work > 0 and csp_ilp.duties and (ilp_better or ilp_tie_and_not_worse_crew):
+                greedy_shorts = sum(1 for d in csp_greedy.duties if d.work_time < min_work)
+                ilp_shorts = sum(1 for d in csp_ilp.duties if d.work_time < min_work)
+                if ilp_shorts > greedy_shorts:
+                    logger.info(
+                        "[PIPELINE] ILP has more short duties (%d vs %d), keeping greedy",
+                        ilp_shorts, greedy_shorts,
+                    )
+                    csp_final = csp_greedy
+                else:
+                    csp_final = csp_ilp
+            else:
+                csp_final = csp_ilp if csp_ilp.duties and (ilp_better or ilp_tie_and_not_worse_crew) else csp_greedy
         else:
             csp_final = csp_greedy                
         from ..joint_opt import joint_duty_vehicle_swap
-        csp_final, vsp_sol = joint_duty_vehicle_swap(csp_final, vsp_sol, trips, self.cct_params, kwargs)
+        t_phase = time.perf_counter()
+        csp_final, vsp_sol = joint_duty_vehicle_swap(
+            csp_final,
+            vsp_sol,
+            trips,
+            self.cct_params,
+            {**kwargs, "vsp_params": self.vsp_params},
+        )
+        phase_timings_ms["joint_swap_ms"] = round((time.perf_counter() - t_phase) * 1000, 2)
         result = OptimizationResult(
             vsp=vsp_sol,
             csp=csp_final,
@@ -184,6 +224,15 @@ class HybridPipeline(BaseAlgorithm):
             total_elapsed_ms=self._elapsed_ms(),
         )
         result.total_cost = evaluator.total_cost(result, vehicle_types)
+        result.meta.setdefault("performance", {})
+        result.meta["performance"].update(
+            {
+                "phase_timings_ms": phase_timings_ms,
+                "input_trip_count": len(trips),
+                "selected_vsp_algorithm": getattr(vsp_sol, "algorithm", "greedy_vsp"),
+                "time_budget_s": self.time_budget_s,
+            }
+        )
         return result
         
 
@@ -206,10 +255,28 @@ def _vsp_cost(sol, vsp_params=None) -> float:
         preferred_pairs = build_preferred_pairs(all_trips, min_layover, int(vsp_params.get("preferred_pair_window_minutes", 120) or 120))
         pair_break_penalty = float(vsp_params.get("pair_break_penalty", 1000.0))
         paired_trip_bonus = float(vsp_params.get("paired_trip_bonus", 40.0))
+        hard_pairing_penalty = (
+            float(
+                vsp_params.get(
+                    "hard_pairing_penalty",
+                    max(pair_break_penalty * 10.0, float(vsp_params.get("fixed_vehicle_activation_cost", 800.0)) * 25.0),
+                )
+            )
+            if bool(vsp_params.get("hard_pairing_vehicle_level", False))
+            else 0.0
+        )
     else:
         preferred_pairs = {}
         pair_break_penalty = 0.0
         paired_trip_bonus = 0.0
+        hard_pairing_penalty = 0.0
+    pair_penalty = preferred_pair_penalty(
+        getattr(sol, "blocks", []),
+        preferred_pairs,
+        pair_break_penalty,
+        paired_trip_bonus,
+        hard_pairing_penalty,
+    )
     for block in getattr(sol, "blocks", []):
         trips = list(getattr(block, "trips", []))
         for index in range(len(trips) - 1):
@@ -222,11 +289,6 @@ def _vsp_cost(sol, vsp_params=None) -> float:
                 infeasible_penalty += 20000.0 + abs(gap) * 500.0
             elif gap < need:
                 infeasible_penalty += 15000.0 + (need - gap) * 400.0
-            expected_pair = preferred_pairs.get(current.id)
-            if expected_pair == nxt.id:
-                pair_penalty -= paired_trip_bonus
-            elif expected_pair is not None and expected_pair != nxt.id:
-                pair_penalty += pair_break_penalty
     return quick_cost_sorted(sol.blocks) + unassigned_penalty + long_block_penalty + infeasible_penalty + pair_penalty
 
 

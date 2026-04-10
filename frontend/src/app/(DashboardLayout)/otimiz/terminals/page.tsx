@@ -67,6 +67,10 @@ function TerminalsInner() {
 
   const handleSave = async () => {
     if (!form.name.trim()) { notify.warning('Nome é obrigatório.'); return; }
+    const lat = form.latitude ? parseFloat(form.latitude) : undefined;
+    const lng = form.longitude ? parseFloat(form.longitude) : undefined;
+    if (lat != null && (lat < -90 || lat > 90)) { notify.warning('Latitude deve estar entre -90 e 90.'); return; }
+    if (lng != null && (lng < -180 || lng > 180)) { notify.warning('Longitude deve estar entre -180 e 180.'); return; }
     setSaving(true);
     try {
       const user = getSessionUser();
@@ -75,8 +79,8 @@ function TerminalsInner() {
         name: form.name.trim(),
         shortName: form.shortName.trim().toUpperCase() || undefined,
         address: form.address.trim() || undefined,
-        latitude: form.latitude ? parseFloat(form.latitude) : undefined,
-        longitude: form.longitude ? parseFloat(form.longitude) : undefined,
+        latitude: lat,
+        longitude: lng,
         isGarage: form.isGarage, isActive: form.isActive,
       };
       if (editTarget) { await terminalsApi.update(editTarget.id, payload); notify.success('Terminal atualizado!'); }

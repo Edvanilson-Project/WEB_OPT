@@ -12,6 +12,7 @@ import {
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CompaniesService } from './companies.service';
 import { CreateCompanyDto } from './dto/create-company.dto';
+import { UpdateCompanyDto } from './dto/update-company.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 
 @ApiTags('companies')
@@ -41,10 +42,7 @@ export class CompaniesController {
 
   @Patch(':id')
   @ApiOperation({ summary: 'Atualizar empresa' })
-  update(
-    @Param('id', ParseIntPipe) id: number,
-    @Body() dto: CreateCompanyDto,
-  ) {
+  update(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateCompanyDto) {
     return this.companiesService.update(id, dto);
   }
 

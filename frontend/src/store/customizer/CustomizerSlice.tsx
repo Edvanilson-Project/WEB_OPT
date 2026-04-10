@@ -19,8 +19,8 @@ interface StateType {
 
 const initialState: StateType = {
   activeDir: 'ltr',
-  activeMode: 'light', // This can be light or dark
-  activeTheme: 'BLUE_THEME', // BLUE_THEME, GREEN_THEME, BLACK_THEME, PURPLE_THEME, ORANGE_THEME
+  activeMode: 'dark', // Forced Dark Mode Optibus Style
+  activeTheme: 'BLUE_THEME', // BLUE_THEME is the target for Indigo
   SidebarWidth: 270,
   MiniSidebarWidth: 87,
   TopbarHeight: 70,
@@ -31,7 +31,7 @@ const initialState: StateType = {
   isHorizontal: false,
   isLanguage: 'en',
   isCardShadow: true,
-  borderRadius: 7,
+  borderRadius: 14,
 };
 
 export const CustomizerSlice = createSlice({

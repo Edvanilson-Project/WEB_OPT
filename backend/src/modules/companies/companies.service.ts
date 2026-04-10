@@ -36,6 +36,11 @@ export class CompaniesService {
     dto: Partial<CreateCompanyDto>,
   ): Promise<CompanyEntity> {
     const company = await this.findOne(id);
+    if (dto.cnpj && dto.cnpj !== company.cnpj) {
+      const dup = await this.companyRepo.findOne({ where: { cnpj: dto.cnpj } });
+      if (dup && dup.id !== id)
+        throw new ConflictException(`CNPJ ${dto.cnpj} já cadastrado.`);
+    }
     Object.assign(company, dto);
     return this.companyRepo.save(company);
   }

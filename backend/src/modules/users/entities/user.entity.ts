@@ -1,4 +1,5 @@
 import { Entity, Column, Index } from 'typeorm';
+import { Exclude } from 'class-transformer';
 import { BaseEntity } from '../../../common/entities/base.entity';
 
 export enum UserRole {
@@ -22,6 +23,7 @@ export class UserEntity extends BaseEntity {
   @Column({ unique: true, length: 200 })
   email: string;
 
+  @Exclude()
   @Column({ name: 'password_hash', length: 255 })
   passwordHash: string;
 

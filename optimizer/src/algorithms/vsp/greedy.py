@@ -9,9 +9,12 @@ Cada bloco representa a ativação de um veículo, e cada conexão carrega custo
 """
 from __future__ import annotations
 
+import logging
 from typing import Any, Dict, List, Optional, Tuple
 
 from ...core.config import get_settings
+
+_log = logging.getLogger(__name__)
 from ...domain.interfaces import IVSPAlgorithm
 from ...domain.models import Block, Trip, VehicleType, VSPSolution
 from ..base import BaseAlgorithm
@@ -76,7 +79,8 @@ def build_preferred_pairs(trips: List[Trip], min_layover: int, max_pair_window: 
             continue
         if first.destination_id != second.origin_id or first.origin_id != second.destination_id:
             continue
-        min_pair_gap = min_layover
+        gap = second.start_time - first.end_time
+        min_pair_gap = 0 if gap == 0 and first.trip_group_id == second.trip_group_id else min_layover
         if second.start_time - first.end_time < min_pair_gap:
             continue
         pair_map[first.id] = second.id
@@ -194,9 +198,7 @@ class GreedyVSP(BaseAlgorithm, IVSPAlgorithm):
         vehicle_types: List[VehicleType],
         depot_id: Optional[int] = None,
     ) -> VSPSolution:
-        print("====== VSP PARAMS ======")
-        print(self.vsp_params)
-        print("========================")
+        _log.debug("VSP PARAMS: %s", self.vsp_params)
 
         self._start_timer()
         if not trips:
@@ -229,7 +231,7 @@ class GreedyVSP(BaseAlgorithm, IVSPAlgorithm):
         allow_multi_line_block = bool(self._p("allow_multi_line_block", True))
         allow_vehicle_split_shifts = bool(self._p("allow_vehicle_split_shifts", True))
         split_shift_min_gap = int(self._p("split_shift_min_gap_minutes", 120))
-        split_shift_max_gap = 540
+        split_shift_max_gap = int(self._p("split_shift_max_gap_minutes", 540))
         split_shift_min_gap = max(min_layover, split_shift_min_gap)
         split_shift_max_gap = max(split_shift_min_gap, split_shift_max_gap)
         max_chargers = int(self._p("max_simultaneous_chargers", 999999))
@@ -378,7 +380,7 @@ class GreedyVSP(BaseAlgorithm, IVSPAlgorithm):
             return (marginal_cost, target_blk, data)
 
         def _best_candidate(trip: Trip) -> Optional[Tuple[float, Block, Dict[str, Any]]]:
-            best: Optional[Tuple[float, Block, Dict[str, Any]]] = None
+            best: Optional[Tuple[float, Block, tuple]] = None
             for blk in active_blocks:
                 last = blk.trips[-1]
                 reserved_pair = preferred_pairs.get(last.id)
@@ -416,14 +418,11 @@ class GreedyVSP(BaseAlgorithm, IVSPAlgorithm):
                 pairing_delta = 0.0
                 pairing_state = "neutral"
                 expected_pair = preferred_pairs.get(last.id)
-                # Check trip_group affinity: if trip shares a group with any trip in this block
                 trip_gid = getattr(trip, "trip_group_id", None)
                 block_has_group = False
                 if trip_gid is not None:
-                    block_has_group = any(
-                        getattr(t, "trip_group_id", None) == trip_gid
-                        for t in blk.trips
-                    )
+                    block_has_group = any(getattr(t, "trip_group_id", None) == trip_gid for t in blk.trips)
+                
                 if block_has_group:
                     pairing_delta -= paired_trip_bonus * 3.0
                     pairing_state = "trip_group_match"
@@ -434,7 +433,6 @@ class GreedyVSP(BaseAlgorithm, IVSPAlgorithm):
                     pairing_delta += pair_break_penalty
                     pairing_state = "pair_break"
                 else:
-                    # Inferred preferred pair for natural ida/volta
                     if last.line_id == trip.line_id:
                         if last.destination_id == trip.origin_id and last.origin_id == trip.destination_id:
                             pairing_delta -= paired_trip_bonus * 2.0
@@ -443,29 +441,30 @@ class GreedyVSP(BaseAlgorithm, IVSPAlgorithm):
                             pairing_delta -= paired_trip_bonus * 0.5
                             pairing_state = "same_line"
 
-
                 marginal_cost = needed * deadhead_cost + slack * idle_cost + energy_need * energy_rate + pairing_delta
-                # Para minimizar veículos, priorizar GAP MÍNIMO como critério principal.
-                # pairing_delta serve apenas como tiebreaker secundário.
                 ranking_key = gap * 100 + pairing_delta * 0.01
-                data = {
-                    "gap": gap,
-                    "needed_deadhead": needed,
-                    "charged_kwh": charged,
-                    "soc_after_trip": soc_after_trip,
-                    "energy_need_kwh": energy_need,
-                    "marginal_cost": marginal_cost,
-                    "ranking_key": ranking_key,
-                    "pairing_delta": pairing_delta,
-                    "pairing_state": pairing_state,
-                    "is_split_shift_window": bool(
-                        allow_vehicle_split_shifts
-                        and split_shift_min_gap <= gap <= split_shift_max_gap
-                    ),
-                }
                 if best is None or ranking_key < best[0]:
-                    best = (ranking_key, blk, data)
-            return best
+                    best = (ranking_key, blk, (gap, needed, charged, soc_after_trip, energy_need, marginal_cost, pairing_delta, pairing_state))
+                    
+            if best is None:
+                return None
+            
+            b_ranking, b_blk, raw_data = best
+            gap, needed, charged, soc_after_trip, energy_need, marginal_cost, pairing_delta, pairing_state = raw_data
+            
+            data = {
+                "gap": gap,
+                "needed_deadhead": needed,
+                "charged_kwh": charged,
+                "soc_after_trip": soc_after_trip,
+                "energy_need_kwh": energy_need,
+                "marginal_cost": marginal_cost,
+                "ranking_key": b_ranking,
+                "pairing_delta": pairing_delta,
+                "pairing_state": pairing_state,
+                "is_split_shift_window": bool(allow_vehicle_split_shifts and split_shift_min_gap <= gap <= split_shift_max_gap),
+            }
+            return (marginal_cost, b_blk, data)
 
         def _forced_preferred_pair_candidate(trip: Trip) -> Optional[Tuple[float, Block, Dict[str, Any]]]:
             pair_trip_id = preferred_pairs.get(trip.id)

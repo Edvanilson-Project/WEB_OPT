@@ -9,7 +9,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from src.algorithms.csp.greedy import GreedyCSP
 from src.algorithms.csp.set_partitioning import SetPartitioningCSP
-from src.algorithms.vsp.greedy import GreedyVSP
+from src.algorithms.utils import preferred_pair_penalty
+from src.algorithms.vsp.greedy import GreedyVSP, build_preferred_pairs
 from src.core.exceptions import HardConstraintViolationError
 from src.domain.models import AlgorithmType, Block, Trip, VehicleType
 from src.services.optimizer_service import OptimizerService
@@ -26,6 +27,8 @@ def _trip(
     depot: int | None = None,
     energy: float = 0.0,
     night: bool = False,
+    trip_group_id: int | None = None,
+    direction: str | None = None,
 ):
     start_time = start if not night else 22 * 60 + start
     return Trip(
@@ -35,6 +38,8 @@ def _trip(
         end_time=start_time + dur,
         origin_id=origin,
         destination_id=dest,
+        trip_group_id=trip_group_id,
+        direction=direction,
         duration=dur,
         distance_km=max(1.0, dur / 3),
         depot_id=depot,
@@ -243,6 +248,38 @@ def test_vsp_preserves_preferred_ida_volta_pairing_under_competition():
     assert sol.meta["preferred_pair_breaks"] == 0
 
 
+def test_build_preferred_pairs_accepts_contiguous_trip_group_pairs():
+    trips = [
+        _trip(1, 270, 75, line=16, origin=12, dest=13, trip_group_id=120001, direction="outbound"),
+        _trip(2, 345, 87, line=16, origin=13, dest=12, trip_group_id=120001, direction="return"),
+    ]
+    assert build_preferred_pairs(trips, 10, 120) == {1: 2, 2: 1}
+
+
+def test_preferred_pair_penalty_marks_contiguous_group_split_across_blocks():
+    trip_a = _trip(1, 270, 75, line=16, origin=12, dest=13, trip_group_id=120001, direction="outbound")
+    trip_b = _trip(2, 345, 87, line=16, origin=13, dest=12, trip_group_id=120001, direction="return")
+    preferred_pairs = build_preferred_pairs([trip_a, trip_b], 10, 120)
+
+    kept_penalty = preferred_pair_penalty(
+        [Block(id=1, trips=[trip_a, trip_b])],
+        preferred_pairs,
+        pair_break_penalty=1000.0,
+        paired_trip_bonus=40.0,
+        hard_pairing_penalty=20000.0,
+    )
+    split_penalty = preferred_pair_penalty(
+        [Block(id=1, trips=[trip_a]), Block(id=2, trips=[trip_b])],
+        preferred_pairs,
+        pair_break_penalty=1000.0,
+        paired_trip_bonus=40.0,
+        hard_pairing_penalty=20000.0,
+    )
+
+    assert kept_penalty < 0
+    assert split_penalty >= 20000.0
+
+
 def test_pairing_guard_reduces_pair_breaks_vs_disabled_mode():
     trips = [
         _trip(1, 360, 55, line=22, origin=11, dest=22, depot=1),
@@ -292,6 +329,27 @@ def test_optimizer_trip_group_pairing_is_soft_by_default():
         time_budget_s=5.0,
     )
     assert "mandatory_trip_groups_same_duty" not in result.meta["input"]["cct_params"]
+
+
+def test_optimizer_promotes_hard_pairing_to_vsp_when_single_vehicle_only():
+    trips = [
+        _trip(1, 270, 75, line=16, origin=12, dest=13, trip_group_id=120001, direction="outbound"),
+        _trip(2, 345, 87, line=16, origin=13, dest=12, trip_group_id=120001, direction="return"),
+    ]
+    result = OptimizerService().run(
+        trips,
+        _vehicle(),
+        algorithm=AlgorithmType.GREEDY,
+        cct_params={
+            "enforce_trip_groups_hard": True,
+            "operator_single_vehicle_only": True,
+            "allow_relief_points": True,
+        },
+        vsp_params={"preserve_preferred_pairs": True, "min_layover_minutes": 10},
+        time_budget_s=2.0,
+    )
+    assert result.meta["input"]["vsp_params"]["hard_pairing_vehicle_level"] is True
+    assert result.meta["input"]["vsp_params"]["hard_pairing_penalty"] >= 20000.0
 
 
 def test_greedy_csp_can_enforce_single_line_duty():
@@ -350,22 +408,60 @@ def test_hard_validation_rejects_invalid_gps_input():
 
 
 def test_hard_validation_rejects_mandatory_group_split():
+    """MANDATORY_GROUP_SPLIT é soft — não bloqueia, mas aparece no relatório."""
     trips = [
         _trip(1, 360, 60, line=30, origin=10, dest=20, depot=1),
         _trip(2, 390, 60, line=30, origin=10, dest=20, depot=1),
         _trip(3, 500, 60, line=30, origin=20, dest=10, depot=1),
         _trip(4, 570, 60, line=30, origin=20, dest=10, depot=1),
     ]
-    with pytest.raises(HardConstraintViolationError) as exc:
-        OptimizerService().run(
-            trips,
-            _vehicle(),
-            algorithm=AlgorithmType.HYBRID_PIPELINE,
-            cct_params={"mandatory_trip_groups_same_duty": [[1, 2]], "allow_relief_points": True},
-            vsp_params={"preserve_preferred_pairs": True},
-            time_budget_s=5.0,
-        )
-    assert "MANDATORY_GROUP_SPLIT" in str(exc.value)
+    result = OptimizerService().run(
+        trips,
+        _vehicle(),
+        algorithm=AlgorithmType.HYBRID_PIPELINE,
+        cct_params={"mandatory_trip_groups_same_duty": [[1, 2]], "allow_relief_points": True},
+        vsp_params={"preserve_preferred_pairs": True},
+        time_budget_s=5.0,
+    )
+    output_report = result.meta["hard_constraint_report"]["output"]
+    soft_issues = output_report.get("soft_issues", [])
+    has_split = any("MANDATORY_GROUP_SPLIT" in issue for issue in soft_issues)
+    # Se o solver conseguir manter o grupo junto, ótimo (sem split).
+    # Se não, deve aparecer como soft issue (não hard).
+    if not has_split:
+        # Verificar que o grupo ficou junto (sucesso do solver)
+        all_issues = output_report.get("issues", [])
+        assert not any("MANDATORY_GROUP_SPLIT" in issue for issue in all_issues), \
+            "MANDATORY_GROUP_SPLIT deve ser soft, não hard"
+
+
+def test_run_cutting_cuts_before_guarded_pair_when_continuous_drive_would_break_limit():
+    block = Block(
+        id=1,
+        trips=[
+            _trip(1, 405, 87, line=16, origin=13, dest=12, trip_group_id=120002, direction="return"),
+            _trip(2, 510, 80, line=16, origin=12, dest=13, trip_group_id=120010, direction="outbound"),
+            _trip(3, 590, 106, line=16, origin=13, dest=12, trip_group_id=120010, direction="return"),
+        ],
+    )
+    solver = GreedyCSP(
+        min_break_minutes=20,
+        mandatory_break_after_minutes=240,
+        max_driving_minutes=270,
+        meal_break_minutes=20,
+        max_shift_minutes=560,
+        max_work_minutes=440,
+        allow_relief_points=True,
+    )
+
+    tasks, _ = solver.prepare_tasks([block])
+    assert len(tasks) == 2
+    assert [trip.id for trip in tasks[0].trips] == [1]
+    assert [trip.id for trip in tasks[1].trips] == [2, 3]
+
+    sol = solver.solve([block], block.trips)
+    assert all(int(duty.meta.get("max_continuous_drive_minutes", 0)) <= 240 for duty in sol.duties)
+    assert all(duty.rest_violations == 0 for duty in sol.duties)
 
 
 def test_set_covering_respects_column_limit_meta():

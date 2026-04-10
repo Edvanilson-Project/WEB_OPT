@@ -14,6 +14,7 @@ class TripInput(BaseModel):
     id: int
     line_id: int
     trip_group_id: Optional[int] = None
+    direction: Optional[str] = None
     start_time: int = Field(..., description="Minutos desde meia-noite")
     end_time: int
     origin_id: int
@@ -34,6 +35,10 @@ class TripInput(BaseModel):
     sent_to_driver_terminal: Optional[bool] = None
     gps_valid: Optional[bool] = None
     deadhead_times: Dict[int, int] = Field(default_factory=dict)
+    idle_before_minutes: int = 0
+    idle_after_minutes: int = 0
+    is_pull_out: bool = False
+    is_pull_back: bool = False
 
 
 class OperatorProfileInput(BaseModel):
@@ -70,6 +75,7 @@ class CctParamsInput(BaseModel):
     overtime_limit_minutes: Optional[int] = None
     max_driving_minutes: Optional[int] = None
     min_break_minutes: Optional[int] = None
+    connection_tolerance_minutes: Optional[int] = None
     mandatory_break_after_minutes: Optional[int] = None
     split_break_first_minutes: Optional[int] = None
     split_break_second_minutes: Optional[int] = None
@@ -122,6 +128,7 @@ class CctParamsInput(BaseModel):
 
 class VspParamsInput(BaseModel):
     time_budget_s: Optional[float] = None
+    random_seed: Optional[int] = None
     max_vehicle_shift_minutes: Optional[int] = None
     max_vehicles: Optional[int] = None
     maxVehicles: Optional[int] = None
@@ -177,6 +184,12 @@ class BlockOutput(BaseModel):
     num_trips: int
     start_time: int
     end_time: int
+    activation_cost: float = 0.0
+    connection_cost: float = 0.0
+    distance_cost: float = 0.0
+    time_cost: float = 0.0
+    idle_cost: float = 0.0
+    total_cost: float = 0.0
     warnings: List[str] = Field(default_factory=list)
     meta: Dict[str, Any] = Field(default_factory=dict)
 
@@ -192,6 +205,15 @@ class DutyOutput(BaseModel):
     paid_minutes: int = 0
     overtime_minutes: int = 0
     nocturnal_minutes: int = 0
+    work_cost: float = 0.0
+    guaranteed_cost: float = 0.0
+    waiting_cost: float = 0.0
+    overtime_cost: float = 0.0
+    long_unpaid_break_penalty: float = 0.0
+    nocturnal_extra_cost: float = 0.0
+    holiday_extra_cost: float = 0.0
+    cct_penalties_cost: float = 0.0
+    total_cost: float = 0.0
     meta: Dict[str, Any] = Field(default_factory=dict)
 
 
@@ -223,6 +245,7 @@ class ErrorResponse(BaseModel):
     status: str = "error"
     code: str
     message: str
+    diagnostics: Dict[str, Any] = Field(default_factory=dict)
 
 
 class MacroEstimateRequest(BaseModel):

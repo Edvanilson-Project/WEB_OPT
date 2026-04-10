@@ -39,6 +39,11 @@ export class CreateTerminalDto {
   @IsBoolean()
   isGarage?: boolean;
 
+  @ApiPropertyOptional({ default: true })
+  @IsOptional()
+  @IsBoolean()
+  isActive?: boolean;
+
   @ApiProperty({ description: 'ID da empresa' })
   @IsInt()
   companyId: number;

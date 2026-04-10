@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
@@ -236,10 +237,20 @@ class StrategyPersistenceService:
 
     @staticmethod
     def _write_json(path: Path, payload: Dict[str, Any]) -> None:
-        path.write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=False),
-            encoding="utf-8",
+        import tempfile
+        tmp_fd, tmp_path = tempfile.mkstemp(
+            dir=str(path.parent), suffix=".tmp", prefix=path.stem
         )
+        try:
+            with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
+                f.write(
+                    json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=False)
+                )
+            os.replace(tmp_path, str(path))
+        except Exception:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+            raise
 
     @classmethod
     def _apply_retention(
@@ -272,13 +283,13 @@ class StrategyPersistenceService:
     @staticmethod
     def _to_timestamp(value: Any) -> float:
         if not value:
-            return float("inf")
+            return 0.0
         if not isinstance(value, str):
-            return float("inf")
+            return 0.0
         try:
             text = value.strip()
             if text.endswith("Z"):
                 text = f"{text[:-1]}+00:00"
             return datetime.fromisoformat(text).timestamp()
         except Exception:
-            return float("inf")
+            return 0.0

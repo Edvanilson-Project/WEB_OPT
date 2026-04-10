@@ -18,6 +18,7 @@ import {
 } from '@nestjs/swagger';
 import { TerminalsService } from './terminals.service';
 import { CreateTerminalDto } from './dto/create-terminal.dto';
+import { UpdateTerminalDto } from './dto/update-terminal.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 
 @ApiTags('terminals')
@@ -37,9 +38,7 @@ export class TerminalsController {
   @ApiOperation({ summary: 'Listar terminais' })
   @ApiQuery({ name: 'companyId', required: false })
   findAll(@Query('companyId') companyId?: string) {
-    return this.terminalsService.findAll(
-      companyId ? +companyId : undefined,
-    );
+    return this.terminalsService.findAll(companyId ? +companyId : undefined);
   }
 
   @Get(':id')
@@ -52,7 +51,7 @@ export class TerminalsController {
   @ApiOperation({ summary: 'Atualizar terminal' })
   update(
     @Param('id', ParseIntPipe) id: number,
-    @Body() dto: CreateTerminalDto,
+    @Body() dto: UpdateTerminalDto,
   ) {
     return this.terminalsService.update(id, dto);
   }

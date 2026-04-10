@@ -1,6 +1,6 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { MoreThanOrEqual, Repository } from 'typeorm';
 import {
   OptimizationRunEntity,
   OptimizationStatus,
@@ -45,9 +45,7 @@ export class ReportsService {
       completedRuns,
       failedRuns,
       successRate:
-        totalRuns > 0
-          ? ((completedRuns / totalRuns) * 100).toFixed(1)
-          : '0',
+        totalRuns > 0 ? ((completedRuns / totalRuns) * 100).toFixed(1) : '0',
       totalTrips,
       totalLines,
       lastOptimization: lastCompleted
@@ -64,8 +62,10 @@ export class ReportsService {
   }
 
   async getOptimizationHistory(companyId: number, days = 30) {
+    const since = new Date();
+    since.setDate(since.getDate() - days);
     return this.runRepo.find({
-      where: { companyId },
+      where: { companyId, createdAt: MoreThanOrEqual(since) },
       order: { createdAt: 'DESC' },
       take: 100,
     });
@@ -77,7 +77,12 @@ export class ReportsService {
       this.runRepo.findOne({ where: { id: runId2 } }),
     ]);
 
-    if (!run1 || !run2) return null;
+    if (!run1 || !run2) {
+      const missing = !run1 ? runId1 : runId2;
+      throw new NotFoundException(
+        `Optimization run #${missing} não encontrada`,
+      );
+    }
 
     return {
       run1: {
@@ -97,10 +102,8 @@ export class ReportsService {
       delta: {
         vehicles: (run2.totalVehicles || 0) - (run1.totalVehicles || 0),
         crew: (run2.totalCrew || 0) - (run1.totalCrew || 0),
-        cost:
-          (Number(run2.totalCost) || 0) - (Number(run1.totalCost) || 0),
-        violations:
-          (run2.cctViolations || 0) - (run1.cctViolations || 0),
+        cost: (Number(run2.totalCost) || 0) - (Number(run1.totalCost) || 0),
+        violations: (run2.cctViolations || 0) - (run1.cctViolations || 0),
       },
     };
   }

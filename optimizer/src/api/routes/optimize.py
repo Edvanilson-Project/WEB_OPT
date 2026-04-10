@@ -1,6 +1,7 @@
 """
 POST /optimize — executa o pipeline de otimização VSP+CSP.
 """
+import asyncio
 import logging
 
 from fastapi import APIRouter, HTTPException
@@ -8,39 +9,12 @@ from fastapi import APIRouter, HTTPException
 from ...core.exceptions import OptimizerError
 from ...domain.models import Trip, VehicleType
 from ...services.optimizer_service import OptimizerService
+from ..converters import to_trip as _to_trip
 from ..schemas import BlockOutput, DutyOutput, ErrorResponse, OptimizeRequest, OptimizeResponse
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 _service = OptimizerService()
-
-
-def _to_trip(t) -> Trip:
-    return Trip(
-        id=t.id,
-        line_id=t.line_id,
-        trip_group_id=t.trip_group_id,
-        start_time=t.start_time,
-        end_time=t.end_time,
-        origin_id=t.origin_id,
-        destination_id=t.destination_id,
-        duration=t.duration,
-        distance_km=t.distance_km,
-        depot_id=t.depot_id,
-        relief_point_id=t.relief_point_id,
-        is_relief_point=t.is_relief_point,
-        energy_kwh=t.energy_kwh,
-        elevation_gain_m=t.elevation_gain_m,
-        service_day=t.service_day,
-        is_holiday=t.is_holiday,
-        origin_latitude=t.origin_latitude,
-        origin_longitude=t.origin_longitude,
-        destination_latitude=t.destination_latitude,
-        destination_longitude=t.destination_longitude,
-        sent_to_driver_terminal=t.sent_to_driver_terminal,
-        gps_valid=t.gps_valid,
-        deadhead_times={int(k): v for k, v in (t.deadhead_times or {}).items()},
-    )
 
 
 def _to_vt(v) -> VehicleType:
@@ -74,7 +48,8 @@ async def optimize(body: OptimizeRequest) -> OptimizeResponse:
     vehicle_types = [_to_vt(v) for v in body.vehicle_types]
 
     try:
-        result = _service.run(
+        result = await asyncio.to_thread(
+            _service.run,
             trips=trips,
             vehicle_types=vehicle_types,
             algorithm=body.algorithm,
@@ -84,7 +59,22 @@ async def optimize(body: OptimizeRequest) -> OptimizeResponse:
             vsp_params=body.vsp_params,
         )
     except OptimizerError as exc:
-        raise HTTPException(status_code=400, detail={"code": exc.code, "message": str(exc)}) from exc
+        diagnostics = exc.details or _service.build_failure_payload(
+            exc,
+            trips,
+            body.algorithm,
+            body.cct_params.model_dump(exclude_none=True) if body.cct_params else {},
+            body.vsp_params.model_dump(exclude_none=True) if body.vsp_params else {},
+            stage="api",
+        )
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": exc.code,
+                "message": str(exc),
+                "diagnostics": diagnostics,
+            },
+        ) from exc
     except Exception as exc:
         logger.exception("optimization_failed")
         raise HTTPException(status_code=500, detail=str(exc)) from exc

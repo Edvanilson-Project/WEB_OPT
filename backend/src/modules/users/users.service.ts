@@ -14,15 +14,23 @@ export class UsersService {
     private readonly userRepo: Repository<UserEntity>,
   ) {}
 
+  private normalizeEmail(email: string): string {
+    return email.trim().toLowerCase();
+  }
+
   async create(dto: CreateUserDto): Promise<UserEntity> {
-    const exists = await this.userRepo.findOne({ where: { email: dto.email } });
+    const normalizedEmail = this.normalizeEmail(dto.email);
+    const exists = await this.userRepo.findOne({
+      where: { email: normalizedEmail },
+    });
     if (exists) {
-      throw new ConflictException(`E-mail ${dto.email} já está em uso.`);
+      throw new ConflictException(`E-mail ${normalizedEmail} já está em uso.`);
     }
 
     const passwordHash = await bcrypt.hash(dto.password, 10);
     const user = this.userRepo.create({
       ...dto,
+      email: normalizedEmail,
       passwordHash,
       status: UserStatus.ACTIVE,
     });
@@ -40,7 +48,9 @@ export class UsersService {
   }
 
   async findByEmail(email: string): Promise<UserEntity | null> {
-    return this.userRepo.findOne({ where: { email } });
+    return this.userRepo.findOne({
+      where: { email: this.normalizeEmail(email) },
+    });
   }
 
   async update(id: number, dto: UpdateUserDto): Promise<UserEntity> {
@@ -48,6 +58,9 @@ export class UsersService {
     if (dto.password) {
       (dto as any).passwordHash = await bcrypt.hash(dto.password, 10);
       delete dto.password;
+    }
+    if (dto.email) {
+      dto.email = this.normalizeEmail(dto.email);
     }
     Object.assign(user, dto);
     return this.userRepo.save(user);

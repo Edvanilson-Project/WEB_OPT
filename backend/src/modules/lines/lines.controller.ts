@@ -13,6 +13,7 @@ import {
 import { ApiBearerAuth, ApiTags, ApiQuery } from '@nestjs/swagger';
 import { LinesService } from './lines.service';
 import { CreateLineDto } from './dto/create-line.dto';
+import { UpdateLineDto } from './dto/update-line.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 
 @ApiTags('lines')
@@ -39,10 +40,7 @@ export class LinesController {
   }
 
   @Patch(':id')
-  update(
-    @Param('id', ParseIntPipe) id: number,
-    @Body() dto: CreateLineDto,
-  ) {
+  update(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateLineDto) {
     return this.linesService.update(id, dto);
   }
 

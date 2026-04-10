@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, ConflictException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { LineEntity } from './entities/line.entity';
@@ -13,6 +13,9 @@ export class LinesService {
   ) {}
 
   async create(dto: CreateLineDto): Promise<LineEntity> {
+    const exists = await this.lineRepo.findOne({ where: { code: dto.code } });
+    if (exists)
+      throw new ConflictException(`Código de linha '${dto.code}' já existe.`);
     const line = this.lineRepo.create(dto);
     return this.lineRepo.save(line);
   }

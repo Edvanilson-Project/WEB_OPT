@@ -14,8 +14,8 @@ import DashboardCard from '@/app/components/shared/DashboardCard';
 import ConfirmDialog from '../_components/ConfirmDialog';
 import StatusChip from '../_components/StatusChip';
 import { NotifyProvider, useNotify } from '../_components/Notify';
-import { linesApi, terminalsApi, getSessionUser } from '@/lib/api';
-import type { Line, Terminal } from '../_types';
+import { linesApi, terminalsApi, vehicleTypesApi, getSessionUser } from '@/lib/api';
+import type { Line, Terminal, VehicleType } from '../_types';
 import { extractArray } from '../_types';
 
 interface LineForm {
@@ -24,14 +24,29 @@ interface LineForm {
   originTerminalId: string;
   destinationTerminalId: string;
   distanceKm: string;
-  avgTripDurationMinutes: string;
+  returnDistanceKm: string;
+  idleTerminalId: string;
+  idleDistanceKm: string;
+  idleReturnDistanceKm: string;
+  garageTerminalId: string;
+  garageDistanceKm: string;
+  vehicleTypeId: string;
   status: string;
-  colorHex: string;
+  operationMode: string;
 }
 
 const EMPTY: LineForm = {
   code: '', name: '', originTerminalId: '', destinationTerminalId: '',
-  distanceKm: '', avgTripDurationMinutes: '', status: 'active', colorHex: '#5D87FF',
+  distanceKm: '', returnDistanceKm: '', idleTerminalId: '', idleDistanceKm: '',
+  idleReturnDistanceKm: '', garageTerminalId: '', garageDistanceKm: '',
+  vehicleTypeId: '', status: 'active', operationMode: 'roundtrip',
+};
+
+const OP_MODE_LABELS: Record<string, string> = {
+  roundtrip: 'Ida e Volta',
+  outbound_only: 'Somente Ida',
+  return_only: 'Somente Volta',
+  flexible: 'Flexível',
 };
 
 function LinesInner() {
@@ -39,6 +54,7 @@ function LinesInner() {
   const notify = useNotify();
   const [lines, setLines] = useState<Line[]>([]);
   const [terminals, setTerminals] = useState<Terminal[]>([]);
+  const [vehicleTypes, setVehicleTypes] = useState<VehicleType[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -51,12 +67,14 @@ function LinesInner() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [linesData, terminalsData] = await Promise.allSettled([
+      const [linesData, terminalsData, vtData] = await Promise.allSettled([
         linesApi.getAll(),
         terminalsApi.getAll(),
+        vehicleTypesApi.getAll(),
       ]);
       if (linesData.status === 'fulfilled') setLines(extractArray(linesData.value));
       if (terminalsData.status === 'fulfilled') setTerminals(extractArray(terminalsData.value));
+      if (vtData.status === 'fulfilled') setVehicleTypes(extractArray(vtData.value));
     } catch {
       notify.error('Falha ao carregar dados. Verifique a conexão com o servidor.');
     } finally {
@@ -80,9 +98,15 @@ function LinesInner() {
       originTerminalId: String(line.originTerminalId),
       destinationTerminalId: String(line.destinationTerminalId),
       distanceKm: line.distanceKm != null ? String(line.distanceKm) : '',
-      avgTripDurationMinutes: line.avgTripDurationMinutes != null ? String(line.avgTripDurationMinutes) : '',
+      returnDistanceKm: line.returnDistanceKm != null ? String(line.returnDistanceKm) : '',
+      idleTerminalId: line.idleTerminalId != null ? String(line.idleTerminalId) : '',
+      idleDistanceKm: line.idleDistanceKm != null ? String(line.idleDistanceKm) : '',
+      idleReturnDistanceKm: line.idleReturnDistanceKm != null ? String(line.idleReturnDistanceKm) : '',
+      garageTerminalId: line.garageTerminalId != null ? String(line.garageTerminalId) : '',
+      garageDistanceKm: line.garageDistanceKm != null ? String(line.garageDistanceKm) : '',
+      vehicleTypeId: line.vehicleTypeId != null ? String(line.vehicleTypeId) : '',
       status: line.status,
-      colorHex: line.colorHex ?? '#5D87FF',
+      operationMode: line.operationMode || 'roundtrip',
     });
     setDialogOpen(true);
   };
@@ -102,9 +126,15 @@ function LinesInner() {
         originTerminalId: Number(form.originTerminalId),
         destinationTerminalId: Number(form.destinationTerminalId),
         distanceKm: form.distanceKm ? parseFloat(form.distanceKm) : undefined,
-        avgTripDurationMinutes: form.avgTripDurationMinutes ? parseInt(form.avgTripDurationMinutes) : undefined,
+        returnDistanceKm: form.returnDistanceKm ? parseFloat(form.returnDistanceKm) : undefined,
+        idleTerminalId: form.idleTerminalId ? Number(form.idleTerminalId) : undefined,
+        idleDistanceKm: form.idleDistanceKm ? parseFloat(form.idleDistanceKm) : undefined,
+        idleReturnDistanceKm: form.idleReturnDistanceKm ? parseFloat(form.idleReturnDistanceKm) : undefined,
+        garageTerminalId: form.garageTerminalId ? Number(form.garageTerminalId) : undefined,
+        garageDistanceKm: form.garageDistanceKm ? parseFloat(form.garageDistanceKm) : undefined,
+        vehicleTypeId: form.vehicleTypeId ? Number(form.vehicleTypeId) : undefined,
         status: form.status,
-        colorHex: form.colorHex,
+        operationMode: form.operationMode,
       };
       if (editTarget) {
         await linesApi.update(editTarget.id, payload);
@@ -193,7 +223,15 @@ function LinesInner() {
                   <TableCell sx={{ fontWeight: 600 }}>Nome</TableCell>
                   <TableCell sx={{ fontWeight: 600 }}>Origem</TableCell>
                   <TableCell sx={{ fontWeight: 600 }}>Destino</TableCell>
-                  <TableCell align="center" sx={{ fontWeight: 600 }}>Dist. (km)</TableCell>
+                  <TableCell align="center" sx={{ fontWeight: 600 }}>Km Ida</TableCell>
+                  <TableCell align="center" sx={{ fontWeight: 600 }}>Km Volta</TableCell>
+                  <TableCell sx={{ fontWeight: 600 }}>Term. Ociosa</TableCell>
+                  <TableCell align="center" sx={{ fontWeight: 600 }}>Km Ociosa Ida</TableCell>
+                  <TableCell align="center" sx={{ fontWeight: 600 }}>Km Ociosa Volta</TableCell>
+                  <TableCell sx={{ fontWeight: 600 }}>Term. Garagem</TableCell>
+                  <TableCell align="center" sx={{ fontWeight: 600 }}>Km Garagem</TableCell>
+                  <TableCell sx={{ fontWeight: 600 }}>Tipo Veículo</TableCell>
+                  <TableCell align="center" sx={{ fontWeight: 600 }}>Modo Op.</TableCell>
                   <TableCell align="center" sx={{ fontWeight: 600 }}>Status</TableCell>
                   <TableCell align="right" sx={{ fontWeight: 600 }}>Ações</TableCell>
                 </TableRow>
@@ -201,7 +239,7 @@ function LinesInner() {
               <TableBody>
                 {filtered.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={7} align="center" sx={{ py: 6 }}>
+                    <TableCell colSpan={15} align="center" sx={{ py: 6 }}>
                       <IconRoute size={40} color={theme.palette.grey[400]} />
                       <Typography variant="body2" color="text.secondary" mt={1}>
                         {search ? 'Nenhuma linha encontrada para esta busca.' : 'Nenhuma linha cadastrada. Crie a primeira!'}
@@ -212,10 +250,7 @@ function LinesInner() {
                   filtered.map((line) => (
                     <TableRow key={line.id} hover>
                       <TableCell>
-                        <Stack direction="row" alignItems="center" gap={1}>
-                          <Box sx={{ width: 10, height: 10, borderRadius: '50%', bgcolor: line.colorHex ?? '#5D87FF', flexShrink: 0 }} />
-                          <Typography variant="body2" fontWeight={600} fontFamily="monospace">{line.code}</Typography>
-                        </Stack>
+                        <Typography variant="body2" fontWeight={600} fontFamily="monospace">{line.code}</Typography>
                       </TableCell>
                       <TableCell>
                         <Typography variant="body2">{line.name}</Typography>
@@ -227,7 +262,31 @@ function LinesInner() {
                         <Typography variant="body2" color="text.secondary">{terminalLabel(line.destinationTerminalId)}</Typography>
                       </TableCell>
                       <TableCell align="center">
-                        <Typography variant="body2">{line.distanceKm != null ? `${line.distanceKm}km` : '–'}</Typography>
+                        <Typography variant="body2">{line.distanceKm != null ? `${line.distanceKm}` : '–'}</Typography>
+                      </TableCell>
+                      <TableCell align="center">
+                        <Typography variant="body2">{line.returnDistanceKm != null ? `${line.returnDistanceKm}` : '–'}</Typography>
+                      </TableCell>
+                      <TableCell>
+                        <Typography variant="body2" color="text.secondary">{line.idleTerminalId ? terminalLabel(line.idleTerminalId) : '–'}</Typography>
+                      </TableCell>
+                      <TableCell align="center">
+                        <Typography variant="body2">{line.idleDistanceKm != null ? `${line.idleDistanceKm}` : '–'}</Typography>
+                      </TableCell>
+                      <TableCell align="center">
+                        <Typography variant="body2">{line.idleReturnDistanceKm != null ? `${line.idleReturnDistanceKm}` : '–'}</Typography>
+                      </TableCell>
+                      <TableCell>
+                        <Typography variant="body2" color="text.secondary">{line.garageTerminalId ? terminalLabel(line.garageTerminalId) : '–'}</Typography>
+                      </TableCell>
+                      <TableCell align="center">
+                        <Typography variant="body2">{line.garageDistanceKm != null ? `${line.garageDistanceKm}` : '–'}</Typography>
+                      </TableCell>
+                      <TableCell>
+                        <Typography variant="body2" color="text.secondary">{line.vehicleTypeId ? (vehicleTypes.find(v => v.id === line.vehicleTypeId)?.name ?? '–') : '–'}</Typography>
+                      </TableCell>
+                      <TableCell align="center">
+                        <Chip size="small" label={OP_MODE_LABELS[line.operationMode || 'roundtrip'] || line.operationMode} />
                       </TableCell>
                       <TableCell align="center">
                         <StatusChip type="status" value={line.status} />
@@ -274,12 +333,36 @@ function LinesInner() {
               </Select>
             </FormControl>
             <Stack direction="row" spacing={2}>
-              <TextField label="Distância (km)" type="number" fullWidth value={form.distanceKm} onChange={f('distanceKm')}
+              <TextField label="Km Ida" type="number" fullWidth value={form.distanceKm} onChange={f('distanceKm')}
                 InputProps={{ endAdornment: <InputAdornment position="end">km</InputAdornment> }} />
-              <TextField label="Duração Média" type="number" fullWidth value={form.avgTripDurationMinutes} onChange={f('avgTripDurationMinutes')}
-                InputProps={{ endAdornment: <InputAdornment position="end">min</InputAdornment> }} />
+              <TextField label="Km Volta" type="number" fullWidth value={form.returnDistanceKm} onChange={f('returnDistanceKm')}
+                InputProps={{ endAdornment: <InputAdornment position="end">km</InputAdornment> }} />
             </Stack>
+            <FormControl fullWidth size="small">
+              <InputLabel>Terminal Ociosa</InputLabel>
+              <Select label="Terminal Ociosa" value={form.idleTerminalId}
+                onChange={(e) => setForm((p) => ({ ...p, idleTerminalId: e.target.value }))}>
+                <MenuItem value="">Nenhum</MenuItem>
+                {terminals.map((t) => <MenuItem key={t.id} value={String(t.id)}>{t.name}{t.shortName ? ` (${t.shortName})` : ''}</MenuItem>)}
+              </Select>
+            </FormControl>
             <Stack direction="row" spacing={2} alignItems="center">
+              <TextField label="Km Ociosa Ida" type="number" fullWidth value={form.idleDistanceKm} onChange={f('idleDistanceKm')}
+                InputProps={{ endAdornment: <InputAdornment position="end">km</InputAdornment> }} />
+              <TextField label="Km Ociosa Volta" type="number" fullWidth value={form.idleReturnDistanceKm} onChange={f('idleReturnDistanceKm')}
+                InputProps={{ endAdornment: <InputAdornment position="end">km</InputAdornment> }} />
+            </Stack>
+            <FormControl fullWidth size="small">
+              <InputLabel>Terminal Garagem</InputLabel>
+              <Select label="Terminal Garagem" value={form.garageTerminalId}
+                onChange={(e) => setForm((p) => ({ ...p, garageTerminalId: e.target.value }))}>
+                <MenuItem value="">Nenhum</MenuItem>
+                {terminals.map((t) => <MenuItem key={t.id} value={String(t.id)}>{t.name}{t.shortName ? ` (${t.shortName})` : ''}</MenuItem>)}
+              </Select>
+            </FormControl>
+            <Stack direction="row" spacing={2} alignItems="center">
+              <TextField label="Km Garagem" type="number" fullWidth value={form.garageDistanceKm} onChange={f('garageDistanceKm')}
+                InputProps={{ endAdornment: <InputAdornment position="end">km</InputAdornment> }} />
               <FormControl size="small" sx={{ minWidth: 140 }}>
                 <InputLabel>Status</InputLabel>
                 <Select label="Status" value={form.status} onChange={(e) => setForm((p) => ({ ...p, status: e.target.value }))}>
@@ -287,15 +370,23 @@ function LinesInner() {
                   <MenuItem value="inactive">Inativa</MenuItem>
                 </Select>
               </FormControl>
-              <Stack direction="row" alignItems="center" gap={1}>
-                <Typography variant="body2" color="text.secondary">Cor:</Typography>
-                <Box component="label" sx={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <Box sx={{ width: 32, height: 32, borderRadius: 1, bgcolor: form.colorHex, border: '1px solid', borderColor: 'divider' }} />
-                  <input type="color" value={form.colorHex} onChange={(e) => setForm((p) => ({ ...p, colorHex: e.target.value }))} style={{ opacity: 0, position: 'absolute', width: 0 }} />
-                  <Typography variant="caption" fontFamily="monospace">{form.colorHex}</Typography>
-                </Box>
-              </Stack>
             </Stack>
+            <FormControl fullWidth size="small">                <InputLabel>Tipo de Veículo</InputLabel>
+                <Select label="Tipo de Veículo" value={form.vehicleTypeId}
+                  onChange={(e) => setForm((p) => ({ ...p, vehicleTypeId: e.target.value }))}>
+                  <MenuItem value="">Nenhum</MenuItem>
+                  {vehicleTypes.filter(v => v.isActive).map((v) => (
+                    <MenuItem key={v.id} value={String(v.id)}>{v.name} ({v.passengerCapacity} pass.)</MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+              <FormControl fullWidth size="small">              <InputLabel>Modo de Operação</InputLabel>
+              <Select label="Modo de Operação" value={form.operationMode}
+                onChange={(e) => setForm((p) => ({ ...p, operationMode: e.target.value }))}>
+                <MenuItem value="roundtrip">Ida e Volta (duas pontas)</MenuItem>
+                <MenuItem value="outbound_only">Somente Ida</MenuItem>                  <MenuItem value="return_only">Somente Volta</MenuItem>                <MenuItem value="flexible">Flexível (ida e/ou volta conforme demanda)</MenuItem>
+              </Select>
+            </FormControl>
           </Stack>
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2.5 }}>

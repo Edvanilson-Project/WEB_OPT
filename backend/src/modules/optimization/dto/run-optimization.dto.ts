@@ -10,19 +10,27 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { OptimizationAlgorithm } from '../entities/optimization-run.entity';
 
 export class RunOptimizationDto {
-  @ApiPropertyOptional({ description: 'ID de uma única linha (use lineIds para múltiplas)' })
+  @ApiPropertyOptional({
+    description: 'ID de uma única linha (use lineIds para múltiplas)',
+  })
   @IsOptional()
   @IsInt()
   lineId?: number;
 
-  @ApiPropertyOptional({ description: 'IDs de múltiplas linhas a otimizar em conjunto' })
+  @ApiPropertyOptional({
+    description: 'IDs de múltiplas linhas a otimizar em conjunto',
+  })
   @IsOptional()
   @IsArray()
+  @IsInt({ each: true })
   lineIds?: number[];
 
-  @ApiProperty({ description: 'ID da empresa' })
+  @ApiPropertyOptional({
+    description: 'ID da empresa (extraído do JWT se omitido)',
+  })
+  @IsOptional()
   @IsInt()
-  companyId: number;
+  companyId?: number;
 
   @ApiPropertyOptional({ description: 'ID da expedição específica' })
   @IsOptional()
@@ -32,8 +40,10 @@ export class RunOptimizationDto {
   @ApiPropertyOptional({
     description: 'Algoritmo a usar',
     default: OptimizationAlgorithm.FULL_PIPELINE,
+    enum: OptimizationAlgorithm,
   })
   @IsOptional()
+  @IsEnum(OptimizationAlgorithm)
   algorithm?: string;
 
   @ApiPropertyOptional({ description: 'Parâmetros do VSP' })
@@ -49,6 +59,7 @@ export class RunOptimizationDto {
     fixedVehicleActivationCost?: number;
     deadheadCostPerMinute?: number;
     idleCostPerMinute?: number;
+    randomSeed?: number;
     maxConnectionCostForReuseRatio?: number;
     strictHardValidation?: boolean;
     allowMultiLineBlock?: boolean;
@@ -64,9 +75,10 @@ export class RunOptimizationDto {
     maxWorkMinutes?: number;
     minWorkMinutes?: number;
     minShiftMinutes?: number;
-    maxShiftMinutes?: number;     // jornada máxima total (spread)
-    maxDrivingMinutes?: number;  // direção contínua máxima
+    maxShiftMinutes?: number; // jornada máxima total (spread)
+    maxDrivingMinutes?: number; // direção contínua máxima
     breakMinutes?: number;
+    connectionToleranceMinutes?: number;
     enforceSingleLineDuty?: boolean;
     fairnessWeight?: number;
     fairnessTargetWorkMinutes?: number;

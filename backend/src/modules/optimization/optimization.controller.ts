@@ -4,7 +4,7 @@ import {
   Post,
   Body,
   Param,
-  Delete,
+  Patch,
   UseGuards,
   ParseIntPipe,
   Query,
@@ -19,6 +19,7 @@ import {
 import { OptimizationService } from './optimization.service';
 import { RunOptimizationDto } from './dto/run-optimization.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { resolveScopedCompanyId } from '../../common/utils/company-scope.util';
 
 @ApiTags('optimization')
 @ApiBearerAuth()
@@ -30,33 +31,59 @@ export class OptimizationController {
   @Post('run')
   @ApiOperation({ summary: 'Iniciar nova execução de otimização VSP+CSP' })
   run(@Body() dto: RunOptimizationDto, @Request() req: any) {
+    dto.companyId = resolveScopedCompanyId(req.user?.companyId, dto.companyId);
     return this.optimizationService.startOptimization(dto, req.user?.id);
   }
 
   @Get()
   @ApiOperation({ summary: 'Listar execuções de otimização' })
   @ApiQuery({ name: 'companyId', required: false })
-  findAll(@Query('companyId') companyId?: string) {
+  findAll(@Request() req: any, @Query('companyId') companyId?: string) {
     return this.optimizationService.findAll(
-      companyId ? +companyId : undefined,
+      resolveScopedCompanyId(req.user?.companyId, companyId),
     );
   }
 
   @Get('dashboard/:companyId')
   @ApiOperation({ summary: 'Estatísticas do dashboard de otimização' })
-  getDashboard(@Param('companyId', ParseIntPipe) companyId: number) {
-    return this.optimizationService.getDashboardStats(companyId);
+  getDashboard(
+    @Param('companyId', ParseIntPipe) companyId: number,
+    @Request() req: any,
+  ) {
+    return this.optimizationService.getDashboardStats(
+      resolveScopedCompanyId(req.user?.companyId, companyId),
+    );
+  }
+
+  @Get(':id/audit')
+  @ApiOperation({ summary: 'Auditoria completa de uma execução' })
+  audit(@Param('id', ParseIntPipe) id: number, @Request() req: any) {
+    return this.optimizationService.getRunAudit(id, req.user?.companyId);
+  }
+
+  @Get(':id/compare/:otherId')
+  @ApiOperation({ summary: 'Comparar duas execuções de otimização' })
+  compare(
+    @Param('id', ParseIntPipe) id: number,
+    @Param('otherId', ParseIntPipe) otherId: number,
+    @Request() req: any,
+  ) {
+    return this.optimizationService.compareRuns(
+      id,
+      otherId,
+      req.user?.companyId,
+    );
   }
 
   @Get(':id')
   @ApiOperation({ summary: 'Detalhes de uma execução' })
-  findOne(@Param('id', ParseIntPipe) id: number) {
-    return this.optimizationService.findOne(id);
+  findOne(@Param('id', ParseIntPipe) id: number, @Request() req: any) {
+    return this.optimizationService.findOne(id, req.user?.companyId);
   }
 
-  @Delete(':id/cancel')
+  @Patch(':id/cancel')
   @ApiOperation({ summary: 'Cancelar execução em andamento' })
-  cancel(@Param('id', ParseIntPipe) id: number) {
-    return this.optimizationService.cancel(id);
+  cancel(@Param('id', ParseIntPipe) id: number, @Request() req: any) {
+    return this.optimizationService.cancel(id, req.user?.companyId);
   }
 }

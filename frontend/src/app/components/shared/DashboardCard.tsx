@@ -1,4 +1,4 @@
-import { useTheme } from '@mui/material/styles';
+import { SxProps, Theme, useTheme } from '@mui/material/styles';
 import { Card, CardContent, Typography, Stack, Box } from '@mui/material';
 import { useSelector } from '@/store/hooks';
 import { AppState } from '@/store/store';
@@ -13,6 +13,7 @@ type Props = {
   headsubtitle?: string | JSX.Element;
   children?: JSX.Element;
   middlecontent?: string | JSX.Element;
+  sx?: SxProps<Theme>;
 };
 
 const DashboardCard = ({
@@ -25,6 +26,7 @@ const DashboardCard = ({
   headtitle,
   headsubtitle,
   middlecontent,
+  sx,
 }: Props) => {
   const customizer = useSelector((state: AppState) => state.customizer);
 
@@ -33,7 +35,11 @@ const DashboardCard = ({
 
   return (
     <Card
-      sx={{ padding: 0, border: !customizer.isCardShadow ?  `1px solid ${borderColor}` : 'none' }}
+      sx={{
+        padding: 0,
+        border: !customizer.isCardShadow ?  `1px solid ${borderColor}` : 'none',
+        ...sx,
+      }}
       elevation={customizer.isCardShadow ? 9 : 0}
       variant={!customizer.isCardShadow ? 'outlined' : undefined}
     >

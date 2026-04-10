@@ -19,9 +19,12 @@ import { tripsApi, linesApi, getSessionUser } from '@/lib/api';
 import type { Trip, Line } from '../_types';
 import { extractArray } from '../_types';
 
-const toHHMM = (minutes: number): string => {
-  const h = Math.floor(minutes / 60).toString().padStart(2, '0');
-  const m = (minutes % 60).toString().padStart(2, '0');
+const toHHMM = (minutes?: number | null): string => {
+  const safeMinutes = Number(minutes);
+  if (!Number.isFinite(safeMinutes)) return '--:--';
+  const normalized = Math.max(0, Math.floor(safeMinutes));
+  const h = Math.floor(normalized / 60).toString().padStart(2, '0');
+  const m = (normalized % 60).toString().padStart(2, '0');
   return `${h}:${m}`;
 };
 
@@ -344,6 +347,7 @@ function TripsInner() {
                             )}
                           </TableCell>
                           <TableCell align="right">
+                            <Stack direction="row" justifyContent="flex-end" gap={0}>
                             {pair.outbound && (
                               <>
                                 <Tooltip title="Editar IDA">
@@ -354,6 +358,17 @@ function TripsInner() {
                                 </Tooltip>
                               </>
                             )}
+                            {pair.return && (
+                              <>
+                                <Tooltip title="Editar VOLTA">
+                                  <IconButton size="small" onClick={() => openEdit(pair.return!)}><IconEdit size={15} /></IconButton>
+                                </Tooltip>
+                                <Tooltip title="Excluir VOLTA">
+                                  <IconButton size="small" color="error" onClick={() => setDeleteTarget(pair.return!)}><IconTrash size={15} /></IconButton>
+                                </Tooltip>
+                              </>
+                            )}
+                            </Stack>
                           </TableCell>
                         </TableRow>
                       );

@@ -3,6 +3,7 @@ import {
   CreateDateColumn,
   UpdateDateColumn,
   Column,
+  Index,
 } from 'typeorm';
 
 export abstract class BaseEntity {
@@ -17,6 +18,7 @@ export abstract class BaseEntity {
 }
 
 export abstract class BaseCompanyEntity extends BaseEntity {
+  @Index()
   @Column({ name: 'company_id' })
   companyId: number;
 }

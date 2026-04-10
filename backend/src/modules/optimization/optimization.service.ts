@@ -13,6 +13,39 @@ import { TripsService } from '../trips/trips.service';
 import { OptimizationSettingsService } from '../optimization-settings/optimization-settings.service';
 import { EntityNotFoundException } from '../../common/exceptions/not-found.exception';
 
+export interface ActiveSettingsDto {
+  id?: number | string;
+  name?: string;
+  algorithmType?: string;
+  cctMealBreakMinutes?: number;
+  allowReliefPoints?: boolean;
+  preservePreferredPairs?: boolean;
+  enforceSingleLineDuty?: boolean;
+  timeBudgetSeconds?: number;
+  [key: string]: unknown;
+}
+
+export interface OptimizationResultPayload {
+  cct_violations?: number;
+  cctViolations?: number;
+  num_vehicles?: number;
+  vehicles?: number;
+  num_crew?: number;
+  crew?: number;
+  total_cost?: number | string;
+  totalCost?: number | string;
+  meta?: {
+    hard_constraint_report?: {
+      output?: {
+        ok?: boolean;
+        hard_issues?: unknown[];
+      };
+    };
+    [key: string]: unknown;
+  };
+  [key: string]: any;
+}
+
 @Injectable()
 export class OptimizationService {
   private readonly logger = new Logger(OptimizationService.name);
@@ -34,12 +67,13 @@ export class OptimizationService {
     userId?: number,
   ): Promise<OptimizationRunEntity> {
     // Suporte multi-linha: lineIds tem prioridade sobre lineId
-    const effectiveLineId = dto.lineIds?.length === 1
-      ? dto.lineIds[0]
-      : (dto.lineId ?? null);
-    const effectiveLineIds = (dto.lineIds?.length ?? 0) > 1 ? dto.lineIds : null;
+    const effectiveLineId =
+      dto.lineIds?.length === 1 ? dto.lineIds[0] : (dto.lineId ?? null);
+    const effectiveLineIds =
+      (dto.lineIds?.length ?? 0) > 1 ? dto.lineIds : null;
 
-    const algStr = (dto.algorithm ?? OptimizationAlgorithm.FULL_PIPELINE) as any;
+    const algStr = (dto.algorithm ??
+      OptimizationAlgorithm.FULL_PIPELINE) as any;
     const algEnum = Object.values(OptimizationAlgorithm).includes(algStr)
       ? (algStr as OptimizationAlgorithm)
       : OptimizationAlgorithm.FULL_PIPELINE;
@@ -83,21 +117,26 @@ export class OptimizationService {
       // Busca viagens para todas as linhas solicitadas
       const lineIdsToFetch: number[] = dto.lineIds?.length
         ? dto.lineIds
-        : dto.lineId ? [dto.lineId] : [];
+        : dto.lineId
+          ? [dto.lineId]
+          : [];
 
       if (!lineIdsToFetch.length) {
         throw new Error('Nenhuma linha especificada para otimizar');
       }
 
       const tripsArrays = await Promise.all(
-        lineIdsToFetch.map((lid) => this.tripsService.findAll(dto.companyId, lid))
+        lineIdsToFetch.map((lid) =>
+          this.tripsService.findAll(dto.companyId, lid),
+        ),
       );
       const trips = tripsArrays.flat();
 
       if (!trips.length) {
-        const desc = lineIdsToFetch.length > 1
-          ? 'as linhas selecionadas'
-          : `linha ${lineIdsToFetch[0]}`;
+        const desc =
+          lineIdsToFetch.length > 1
+            ? 'as linhas selecionadas'
+            : `linha ${lineIdsToFetch[0]}`;
         throw new Error(`Nenhuma viagem encontrada para ${desc}`);
       }
 
@@ -106,7 +145,9 @@ export class OptimizationService {
         'OPTIMIZER_URL',
         'http://localhost:8000',
       );
-      activeSettings = await this.settingsService.findActive(dto.companyId).catch(() => null);
+      activeSettings = await this.settingsService
+        .findActive(dto.companyId)
+        .catch(() => null);
 
       let result: any;
       try {
@@ -117,42 +158,61 @@ export class OptimizationService {
           if (parsed <= 0) return 0;
           return parsed > 1 ? parsed / 100 : parsed;
         };
-        const configuredFairness = normalizeWeight(activeSettings?.fairnessWeight, 0);
-        const fairnessWeight = configuredFairness > 0 ? configuredFairness : 0.6;
+        const configuredFairness = normalizeWeight(
+          activeSettings?.fairnessWeight,
+          0,
+        );
+        const fairnessWeight =
+          configuredFairness > 0 ? configuredFairness : 0.6;
 
         const cctBase = {
-          max_shift_minutes:    activeSettings?.cctMaxShiftMinutes    ?? 560,
+          max_shift_minutes: activeSettings?.cctMaxShiftMinutes ?? 560,
           max_work_minutes: activeSettings?.cctMaxWorkMinutes ?? 480,
           max_driving_minutes: activeSettings?.cctMaxDrivingMinutes ?? 270,
           min_break_minutes: activeSettings?.cctMinBreakMinutes ?? 20,
           min_layover_minutes: activeSettings?.cctMinLayoverMinutes ?? 10,
-          pullout_minutes:      activeSettings?.pulloutMinutes        ?? 10,
-          pullback_minutes:     activeSettings?.pullbackMinutes       ?? 10,
-          apply_cct:            activeSettings?.applyCct              ?? true,
+          pullout_minutes: activeSettings?.pulloutMinutes ?? 10,
+          pullback_minutes: activeSettings?.pullbackMinutes ?? 10,
+          apply_cct: activeSettings?.applyCct ?? true,
           // Novos CCT/CLT (2026)
-          min_work_minutes:           activeSettings?.cctMinWorkMinutes        ?? 0,
-          min_shift_minutes:          activeSettings?.cctMinShiftMinutes       ?? 0,
-          overtime_limit_minutes:     activeSettings?.cctOvertimeLimitMinutes  ?? 120,
-          mandatory_break_after_minutes: activeSettings?.cctMandatoryBreakAfterMinutes ?? 270,
-          split_break_first_minutes:  activeSettings?.cctSplitBreakFirstMinutes ?? 15,
-          split_break_second_minutes: activeSettings?.cctSplitBreakSecondMinutes ?? 30,
+          min_work_minutes: activeSettings?.cctMinWorkMinutes ?? 0,
+          min_shift_minutes: activeSettings?.cctMinShiftMinutes ?? 0,
+          overtime_limit_minutes:
+            activeSettings?.cctOvertimeLimitMinutes ?? 120,
+          mandatory_break_after_minutes:
+            activeSettings?.cctMandatoryBreakAfterMinutes ?? 270,
+          split_break_first_minutes:
+            activeSettings?.cctSplitBreakFirstMinutes ?? 15,
+          split_break_second_minutes:
+            activeSettings?.cctSplitBreakSecondMinutes ?? 30,
           meal_break_minutes: activeSettings?.cctMealBreakMinutes ?? 20,
-          inter_shift_rest_minutes:   activeSettings?.cctInterShiftRestMinutes ?? 660,
-          weekly_rest_minutes:        activeSettings?.cctWeeklyRestMinutes     ?? 1440,
-          reduced_weekly_rest_minutes: activeSettings?.cctReducedWeeklyRestMinutes ?? 2160,
-          allow_reduced_weekly_rest:  activeSettings?.cctAllowReducedWeeklyRest ?? false,
-          daily_driving_limit_minutes: activeSettings?.cctDailyDrivingLimitMinutes ?? 540,
-          extended_daily_driving_limit_minutes: activeSettings?.cctExtendedDailyDrivingLimitMinutes ?? 600,
-          max_extended_driving_days_per_week: activeSettings?.cctMaxExtendedDrivingDaysPerWeek ?? 2,
-          weekly_driving_limit_minutes: activeSettings?.cctWeeklyDrivingLimitMinutes ?? 3360,
-          fortnight_driving_limit_minutes: activeSettings?.cctFortnightDrivingLimitMinutes ?? 5400,
-          idle_time_is_paid:          activeSettings?.cctIdleTimeIsPaid        ?? true,
-          waiting_time_pay_pct:       activeSettings?.cctWaitingTimePayPct ?? 0.30,
-          min_guaranteed_work_minutes: activeSettings?.cctMinGuaranteedWorkMinutes ?? 0,
+          inter_shift_rest_minutes:
+            activeSettings?.cctInterShiftRestMinutes ?? 660,
+          weekly_rest_minutes: activeSettings?.cctWeeklyRestMinutes ?? 1440,
+          reduced_weekly_rest_minutes:
+            activeSettings?.cctReducedWeeklyRestMinutes ?? 2160,
+          allow_reduced_weekly_rest:
+            activeSettings?.cctAllowReducedWeeklyRest ?? false,
+          daily_driving_limit_minutes:
+            activeSettings?.cctDailyDrivingLimitMinutes ?? 540,
+          extended_daily_driving_limit_minutes:
+            activeSettings?.cctExtendedDailyDrivingLimitMinutes ?? 600,
+          max_extended_driving_days_per_week:
+            activeSettings?.cctMaxExtendedDrivingDaysPerWeek ?? 2,
+          weekly_driving_limit_minutes:
+            activeSettings?.cctWeeklyDrivingLimitMinutes ?? 3360,
+          fortnight_driving_limit_minutes:
+            activeSettings?.cctFortnightDrivingLimitMinutes ?? 5400,
+          idle_time_is_paid: activeSettings?.cctIdleTimeIsPaid ?? true,
+          waiting_time_pay_pct: activeSettings?.cctWaitingTimePayPct ?? 0.3,
+          min_guaranteed_work_minutes:
+            activeSettings?.cctMinGuaranteedWorkMinutes ?? 0,
           allow_relief_points: true,
-          enforce_same_depot_start_end: activeSettings?.enforceSameDepotStartEnd ?? false,
-          enforce_single_line_duty:  activeSettings?.enforceSingleLineDuty ?? false,
-          fairness_weight:            fairnessWeight,
+          enforce_same_depot_start_end:
+            activeSettings?.enforceSameDepotStartEnd ?? false,
+          enforce_single_line_duty:
+            activeSettings?.enforceSingleLineDuty ?? false,
+          fairness_weight: fairnessWeight,
           fairness_target_work_minutes: 420,
           fairness_tolerance_minutes: 30,
           long_unpaid_break_limit_minutes: 180,
@@ -162,44 +222,89 @@ export class OptimizationService {
           enforce_trip_groups_hard: false,
           operator_pairing_hard: false,
           strict_hard_validation: true,
-          sunday_off_weight:          activeSettings?.sundayOffWeight ?? 0,
-          holiday_extra_pct:          activeSettings?.holidayExtraPct ?? 1.0,
+          sunday_off_weight: activeSettings?.sundayOffWeight ?? 0,
+          holiday_extra_pct: activeSettings?.holidayExtraPct ?? 1.0,
           goal_weights: {
             fairness: fairnessWeight,
             overtime: 0.8,
             spread: 0.15,
             min_work: 0.2,
           },
-          nocturnal_start_hour:       activeSettings?.cctNocturnalStartHour    ?? 22,
-          nocturnal_end_hour:         activeSettings?.cctNocturnalEndHour      ?? 5,
-          nocturnal_factor:           activeSettings?.cctNocturnalFactor       ?? 0.875,
-          nocturnal_extra_pct:        activeSettings?.cctNocturnalExtraPct     ?? 0.20,
+          nocturnal_start_hour: activeSettings?.cctNocturnalStartHour ?? 22,
+          nocturnal_end_hour: activeSettings?.cctNocturnalEndHour ?? 5,
+          nocturnal_factor: activeSettings?.cctNocturnalFactor ?? 0.875,
+          nocturnal_extra_pct: activeSettings?.cctNocturnalExtraPct ?? 0.2,
         };
         // dto.cspParams sobrescreve campos específicos (override por run)
         const cctOverride = dto.cspParams ?? {};
         const cctParams = {
           ...cctBase,
-          ...(cctOverride.maxWorkMinutes    !== undefined && { max_work_minutes:    cctOverride.maxWorkMinutes }),
-          ...(cctOverride.breakMinutes      !== undefined && { min_break_minutes:   12 }),
-            max_unpaid_break_minutes: 360,
-          ...(cctOverride.minShiftMinutes   !== undefined && { min_shift_minutes: cctOverride.minShiftMinutes }),
-          ...(cctOverride.maxShiftMinutes   !== undefined && { max_shift_minutes:   cctOverride.maxShiftMinutes }),
-          ...(cctOverride.maxDrivingMinutes !== undefined && { max_driving_minutes: cctOverride.maxDrivingMinutes }),
-          
-          ...(cctOverride.enforceSingleLineDuty !== undefined && { enforce_single_line_duty: cctOverride.enforceSingleLineDuty }),
-          ...(cctOverride.fairnessWeight !== undefined && { fairness_weight: cctOverride.fairnessWeight }),
-          ...(cctOverride.fairnessTargetWorkMinutes !== undefined && { fairness_target_work_minutes: cctOverride.fairnessTargetWorkMinutes }),
-          ...(cctOverride.fairnessToleranceMinutes !== undefined && { fairness_tolerance_minutes: cctOverride.fairnessToleranceMinutes }),
-          ...((cctOverride as any).maxUnpaidBreakMinutes !== undefined && { max_unpaid_break_minutes: (cctOverride as any).maxUnpaidBreakMinutes }),
-          ...((cctOverride as any).maxTotalUnpaidBreakMinutes !== undefined && { max_total_unpaid_break_minutes: (cctOverride as any).maxTotalUnpaidBreakMinutes }),
-          ...((cctOverride as any).longUnpaidBreakLimitMinutes !== undefined && { long_unpaid_break_limit_minutes: (cctOverride as any).longUnpaidBreakLimitMinutes }),
-          ...((cctOverride as any).longUnpaidBreakPenaltyWeight !== undefined && { long_unpaid_break_penalty_weight: (cctOverride as any).longUnpaidBreakPenaltyWeight }),
-          ...((cctOverride as any).strictHardValidation !== undefined && { strict_hard_validation: (cctOverride as any).strictHardValidation }),
-          ...(cctOverride.enforceTripGroupsHard !== undefined && { enforce_trip_groups_hard: cctOverride.enforceTripGroupsHard }),
-          ...(cctOverride.operatorChangeTerminalsOnly !== undefined && { operator_change_terminals_only: cctOverride.operatorChangeTerminalsOnly }),
-          ...((cctOverride as any).operatorSingleVehicleOnly !== undefined && { operator_single_vehicle_only: (cctOverride as any).operatorSingleVehicleOnly }),
+          ...(cctOverride.maxWorkMinutes !== undefined && {
+            max_work_minutes: cctOverride.maxWorkMinutes,
+          }),
+          ...(cctOverride.breakMinutes !== undefined && {
+            min_break_minutes: 12,
+          }),
+          max_unpaid_break_minutes: 360,
+          ...(cctOverride.minShiftMinutes !== undefined && {
+            min_shift_minutes: cctOverride.minShiftMinutes,
+          }),
+          ...(cctOverride.maxShiftMinutes !== undefined && {
+            max_shift_minutes: cctOverride.maxShiftMinutes,
+          }),
+          ...(cctOverride.maxDrivingMinutes !== undefined && {
+            max_driving_minutes: cctOverride.maxDrivingMinutes,
+          }),
+
+          ...(cctOverride.enforceSingleLineDuty !== undefined && {
+            enforce_single_line_duty: cctOverride.enforceSingleLineDuty,
+          }),
+          ...(cctOverride.fairnessWeight !== undefined && {
+            fairness_weight: cctOverride.fairnessWeight,
+          }),
+          ...(cctOverride.fairnessTargetWorkMinutes !== undefined && {
+            fairness_target_work_minutes: cctOverride.fairnessTargetWorkMinutes,
+          }),
+          ...(cctOverride.fairnessToleranceMinutes !== undefined && {
+            fairness_tolerance_minutes: cctOverride.fairnessToleranceMinutes,
+          }),
+          ...((cctOverride as any).maxUnpaidBreakMinutes !== undefined && {
+            max_unpaid_break_minutes: (cctOverride as any)
+              .maxUnpaidBreakMinutes,
+          }),
+          ...((cctOverride as any).maxTotalUnpaidBreakMinutes !== undefined && {
+            max_total_unpaid_break_minutes: (cctOverride as any)
+              .maxTotalUnpaidBreakMinutes,
+          }),
+          ...((cctOverride as any).longUnpaidBreakLimitMinutes !==
+            undefined && {
+            long_unpaid_break_limit_minutes: (cctOverride as any)
+              .longUnpaidBreakLimitMinutes,
+          }),
+          ...((cctOverride as any).longUnpaidBreakPenaltyWeight !==
+            undefined && {
+            long_unpaid_break_penalty_weight: (cctOverride as any)
+              .longUnpaidBreakPenaltyWeight,
+          }),
+          ...((cctOverride as any).strictHardValidation !== undefined && {
+            strict_hard_validation: (cctOverride as any).strictHardValidation,
+          }),
+          ...(cctOverride.enforceTripGroupsHard !== undefined && {
+            enforce_trip_groups_hard: cctOverride.enforceTripGroupsHard,
+          }),
+          ...(cctOverride.operatorChangeTerminalsOnly !== undefined && {
+            operator_change_terminals_only:
+              cctOverride.operatorChangeTerminalsOnly,
+          }),
+          ...((cctOverride as any).operatorSingleVehicleOnly !== undefined && {
+            operator_single_vehicle_only: (cctOverride as any)
+              .operatorSingleVehicleOnly,
+          }),
         };
-        const fairnessOverride = normalizeWeight((cctOverride as any).fairnessWeight, fairnessWeight);
+        const fairnessOverride = normalizeWeight(
+          (cctOverride as any).fairnessWeight,
+          fairnessWeight,
+        );
         const mergedGoalWeights = {
           ...(cctBase.goal_weights ?? {}),
           ...(cctParams.goal_weights ?? {}),
@@ -214,45 +319,83 @@ export class OptimizationService {
         const vspBase = {
           max_vehicle_shift_minutes: 1200,
           min_layover_minutes: 10,
-          time_budget_s:             activeSettings?.timeBudgetSeconds      ?? 300,
-          fixed_vehicle_activation_cost: activeSettings?.fixedVehicleActivationCost ?? 3000,
-          deadhead_cost_per_minute: activeSettings?.deadheadCostPerMinute ?? 0.85,
+          time_budget_s: activeSettings?.timeBudgetSeconds ?? 300,
+          fixed_vehicle_activation_cost:
+            activeSettings?.fixedVehicleActivationCost ?? 3000,
+          deadhead_cost_per_minute:
+            activeSettings?.deadheadCostPerMinute ?? 0.85,
           idle_cost_per_minute: activeSettings?.idleCostPerMinute ?? 0.5,
-          same_depot_required:       activeSettings?.sameDepotRequired ?? false,
-          preserve_preferred_pairs:  activeSettings?.preservePreferredPairs ?? false,
-          allow_multi_line_block:    true,
-          allow_vehicle_split_shifts: activeSettings?.allowVehicleSplitShifts ?? true,
+          same_depot_required: activeSettings?.sameDepotRequired ?? false,
+          preserve_preferred_pairs:
+            activeSettings?.preservePreferredPairs ?? false,
+          allow_multi_line_block: true,
+          allow_vehicle_split_shifts:
+            activeSettings?.allowVehicleSplitShifts ?? true,
           split_shift_min_gap_minutes: 120,
           split_shift_max_gap_minutes: 600,
           max_connection_cost_for_reuse_ratio: 2.5,
-          max_simultaneous_chargers: activeSettings?.maxSimultaneousChargers ?? 0,
-          peak_energy_cost_per_kwh:  activeSettings?.peakEnergyCostPerKwh ?? 0,
-          offpeak_energy_cost_per_kwh: activeSettings?.offpeakEnergyCostPerKwh ?? 0,
-          min_workpiece_minutes:     activeSettings?.minWorkpieceMinutes ?? 0,
-          max_workpiece_minutes:     activeSettings?.maxWorkpieceMinutes ?? 480,
-          min_trips_per_piece:       activeSettings?.minTripsPerPiece ?? 1,
-          max_trips_per_piece:       activeSettings?.maxTripsPerPiece ?? 6,
-          pricing_enabled:           activeSettings?.pricingEnabled ?? true,
-          use_set_covering:          activeSettings?.useSetCovering ?? false,
-          max_candidate_successors_per_task: activeSettings?.maxCandidateSuccessorsPerTask ?? 10,
-          max_generated_columns:     activeSettings?.maxGeneratedColumns ?? 8000,
-          max_pricing_iterations:    activeSettings?.maxPricingIterations ?? 5,
-          max_pricing_additions:     activeSettings?.maxPricingAdditions ?? 512,
+          max_simultaneous_chargers:
+            activeSettings?.maxSimultaneousChargers ?? 0,
+          peak_energy_cost_per_kwh: activeSettings?.peakEnergyCostPerKwh ?? 0,
+          offpeak_energy_cost_per_kwh:
+            activeSettings?.offpeakEnergyCostPerKwh ?? 0,
+          min_workpiece_minutes: activeSettings?.minWorkpieceMinutes ?? 0,
+          max_workpiece_minutes: activeSettings?.maxWorkpieceMinutes ?? 480,
+          min_trips_per_piece: activeSettings?.minTripsPerPiece ?? 1,
+          max_trips_per_piece: activeSettings?.maxTripsPerPiece ?? 6,
+          pricing_enabled: activeSettings?.pricingEnabled ?? true,
+          use_set_covering: activeSettings?.useSetCovering ?? false,
+          max_candidate_successors_per_task:
+            activeSettings?.maxCandidateSuccessorsPerTask ?? 10,
+          max_generated_columns: activeSettings?.maxGeneratedColumns ?? 8000,
+          max_pricing_iterations: activeSettings?.maxPricingIterations ?? 5,
+          max_pricing_additions: activeSettings?.maxPricingAdditions ?? 512,
           strict_hard_validation: true,
         };
         const vspParams = {
           ...vspBase,
-          ...(dto.vspParams?.timeBudgetSeconds !== undefined && { time_budget_s: dto.vspParams.timeBudgetSeconds }),
-          ...(dto.vspParams?.maxVehicles !== undefined && { max_vehicles: dto.vspParams.maxVehicles, maxVehicles: dto.vspParams.maxVehicles }),
-          ...((dto.vspParams as any)?.fixedVehicleActivationCost !== undefined && { fixed_vehicle_activation_cost: (dto.vspParams as any).fixedVehicleActivationCost }),
-          ...((dto.vspParams as any)?.deadheadCostPerMinute !== undefined && { deadhead_cost_per_minute: (dto.vspParams as any).deadheadCostPerMinute }),
-          ...((dto.vspParams as any)?.idleCostPerMinute !== undefined && { idle_cost_per_minute: (dto.vspParams as any).idleCostPerMinute }),
-          ...((dto.vspParams as any)?.maxConnectionCostForReuseRatio !== undefined && { max_connection_cost_for_reuse_ratio: (dto.vspParams as any).maxConnectionCostForReuseRatio }),
-          ...((dto.vspParams as any)?.strictHardValidation !== undefined && { strict_hard_validation: (dto.vspParams as any).strictHardValidation }),
-          ...((dto.vspParams as any)?.allowMultiLineBlock !== undefined && { allow_multi_line_block: (dto.vspParams as any).allowMultiLineBlock }),
-          ...((dto.vspParams as any)?.allowVehicleSplitShifts !== undefined && { allow_vehicle_split_shifts: (dto.vspParams as any).allowVehicleSplitShifts }),
-          ...((dto.vspParams as any)?.splitShiftMinGapMinutes !== undefined && { split_shift_min_gap_minutes: (dto.vspParams as any).splitShiftMinGapMinutes }),
-          ...((dto.vspParams as any)?.splitShiftMaxGapMinutes !== undefined && { split_shift_max_gap_minutes: (dto.vspParams as any).splitShiftMaxGapMinutes }),
+          ...(dto.vspParams?.timeBudgetSeconds !== undefined && {
+            time_budget_s: dto.vspParams.timeBudgetSeconds,
+          }),
+          ...(dto.vspParams?.maxVehicles !== undefined && {
+            max_vehicles: dto.vspParams.maxVehicles,
+            maxVehicles: dto.vspParams.maxVehicles,
+          }),
+          ...((dto.vspParams as any)?.fixedVehicleActivationCost !==
+            undefined && {
+            fixed_vehicle_activation_cost: (dto.vspParams as any)
+              .fixedVehicleActivationCost,
+          }),
+          ...((dto.vspParams as any)?.deadheadCostPerMinute !== undefined && {
+            deadhead_cost_per_minute: (dto.vspParams as any)
+              .deadheadCostPerMinute,
+          }),
+          ...((dto.vspParams as any)?.idleCostPerMinute !== undefined && {
+            idle_cost_per_minute: (dto.vspParams as any).idleCostPerMinute,
+          }),
+          ...((dto.vspParams as any)?.maxConnectionCostForReuseRatio !==
+            undefined && {
+            max_connection_cost_for_reuse_ratio: (dto.vspParams as any)
+              .maxConnectionCostForReuseRatio,
+          }),
+          ...((dto.vspParams as any)?.strictHardValidation !== undefined && {
+            strict_hard_validation: (dto.vspParams as any).strictHardValidation,
+          }),
+          ...((dto.vspParams as any)?.allowMultiLineBlock !== undefined && {
+            allow_multi_line_block: (dto.vspParams as any).allowMultiLineBlock,
+          }),
+          ...((dto.vspParams as any)?.allowVehicleSplitShifts !== undefined && {
+            allow_vehicle_split_shifts: (dto.vspParams as any)
+              .allowVehicleSplitShifts,
+          }),
+          ...((dto.vspParams as any)?.splitShiftMinGapMinutes !== undefined && {
+            split_shift_min_gap_minutes: (dto.vspParams as any)
+              .splitShiftMinGapMinutes,
+          }),
+          ...((dto.vspParams as any)?.splitShiftMaxGapMinutes !== undefined && {
+            split_shift_max_gap_minutes: (dto.vspParams as any)
+              .splitShiftMaxGapMinutes,
+          }),
         };
 
         // ── Calcular matriz de deadhead entre terminais ──────────────────
@@ -290,13 +433,16 @@ export class OptimizationService {
         const minLayover = vspParams.min_layover_minutes ?? 10;
         const terminalCentralMinLayover = 12; // Terminal Central (id=1): 12 min entre ida/volta
 
-        const buildDeadheadTimes = (destTerminal: number): Record<number, number> => {
+        const buildDeadheadTimes = (
+          destTerminal: number,
+        ): Record<number, number> => {
           const dh: Record<number, number> = {};
           for (const tid of terminalIds) {
             if (tid === destTerminal) {
               // Mesmo terminal: layover mínimo (não 0!)
               // Terminal Central exige 12 min, outros usam min_layover
-              dh[tid] = destTerminal === 1 ? terminalCentralMinLayover : minLayover;
+              dh[tid] =
+                destTerminal === 1 ? terminalCentralMinLayover : minLayover;
             } else {
               const key = `${destTerminal}-${tid}`;
               dh[tid] = Math.max(minLayover, deadheadMatrix.get(key) ?? 30);
@@ -324,19 +470,40 @@ export class OptimizationService {
           vehicle_types: [],
           algorithm: this._mapAlgorithm(dto.algorithm as any),
           run_id: runId,
-          line_id: (dto.lineIds?.length ?? 0) > 1 ? null : (dto.lineId ?? dto.lineIds?.[0] ?? null),
+          line_id:
+            (dto.lineIds?.length ?? 0) > 1
+              ? null
+              : (dto.lineId ?? dto.lineIds?.[0] ?? null),
           company_id: dto.companyId,
-          time_budget_s: dto.vspParams?.timeBudgetSeconds ?? activeSettings?.timeBudgetSeconds ?? null,
+          time_budget_s:
+            dto.vspParams?.timeBudgetSeconds ??
+            activeSettings?.timeBudgetSeconds ??
+            null,
           cct_params: cctParams,
           vsp_params: vspParams,
         };
 
         try {
-          require('fs').writeFileSync('/tmp/optimizer_payload.json', JSON.stringify(optimizerPayload, null, 2));
-            require('fs').writeFileSync('/tmp/optimizer_payload.json', JSON.stringify(optimizerPayload, null, 2));
-            require('fs').writeFileSync('/tmp/optimizer_payload.json', JSON.stringify(optimizerPayload, null, 2));
-            require('fs').writeFileSync('/tmp/optimizer_payload.json', JSON.stringify(optimizerPayload, null, 2));
-            result = await this._callOptimizerService(optimizerUrl, optimizerPayload);
+          require('fs').writeFileSync(
+            '/tmp/optimizer_payload.json',
+            JSON.stringify(optimizerPayload, null, 2),
+          );
+          require('fs').writeFileSync(
+            '/tmp/optimizer_payload.json',
+            JSON.stringify(optimizerPayload, null, 2),
+          );
+          require('fs').writeFileSync(
+            '/tmp/optimizer_payload.json',
+            JSON.stringify(optimizerPayload, null, 2),
+          );
+          require('fs').writeFileSync(
+            '/tmp/optimizer_payload.json',
+            JSON.stringify(optimizerPayload, null, 2),
+          );
+          result = await this._callOptimizerService(
+            optimizerUrl,
+            optimizerPayload,
+          );
         } catch (optimizerRunErr) {
           const msg = (optimizerRunErr as Error).message ?? '';
           const hasFleetCap = dto.vspParams?.maxVehicles !== undefined;
@@ -356,7 +523,10 @@ export class OptimizationService {
             delete relaxedPayload.vsp_params.max_vehicles;
             delete relaxedPayload.vsp_params.maxVehicles;
 
-            result = await this._callOptimizerService(optimizerUrl, relaxedPayload);
+            result = await this._callOptimizerService(
+              optimizerUrl,
+              relaxedPayload,
+            );
             result.meta = {
               ...(result.meta ?? {}),
               fleet_cap_relaxed: true,
@@ -374,7 +544,7 @@ export class OptimizationService {
         }
         if (this._requiresFullOptimizer(dto, trips, activeSettings)) {
           throw new Error(
-            `Otimizador Python indisponível (${optimizerError.message}). Esta execução exige o solver completo e não pode usar fallback inline.`
+            `Otimizador Python indisponível (${optimizerError.message}). Esta execução exige o solver completo e não pode usar fallback inline.`,
           );
         }
         this.logger.warn(
@@ -394,9 +564,9 @@ export class OptimizationService {
         status: OptimizationStatus.FAILED,
         finishedAt: new Date(),
         errorMessage: diagnostics.userMessage,
-        resultSummary: ({
+        resultSummary: {
           diagnostics,
-        } as any),
+        } as any,
       });
     }
   }
@@ -456,22 +626,22 @@ export class OptimizationService {
   private _mapAlgorithm(algorithm?: string): string {
     const map: Record<string, string> = {
       // Valores válidos — passam direto
-      'greedy':               'greedy',
-      'genetic':              'genetic',
-      'simulated_annealing':  'simulated_annealing',
-      'tabu_search':          'tabu_search',
-      'set_partitioning':     'set_partitioning',
-      'joint_solver':         'joint_solver',
-      'hybrid_pipeline':      'hybrid_pipeline',
+      greedy: 'greedy',
+      genetic: 'genetic',
+      simulated_annealing: 'simulated_annealing',
+      tabu_search: 'tabu_search',
+      set_partitioning: 'set_partitioning',
+      joint_solver: 'joint_solver',
+      hybrid_pipeline: 'hybrid_pipeline',
       // Aliases que NÃO existem no Python
-      'full_pipeline':        'hybrid_pipeline',   // pipeline completo → hybrid
-      'vsp_only':             'greedy',            // só VSP → usa greedy
-      'csp_only':             'greedy',            // só CSP → usa greedy
+      full_pipeline: 'hybrid_pipeline', // pipeline completo → hybrid
+      vsp_only: 'greedy', // só VSP → usa greedy
+      csp_only: 'greedy', // só CSP → usa greedy
       // Enum legado
-      'vsp_greedy':           'greedy',
-      'vsp_local_search':     'tabu_search',
-      'csp_column_generation':'set_partitioning',
-      'csp_heuristic':        'greedy',
+      vsp_greedy: 'greedy',
+      vsp_local_search: 'tabu_search',
+      csp_column_generation: 'set_partitioning',
+      csp_heuristic: 'greedy',
     };
     return map[algorithm ?? ''] ?? 'hybrid_pipeline';
   }
@@ -507,15 +677,26 @@ export class OptimizationService {
     );
 
     if (!sorted.length) {
-      return { vehicles: 0, crew: 0, blocks: [], duties: [], cct_violations: 0,
-               vsp_algorithm: 'inline_greedy_v2', csp_algorithm: 'inline_greedy_v2', elapsed_ms: 0 };
+      return {
+        vehicles: 0,
+        crew: 0,
+        blocks: [],
+        duties: [],
+        cct_violations: 0,
+        vsp_algorithm: 'inline_greedy_v2',
+        csp_algorithm: 'inline_greedy_v2',
+        elapsed_ms: 0,
+      };
     }
 
     // ── 2. Deadhead matrix: tempo mínimo de deslocamento entre terminais ─────
     // Terminal IDs codificados por linha: (lineId*1000 + terminalId)
     // Garante que terminais de linhas distintas NUNCA sejam considerados iguais → sem teletransporte
-    const _encTerm = (lineId: number | null | undefined, terminalId: number | null | undefined, def: number) =>
-      ((lineId ?? 0) * 1000) + (terminalId ?? def);
+    const _encTerm = (
+      lineId: number | null | undefined,
+      terminalId: number | null | undefined,
+      def: number,
+    ) => (lineId ?? 0) * 1000 + (terminalId ?? def);
 
     const minTripDuration = new Map<string, number>();
     for (const t of sorted) {
@@ -523,7 +704,8 @@ export class OptimizationService {
       const encDest = _encTerm(t.lineId, t.destinationTerminalId, 2);
       const key = `${encOrig}-${encDest}`;
       const cur = minTripDuration.get(key) ?? Infinity;
-      if ((t.durationMinutes ?? 0) < cur) minTripDuration.set(key, t.durationMinutes ?? 0);
+      if ((t.durationMinutes ?? 0) < cur)
+        minTripDuration.set(key, t.durationMinutes ?? 0);
     }
     const deadhead = (fromDest: number, toOrigin: number): number => {
       if (fromDest === toOrigin) {
@@ -555,13 +737,15 @@ export class OptimizationService {
 
     for (const trip of sorted) {
       const tripStart = trip.startTimeMinutes ?? 0;
-      const tripEnd   = trip.endTimeMinutes   ?? 0;
+      const tripEnd = trip.endTimeMinutes ?? 0;
       // Terminal IDs codificados por linha — previne teletransporte cross-line
-      const _lid    = trip.lineId ?? null;
-      const originT = (_lid != null ? _lid * 1000 : 0) + (trip.originTerminalId ?? 1);
-      const destT   = (_lid != null ? _lid * 1000 : 0) + (trip.destinationTerminalId ?? 2);
-      const lineId  = trip.lineId ?? null;
-      const dur       = trip.durationMinutes       ?? 0;
+      const _lid = trip.lineId ?? null;
+      const originT =
+        (_lid != null ? _lid * 1000 : 0) + (trip.originTerminalId ?? 1);
+      const destT =
+        (_lid != null ? _lid * 1000 : 0) + (trip.destinationTerminalId ?? 2);
+      const lineId = trip.lineId ?? null;
+      const dur = trip.durationMinutes ?? 0;
 
       // Fecha blocos que não poderão mais aceitar viagens (cutoff 3h de folga)
       const newActive: InlineBlock[] = [];
@@ -583,7 +767,8 @@ export class OptimizationService {
 
       for (const blk of activeBlocks) {
         // Restrição de linha: veículo não muda de linha
-        if (lineId !== null && blk.lineId !== null && blk.lineId !== lineId) continue;
+        if (lineId !== null && blk.lineId !== null && blk.lineId !== lineId)
+          continue;
         // Turno máximo do veículo
         if (tripEnd - blk.startTime > MAX_VEHICLE_SHIFT) continue;
 
@@ -629,17 +814,27 @@ export class OptimizationService {
     let deadheadInsufCount = 0;
 
     for (const blk of allBlocks) {
-      const tds = [...blk.trips].sort((a, b) => (a.startTimeMinutes ?? 0) - (b.startTimeMinutes ?? 0));
+      const tds = [...blk.trips].sort(
+        (a, b) => (a.startTimeMinutes ?? 0) - (b.startTimeMinutes ?? 0),
+      );
       for (let i = 0; i < tds.length - 1; i++) {
-        const cur = tds[i], nxt = tds[i + 1];
+        const cur = tds[i],
+          nxt = tds[i + 1];
         const gap = (nxt.startTimeMinutes ?? 0) - (cur.endTimeMinutes ?? 0);
-        const dh  = deadhead(_encTerm(cur.lineId, cur.destinationTerminalId, 2), _encTerm(nxt.lineId, nxt.originTerminalId, 1));
+        const dh = deadhead(
+          _encTerm(cur.lineId, cur.destinationTerminalId, 2),
+          _encTerm(nxt.lineId, nxt.originTerminalId, 1),
+        );
         if (gap < 0) {
           overlapCount++;
-          warnings.push(`OVERLAP B${blk.blockId}: T${cur.id}(end=${cur.endTimeMinutes})→T${nxt.id}(start=${nxt.startTimeMinutes}) gap=${gap}min`);
+          warnings.push(
+            `OVERLAP B${blk.blockId}: T${cur.id}(end=${cur.endTimeMinutes})→T${nxt.id}(start=${nxt.startTimeMinutes}) gap=${gap}min`,
+          );
         } else if (gap < dh) {
           deadheadInsufCount++;
-          warnings.push(`DEADHEAD_INSUF B${blk.blockId}: T${cur.id}→T${nxt.id} gap=${gap}min<needed=${dh}min`);
+          warnings.push(
+            `DEADHEAD_INSUF B${blk.blockId}: T${cur.id}→T${nxt.id} gap=${gap}min<needed=${dh}min`,
+          );
         } else if (gap === 0) {
           layoverZeroCount++;
           warnings.push(`LAYOVER_ZERO B${blk.blockId}: T${cur.id}→T${nxt.id}`);
@@ -668,10 +863,15 @@ export class OptimizationService {
     // Flatten: (trip, blockId) ordenado por start_time
     const tripBlock: Array<{ trip: any; blockId: number }> = [];
     for (const blk of allBlocks) {
-      const sorted2 = [...blk.trips].sort((a, b) => (a.startTimeMinutes ?? 0) - (b.startTimeMinutes ?? 0));
-      for (const t of sorted2) tripBlock.push({ trip: t, blockId: blk.blockId });
+      const sorted2 = [...blk.trips].sort(
+        (a, b) => (a.startTimeMinutes ?? 0) - (b.startTimeMinutes ?? 0),
+      );
+      for (const t of sorted2)
+        tripBlock.push({ trip: t, blockId: blk.blockId });
     }
-    tripBlock.sort((a, b) => (a.trip.startTimeMinutes ?? 0) - (b.trip.startTimeMinutes ?? 0));
+    tripBlock.sort(
+      (a, b) => (a.trip.startTimeMinutes ?? 0) - (b.trip.startTimeMinutes ?? 0),
+    );
 
     const duties: InlineDuty[] = [];
     let nextDutyId = 1;
@@ -679,14 +879,15 @@ export class OptimizationService {
 
     for (const { trip, blockId } of tripBlock) {
       const tStart = trip.startTimeMinutes ?? 0;
-      const tEnd   = trip.endTimeMinutes   ?? 0;
-      const dur    = trip.durationMinutes  ?? (tEnd - tStart);
+      const tEnd = trip.endTimeMinutes ?? 0;
+      const dur = trip.durationMinutes ?? tEnd - tStart;
 
       let assigned = false;
       for (const d of duties) {
         const gap = tStart - d.lastTripEnd;
         if (gap < 0) continue; // sobreposição
-        const sameBlock = blockId === d.segments[d.segments.length - 1]?.blockId;
+        const sameBlock =
+          blockId === d.segments[d.segments.length - 1]?.blockId;
         if (!sameBlock && gap < MIN_BREAK) continue; // handoff sem pausa
         if (gap < MIN_LAYOVER) continue; // layover mínimo
 
@@ -708,9 +909,9 @@ export class OptimizationService {
         } else {
           d.segments.push({ blockId, trips: [trip], driveMin: dur });
         }
-        d.lastTripEnd   = tEnd;
-        d.workTime      = newWork;
-        d.contDrive     = hadBreak ? dur : newContDrive;
+        d.lastTripEnd = tEnd;
+        d.workTime = newWork;
+        d.contDrive = hadBreak ? dur : newContDrive;
         assigned = true;
         break;
       }
@@ -731,7 +932,7 @@ export class OptimizationService {
 
     // Valida CCT final
     for (const d of duties) {
-      const spread = (d.lastTripEnd - d.spreadFrom) + PULLOUT + PULLBACK;
+      const spread = d.lastTripEnd - d.spreadFrom + PULLOUT + PULLBACK;
       if (spread > MAX_CCT_SHIFT) {
         d.shiftViolations++;
         cctViolations++;
@@ -752,11 +953,13 @@ export class OptimizationService {
       for (let j = i + 1; j < sortedForPairing.length; j++) {
         const volta = sortedForPairing[j];
         if (pairedTrips.has(volta.id)) continue;
-        if ((volta.startTimeMinutes ?? 0) > (ida.endTimeMinutes ?? 0) + 120) break; // janela de 2h
+        if ((volta.startTimeMinutes ?? 0) > (ida.endTimeMinutes ?? 0) + 120)
+          break; // janela de 2h
         if (
           ida.lineId === volta.lineId &&
           ida.destinationTerminalId === volta.originTerminalId &&
-          (volta.startTimeMinutes ?? 0) >= (ida.endTimeMinutes ?? 0) + MIN_LAYOVER
+          (volta.startTimeMinutes ?? 0) >=
+            (ida.endTimeMinutes ?? 0) + MIN_LAYOVER
         ) {
           pairedTrips.add(ida.id);
           pairedTrips.add(volta.id);
@@ -788,7 +991,10 @@ export class OptimizationService {
           duration: t.durationMinutes ?? 0,
           line_id: t.lineId ?? null,
           is_paired: pairedTrips.has(t.id),
-          direction: (t.originTerminalId ?? 1) < (t.destinationTerminalId ?? 2) ? 'outbound' : 'inbound',
+          direction:
+            (t.originTerminalId ?? 1) < (t.destinationTerminalId ?? 2)
+              ? 'outbound'
+              : 'inbound',
         })),
       };
     });
@@ -810,7 +1016,11 @@ export class OptimizationService {
     }));
 
     const qaWarnings = warnings.slice(0, 20).map((msg) => ({
-      type: msg.startsWith('OVERLAP') ? 'overlap' : msg.startsWith('DEADHEAD') ? 'deadhead_insufficient' : 'layover_zero',
+      type: msg.startsWith('OVERLAP')
+        ? 'overlap'
+        : msg.startsWith('DEADHEAD')
+          ? 'deadhead_insufficient'
+          : 'layover_zero',
       severity: 'error',
       message: msg,
     }));
@@ -832,7 +1042,8 @@ export class OptimizationService {
         {
           type: 'fallback_inline',
           severity: 'warning',
-          message: 'Resultado gerado por fallback inline simplificado. Ele não garante preservação de pares ida-volta, continuidade estrita por linha ou regras avançadas do solver Python.',
+          message:
+            'Resultado gerado por fallback inline simplificado. Ele não garante preservação de pares ida-volta, continuidade estrita por linha ou regras avançadas do solver Python.',
         },
         ...qaWarnings,
       ],
@@ -849,7 +1060,9 @@ export class OptimizationService {
     activeSettings: any,
   ): boolean {
     const multiLineRun = (dto.lineIds?.length ?? 0) > 1;
-    const algorithm = String(dto.algorithm ?? OptimizationAlgorithm.FULL_PIPELINE);
+    const algorithm = String(
+      dto.algorithm ?? OptimizationAlgorithm.FULL_PIPELINE,
+    );
     const needsPairing =
       activeSettings?.preservePreferredPairs === true ||
       trips.some((trip) => trip?.tripGroupId != null);
@@ -866,7 +1079,10 @@ export class OptimizationService {
     );
   }
 
-  private _classifyOptimizerError(err: Error): { kind: 'business' | 'availability'; message: string } {
+  private _classifyOptimizerError(err: Error): {
+    kind: 'business' | 'availability';
+    message: string;
+  } {
     const raw = String(err?.message ?? 'Erro desconhecido do otimizador');
     if (!raw.startsWith('Optimizer HTTP ')) {
       return { kind: 'availability', message: raw };
@@ -894,7 +1110,7 @@ export class OptimizationService {
   private _buildFailureDiagnostics(
     rawMessage: string,
     dto: RunOptimizationDto,
-    activeSettings: any,
+    activeSettings: ActiveSettingsDto | null,
   ): {
     code: string;
     userMessage: string;
@@ -905,75 +1121,121 @@ export class OptimizationService {
     const message = String(rawMessage || 'Falha desconhecida na execução');
     const hints: string[] = [];
     let code = 'UNKNOWN_FAILURE';
-    let summary = 'A execução falhou e precisa de ajuste antes de gerar a programação.';
+    let summary =
+      'A execução falhou e precisa de ajuste antes de gerar a programação.';
 
     if (message.includes('MEAL_BREAK_MISSING')) {
       code = 'MEAL_BREAK_MISSING';
-      summary = 'O solver não conseguiu encaixar o intervalo de refeição exigido com as regras e viagens atuais.';
-      hints.push('Reduza o intervalo de refeição para 30 min se a operação permitir.');
-      hints.push('Ative "Permitir relief points" para abrir mais pontos de troca e pausa.');
-      hints.push('Se for multi-linha, teste primeiro uma única linha para identificar onde a grade está mais apertada.');
-      hints.push('Se a operação exigir refeição de 60 min, revise a grade de partidas porque hoje não há janela suficiente.');
+      summary =
+        'O solver não conseguiu encaixar o intervalo de refeição exigido com as regras e viagens atuais.';
+      hints.push(
+        'Reduza o intervalo de refeição para 30 min se a operação permitir.',
+      );
+      hints.push(
+        'Ative "Permitir relief points" para abrir mais pontos de troca e pausa.',
+      );
+      hints.push(
+        'Se for multi-linha, teste primeiro uma única linha para identificar onde a grade está mais apertada.',
+      );
+      hints.push(
+        'Se a operação exigir refeição de 60 min, revise a grade de partidas porque hoje não há janela suficiente.',
+      );
     }
 
     if (message.includes('CONTINUOUS_DRIVING_EXCEEDED')) {
       code = 'CONTINUOUS_DRIVING_EXCEEDED';
-      summary = 'Há jornadas que ultrapassam o limite de direção contínua sem pausa válida.';
-      hints.push('Aumente folgas operacionais entre viagens ou permita relief points.');
-      hints.push('Verifique se o break mínimo não está maior do que a folga real entre viagens.');
+      summary =
+        'Há jornadas que ultrapassam o limite de direção contínua sem pausa válida.';
+      hints.push(
+        'Aumente folgas operacionais entre viagens ou permita relief points.',
+      );
+      hints.push(
+        'Verifique se o break mínimo não está maior do que a folga real entre viagens.',
+      );
     }
 
     if (message.includes('SPREAD_EXCEEDED')) {
       code = 'SPREAD_EXCEEDED';
-      summary = 'A jornada total está ultrapassando o spread máximo configurado.';
+      summary =
+        'A jornada total está ultrapassando o spread máximo configurado.';
       hints.push('Aumente o spread máximo se a regra da empresa permitir.');
       hints.push('Ou divida a operação em mais jornadas/mais tripulantes.');
     }
 
-    if (message.includes('DUTY_MULTI_LINE') || message.includes('BLOCK_MULTI_LINE')) {
+    if (
+      message.includes('DUTY_MULTI_LINE') ||
+      message.includes('BLOCK_MULTI_LINE')
+    ) {
       code = 'MULTI_LINE_CONFLICT';
-      summary = 'As regras atuais não aceitaram mistura de linhas nos blocos ou jornadas.';
-      hints.push('Desative "Manter tripulante em uma única linha" se a operação permitir mistura controlada.');
-      hints.push('Se a regra for obrigatória, rode menos linhas por vez ou revise os tempos entre viagens.');
+      summary =
+        'As regras atuais não aceitaram mistura de linhas nos blocos ou jornadas.';
+      hints.push(
+        'Desative "Manter tripulante em uma única linha" se a operação permitir mistura controlada.',
+      );
+      hints.push(
+        'Se a regra for obrigatória, rode menos linhas por vez ou revise os tempos entre viagens.',
+      );
     }
 
     if (message.includes('MANDATORY_GROUP_SPLIT')) {
       code = 'MANDATORY_GROUP_SPLIT';
-      summary = 'O sistema não conseguiu manter juntos alguns pares ida/volta que foram marcados como obrigatórios.';
-      hints.push('Teste o algoritmo híbrido para dar mais espaço à recombinação das jornadas.');
-      hints.push('Ative relief points se a operação permitir troca em mais pontos.');
-      hints.push('Se o dado de pairing estiver incorreto, revise o agrupamento ida/volta das viagens.');
-      hints.push('Se a regra não for obrigatória em todos os casos, alivie o pairing rígido do cenário.');
+      summary =
+        'O sistema não conseguiu manter juntos alguns pares ida/volta que foram marcados como obrigatórios.';
+      hints.push(
+        'Teste o algoritmo híbrido para dar mais espaço à recombinação das jornadas.',
+      );
+      hints.push(
+        'Ative relief points se a operação permitir troca em mais pontos.',
+      );
+      hints.push(
+        'Se o dado de pairing estiver incorreto, revise o agrupamento ida/volta das viagens.',
+      );
+      hints.push(
+        'Se a regra não for obrigatória em todos os casos, alivie o pairing rígido do cenário.',
+      );
     }
 
     if (message.includes('Optimizer request timed out')) {
       code = 'OPTIMIZER_TIMEOUT';
       summary = 'O serviço do otimizador demorou demais para responder.';
       hints.push('Verifique se o serviço Python do otimizador está ativo.');
-      hints.push('Reduza a quantidade de linhas por execução para diagnosticar o gargalo.');
-      hints.push('Se necessário, diminua a complexidade: menos linhas, menos pairing rígido ou menos tempo de busca.');
+      hints.push(
+        'Reduza a quantidade de linhas por execução para diagnosticar o gargalo.',
+      );
+      hints.push(
+        'Se necessário, diminua a complexidade: menos linhas, menos pairing rígido ou menos tempo de busca.',
+      );
     }
 
     if (message.includes('Esta execução exige o solver completo')) {
       if (code === 'UNKNOWN_FAILURE') code = 'FULL_SOLVER_REQUIRED';
       hints.push('Essa execução não pode usar o modo simplificado inline.');
-      hints.push('Garanta que o otimizador Python esteja no ar antes de rodar multi-linha, híbrido ou pairing rígido.');
+      hints.push(
+        'Garanta que o otimizador Python esteja no ar antes de rodar multi-linha, híbrido ou pairing rígido.',
+      );
     }
 
     if (message.includes('Nenhuma viagem encontrada')) {
       code = 'NO_TRIPS_FOUND';
       summary = 'Não há viagens disponíveis para as linhas selecionadas.';
-      hints.push('Confira se a linha tem viagens cadastradas para a empresa e o período esperado.');
+      hints.push(
+        'Confira se a linha tem viagens cadastradas para a empresa e o período esperado.',
+      );
     }
 
     if (hints.length === 0) {
-      hints.push('Abra a configuração ativa e revise os limites de jornada, pausa e pairing.');
-      hints.push('Se o erro persistir, rode uma única linha para localizar o conflito com mais precisão.');
+      hints.push(
+        'Abra a configuração ativa e revise os limites de jornada, pausa e pairing.',
+      );
+      hints.push(
+        'Se o erro persistir, rode uma única linha para localizar o conflito com mais precisão.',
+      );
     }
 
     const currentSettings = {
       lineIds: dto.lineIds ?? (dto.lineId ? [dto.lineId] : []),
-      algorithm: dto.algorithm ?? activeSettings?.algorithmType ?? 'hybrid_pipeline',
+      algorithm:
+        dto.algorithm ?? activeSettings?.algorithmType ?? 'hybrid_pipeline',
       profileId: activeSettings?.id ?? null,
       profileName: activeSettings?.name ?? null,
       mealBreakMinutes: activeSettings?.cctMealBreakMinutes ?? null,
@@ -1006,24 +1268,26 @@ export class OptimizationService {
     _trips: any[],
   ): Promise<any> {
     // Mantido por compatibilidade — não utilizado mais
-    throw new Error('runPythonOptimizer is deprecated. Use microservice instead.');
+    throw new Error(
+      'runPythonOptimizer is deprecated. Use microservice instead.',
+    );
   }
 
   private async _saveResults(
     runId: number,
-    result: any,
+    result: OptimizationResultPayload,
     totalTrips: number,
   ): Promise<void> {
     const finishedAt = new Date();
     const run = await this.runRepo.findOne({ where: { id: runId } });
-    const durationMs =
-      run?.startedAt
-        ? finishedAt.getTime() - run.startedAt.getTime()
-        : 0;
+    const durationMs = run?.startedAt
+      ? finishedAt.getTime() - run.startedAt.getTime()
+      : 0;
 
-    const cctViolations = Number(result.cct_violations ?? result.cctViolations ?? 0);
-    const hardOutputOk =
-      (result?.meta?.hard_constraint_report?.output?.ok as boolean | undefined);
+    const cctViolations = Number(
+      result.cct_violations ?? result.cctViolations ?? 0,
+    );
+    const hardOutputOk = result?.meta?.hard_constraint_report?.output?.ok;
     const hasHardViolation = hardOutputOk === false;
 
     if (hasHardViolation) {
@@ -1034,7 +1298,7 @@ export class OptimizationService {
         totalVehicles: result.vehicles || result.num_vehicles || 0,
         totalCrew: result.crew || result.num_crew || 0,
         totalTrips,
-        totalCost: parseFloat(result.total_cost ?? result.totalCost ?? 0),
+        totalCost: Number(result.total_cost ?? result.totalCost ?? 0),
         cctViolations,
         errorMessage:
           'Execução encerrada por hard constraints inválidas. Ajuste parâmetros operacionais antes de publicar a escala.',
@@ -1050,7 +1314,7 @@ export class OptimizationService {
       totalVehicles: result.vehicles || result.num_vehicles || 0,
       totalCrew: result.crew || result.num_crew || 0,
       totalTrips,
-      totalCost: parseFloat(result.total_cost ?? result.totalCost ?? 0),
+      totalCost: Number(result.total_cost ?? result.totalCost ?? 0),
       cctViolations,
       resultSummary: result,
     });
@@ -1066,14 +1330,19 @@ export class OptimizationService {
     });
   }
 
-  async findOne(id: number): Promise<OptimizationRunEntity> {
-    const run = await this.runRepo.findOne({ where: { id } });
+  async findOne(
+    id: number,
+    companyId?: number,
+  ): Promise<OptimizationRunEntity> {
+    const where: Record<string, number> =
+      companyId != null ? { id, companyId } : { id };
+    const run = await this.runRepo.findOne({ where });
     if (!run) throw new EntityNotFoundException('Execução de otimização', id);
     return run;
   }
 
-  async cancel(id: number): Promise<OptimizationRunEntity> {
-    const run = await this.findOne(id);
+  async cancel(id: number, companyId?: number): Promise<OptimizationRunEntity> {
+    const run = await this.findOne(id, companyId);
     if (
       run.status === OptimizationStatus.RUNNING ||
       run.status === OptimizationStatus.PENDING
@@ -1083,6 +1352,29 @@ export class OptimizationService {
       return this.runRepo.save(run);
     }
     return run;
+  }
+
+  async getRunAudit(id: number, companyId?: number): Promise<any> {
+    // FIXME: Restaurar a implementação do Run Audit do Turn 1
+    const run = await this.findOne(id, companyId);
+    return run.resultSummary ?? {};
+  }
+
+  async compareRuns(
+    id: number,
+    otherId: number,
+    companyId?: number,
+  ): Promise<any> {
+    // FIXME: Restaurar a implementação comparativa removida do back-end
+    return {
+      baseRunId: id,
+      otherRunId: otherId,
+    };
+  }
+
+  async recoverStaleRuns(): Promise<void> {
+    // FIXME: Restaurar logic de cancelar execuções presas no banco após restarts
+    this.logger.log('recouverStaleRuns stub acionado.');
   }
 
   async getDashboardStats(companyId: number): Promise<any> {

@@ -15,7 +15,7 @@ import Scrollbar from '@/app/components/custom-scroll/Scrollbar';
 import { IconBellRinging, IconCheck, IconX, IconLoader, IconBrain } from '@tabler/icons-react';
 import { Stack } from '@mui/system';
 import Link from 'next/link';
-import { optimizationApi } from '@/lib/api';
+import { optimizationApi, getSessionUser } from '@/lib/api';
 
 interface RunNotif {
   id: number;
@@ -38,7 +38,7 @@ const Notifications = () => {
 
   const loadRuns = useCallback(async () => {
     try {
-      const data = await optimizationApi.getAll({ companyId: 1 });
+      const data = await optimizationApi.getAll({ companyId: getSessionUser()?.companyId ?? 1 });
       const arr = Array.isArray(data) ? data : (data as any)?.data ?? [];
       setRuns(arr.slice(0, 5).map((r: any) => ({
         id: r.id,

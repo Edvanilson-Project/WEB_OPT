@@ -23,8 +23,8 @@ from ...domain.interfaces import IVSPAlgorithm
 from ...domain.models import Block, Trip, VehicleType, VSPSolution
 from ..base import BaseAlgorithm
 from ..evaluator import CostEvaluator
-from ..utils import quick_cost_sorted, sort_block_trips, blocks_are_feasible
-from .greedy import GreedyVSP
+from ..utils import block_is_feasible, blocks_are_feasible, preferred_pair_penalty, quick_cost_sorted, sort_block_trips
+from .greedy import GreedyVSP, build_preferred_pairs
 
 settings = get_settings()
 evaluator = CostEvaluator()
@@ -58,20 +58,42 @@ def _blocks_from_chromosome(
     return blocks
 
 
-def _fitness(chrom: Chromosome, trip_map: Dict[int, Trip], vt: List[VehicleType]) -> float:
+def _fitness(
+    chrom: Chromosome,
+    trip_map: Dict[int, Trip],
+    vt: List[VehicleType],
+    fixed_vehicle_cost: float = 800.0,
+    idle_cost_per_minute: float = 0.5,
+    max_work_minutes: float = 480.0,
+    crew_cost_weight: float = 400.0,
+    preferred_pairs: Optional[Dict[int, int]] = None,
+    pair_break_penalty: float = 1000.0,
+    paired_trip_bonus: float = 40.0,
+    hard_pairing_penalty: float = 0.0,
+) -> float:
     """Menor custo estimado = maior fitness (retorna negativo do custo).
-    Penaliza fortemente blocos inviáveis (corrige B3).
+    Penaliza fortemente blocos inviáveis e deadhead violations.
     """
     blocks = _blocks_from_chromosome(chrom, trip_map, vt)
-    sort_block_trips(blocks)  # CORREÇÃO B1: ordena antes de avaliar
+    sort_block_trips(blocks)
     # Penaliza viagens não cobertas
     covered = {tid for seq in chrom for tid in seq}
     missing = len(trip_map) - len(covered)
-    base_cost = quick_cost_sorted(blocks)  # usa função corrigida
-    # Penalidade extra por duplicatas (CORREÇÃO B2)
+    base_cost = quick_cost_sorted(blocks, fixed_vehicle_cost, idle_cost_per_minute,
+                                  max_work_minutes, crew_cost_weight)
+    base_cost += preferred_pair_penalty(
+        blocks,
+        preferred_pairs or {},
+        pair_break_penalty,
+        paired_trip_bonus,
+        hard_pairing_penalty,
+    )
+    # Penalidade por duplicatas
     all_tids = [tid for seq in chrom for tid in seq]
     duplicates = len(all_tids) - len(set(all_tids))
-    return -(base_cost + missing * 5000.0 + duplicates * 10000.0)
+    # Penalidade por blocos com deadhead inviável
+    infeasible_count = sum(1 for b in blocks if not block_is_feasible(b))
+    return -(base_cost + missing * 5000.0 + duplicates * 10000.0 + infeasible_count * 3000.0)
 
 
 def _tournament(population: List[Chromosome], scores: List[float], k: int = 3) -> Chromosome:
@@ -142,21 +164,64 @@ def _crossover(
 
 
 def _mutate(chrom: Chromosome, mutation_rate: float, trip_map: Dict[int, Trip] = None) -> Chromosome:
-    """Move uma viagem aleatória de um bloco para outro. Re-ordena para garantir factibilidade."""
-    if len(chrom) < 2 or random.random() > mutation_rate:
+    """Operador de mutação com split, move e merge. Re-ordena para garantir factibilidade."""
+    if random.random() > mutation_rate:
         return chrom
     all_tids = {tid for seq in chrom for tid in seq}
-    chrom = deepcopy(chrom)
-    src = random.randint(0, len(chrom) - 1)
-    if not chrom[src]:
-        return chrom
-    trip_idx = random.randint(0, len(chrom[src]) - 1)
-    trip_id = chrom[src].pop(trip_idx)
-    dst = random.randint(0, len(chrom) - 1)
-    chrom[dst].append(trip_id)  # Adiciona ao final; fitness/decode vai reordenar por start_time
-    # Remove blocos vazios
-    chrom = [seq for seq in chrom if seq]
-    return _repair_chromosome(chrom, all_tids, trip_map)  # Garante consistência
+    chrom_copy = deepcopy(chrom)
+
+    # Se só tem 1 bloco: split ou não faz nada
+    if len(chrom_copy) == 1:
+        if len(chrom_copy[0]) <= 1:
+            return chrom_copy  # Não pode dividir bloco com 0 ou 1 viagem
+        # Divide o bloco em dois
+        src_block = chrom_copy[0]
+        split_point = random.randint(1, len(src_block) - 1)
+        new_block = src_block[split_point:]
+        chrom_copy[0] = src_block[:split_point]
+        chrom_copy.append(new_block)
+    else:
+        # Escolher aleatoriamente entre move (50%) e merge (50%)
+        if random.random() < 0.5:
+            # Move: move viagem entre blocos
+            src = random.randint(0, len(chrom_copy) - 1)
+            if not chrom_copy[src]:
+                return chrom_copy
+            trip_idx = random.randint(0, len(chrom_copy[src]) - 1)
+            trip_id = chrom_copy[src].pop(trip_idx)
+            dst = random.randint(0, len(chrom_copy) - 1)
+            chrom_copy[dst].append(trip_id)
+        else:
+            # Merge: combina dois blocos se factível
+            if len(chrom_copy) >= 2:
+                i, j = random.sample(range(len(chrom_copy)), 2)
+                # Garantir i < j para remoção correta
+                if i > j:
+                    i, j = j, i
+
+                # Verificar factibilidade se trip_map disponível
+                should_merge = True
+                if trip_map:
+                    # Criar bloco combinado temporário para verificar factibilidade
+                    combined_trip_ids = chrom_copy[i] + chrom_copy[j]
+                    # Converter para Block para verificar factibilidade
+                    combined_trips = [trip_map[tid] for tid in combined_trip_ids if tid in trip_map]
+                    if combined_trips:
+                        # Ordenar viagens por start_time
+                        combined_trips.sort(key=lambda t: t.start_time)
+                        temp_block = Block(id=0, trips=combined_trips)
+                        if not block_is_feasible(temp_block):
+                            should_merge = False
+
+                if should_merge:
+                    # Combinar blocos j em i
+                    chrom_copy[i].extend(chrom_copy[j])
+                    del chrom_copy[j]
+
+        # Remove blocos vazios
+        chrom_copy = [seq for seq in chrom_copy if seq]
+
+    return _repair_chromosome(chrom_copy, all_tids, trip_map)  # Garante consistência
 
 
 class GeneticVSP(BaseAlgorithm, IVSPAlgorithm):
@@ -184,22 +249,83 @@ class GeneticVSP(BaseAlgorithm, IVSPAlgorithm):
         self._start_timer()
         if not trips:
             return VSPSolution(algorithm=self.name)
+        random_seed = self.vsp_params.get("random_seed")
+        if random_seed is not None:
+            random.seed(int(random_seed))
 
         trip_map = _trips_by_id(trips)
+
+        # Custos parametrizáveis
+        fvc = float(self.vsp_params.get("fixed_vehicle_activation_cost", 800.0))
+        icpm = float(self.vsp_params.get("idle_cost_per_minute", 0.5))
+        max_work = float(self.vsp_params.get("max_work_minutes", 480.0))
+        crew_cw = float(self.vsp_params.get("crew_cost_weight", fvc * 0.5))
+        pair_break_penalty = float(self.vsp_params.get("pair_break_penalty", fvc * 1.25))
+        paired_trip_bonus = float(self.vsp_params.get("paired_trip_bonus", fvc * 0.05))
+        preferred_pairs = (
+            build_preferred_pairs(
+                trips,
+                int(self.vsp_params.get("min_layover_minutes", 8) or 8),
+                int(self.vsp_params.get("preferred_pair_window_minutes", 120) or 120),
+            )
+            if bool(self.vsp_params.get("preserve_preferred_pairs", True))
+            else {}
+        )
+        hard_pairing_penalty = (
+            float(self.vsp_params.get("hard_pairing_penalty", max(pair_break_penalty * 10.0, fvc * 25.0)))
+            if bool(self.vsp_params.get("hard_pairing_vehicle_level", False))
+            else 0.0
+        )
+        fit_fn = lambda c: _fitness(
+            c,
+            trip_map,
+            vehicle_types,
+            fvc,
+            icpm,
+            max_work,
+            crew_cw,
+            preferred_pairs,
+            pair_break_penalty,
+            paired_trip_bonus,
+            hard_pairing_penalty,
+        )
 
         # Semente inicial — greedy já factível
         seed = GreedyVSP(vsp_params=self.vsp_params).solve(trips, vehicle_types)
         seed_chrom = _chromosome_from_blocks(seed.blocks)
 
-        # Gera população inicial variando o greedy
+        # Gera população inicial com diversidade real (mover trips entre blocos)
+        all_tids = {tid for seq in seed_chrom for tid in seq}
         population: List[Chromosome] = [seed_chrom]
-        for _ in range(self.pop_size - 1):
-            shuffled = deepcopy(seed_chrom)
-            random.shuffle(shuffled)
-            population.append(shuffled)
+        for p in range(self.pop_size - 1):
+            variant = deepcopy(seed_chrom)
+            # Número crescente de perturbações para diversidade
+            n_moves = min(1 + p, len(trips) // 3)
+            for _ in range(n_moves):
+                # Se só tem 1 bloco, temos que criar um novo bloco (split)
+                if len(variant) == 1:
+                    if len(variant[0]) <= 1:
+                        break  # Não pode dividir bloco com 0 ou 1 viagem
+                    # Divide o bloco em dois
+                    src_block = variant[0]
+                    split_point = random.randint(1, len(src_block) - 1)
+                    new_block = src_block[split_point:]
+                    variant[0] = src_block[:split_point]
+                    variant.append(new_block)
+                else:
+                    src = random.randint(0, len(variant) - 1)
+                    if not variant[src]:
+                        continue
+                    tid = variant[src].pop(random.randint(0, len(variant[src]) - 1))
+                    dst = random.choice([i for i in range(len(variant)) if i != src])
+                    variant[dst].append(tid)
+            variant = [seq for seq in variant if seq]
+            if not variant:
+                variant = deepcopy(seed_chrom)
+            population.append(variant)
 
         best_chrom = deepcopy(seed_chrom)
-        best_score = _fitness(best_chrom, trip_map, vehicle_types)
+        best_score = fit_fn(best_chrom)
 
         elitism_n = max(1, self.pop_size // 10)
 
@@ -207,7 +333,7 @@ class GeneticVSP(BaseAlgorithm, IVSPAlgorithm):
             if self._check_timeout():
                 break
 
-            scores = [_fitness(c, trip_map, vehicle_types) for c in population]
+            scores = [fit_fn(c) for c in population]
 
             # Elitismo
             elite_idx = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)[:elitism_n]
@@ -223,16 +349,16 @@ class GeneticVSP(BaseAlgorithm, IVSPAlgorithm):
                     new_pop.append(_mutate(c2, self.mutation_rate, trip_map))
 
             population = new_pop
-            gen_best_idx = max(range(len(population)), key=lambda i: _fitness(population[i], trip_map, vehicle_types))
-            gen_best_score = _fitness(population[gen_best_idx], trip_map, vehicle_types)
+            gen_best_idx = max(range(len(population)), key=lambda i: fit_fn(population[i]))
+            gen_best_score = fit_fn(population[gen_best_idx])
             if gen_best_score > best_score:
                 best_score = gen_best_score
                 best_chrom = deepcopy(population[gen_best_idx])
 
         blocks = _blocks_from_chromosome(best_chrom, trip_map, vehicle_types)
-        sort_block_trips(blocks)  # CORREÇÃO FINAL B1: garante ordem correta ao retornar
+        sort_block_trips(blocks)
 
-        # CORREÇÃO FINAL B6: divide blocos com viagens incompatíveis em sub-blocos
+        # Repara blocos com deadhead inviável: divide em sub-blocos
         _next_id = max((b.id for b in blocks), default=0) + 1
         repaired: List[Block] = []
         for b in blocks:
@@ -242,8 +368,7 @@ class GeneticVSP(BaseAlgorithm, IVSPAlgorithm):
             for t in b.trips[1:]:
                 prev = cur_trips[-1]
                 gap = t.start_time - prev.end_time
-                dest, orig = prev.destination_id, t.origin_id
-                needed = int(prev.deadhead_times.get(orig, 0))
+                needed = int(prev.deadhead_times.get(t.origin_id, 0))
                 if gap < needed:
                     new_b = Block(id=_next_id, trips=list(cur_trips))
                     if b.vehicle_type_id is not None:
@@ -258,6 +383,24 @@ class GeneticVSP(BaseAlgorithm, IVSPAlgorithm):
                 last_b.vehicle_type_id = b.vehicle_type_id
             repaired.append(last_b)
         blocks = repaired
+
+        # Safety net: se GA ficou pior que greedy, usa greedy
+        ga_cost = quick_cost_sorted(blocks, fvc, icpm, max_work, crew_cw) + preferred_pair_penalty(
+            blocks,
+            preferred_pairs,
+            pair_break_penalty,
+            paired_trip_bonus,
+            hard_pairing_penalty,
+        )
+        greedy_cost = quick_cost_sorted(seed.blocks, fvc, icpm, max_work, crew_cw) + preferred_pair_penalty(
+            seed.blocks,
+            preferred_pairs,
+            pair_break_penalty,
+            paired_trip_bonus,
+            hard_pairing_penalty,
+        )
+        if ga_cost > greedy_cost:
+            blocks = deepcopy(seed.blocks)
 
         return VSPSolution(
             blocks=blocks,

@@ -1,4 +1,4 @@
-import { Entity, Column } from 'typeorm';
+import { Entity, Column, AfterLoad } from 'typeorm';
 import { BaseCompanyEntity } from '../../../common/entities/base.entity';
 
 @Entity('optimization_settings')
@@ -46,36 +46,67 @@ export class OptimizationSettingsEntity extends BaseCompanyEntity {
 
   // Crew Constraints (CCT / CLT art. 235-A a 235-G)
   @Column({ name: 'cct_max_shift_minutes', default: 480 })
-  cctMaxShiftMinutes: number;          // jornada máxima (spread) — padrão 8h
+  cctMaxShiftMinutes: number; // jornada máxima (spread) — padrão 8h
 
   @Column({ name: 'cct_max_work_minutes', default: 440 })
-  cctMaxWorkMinutes: number;           // trabalho efetivo máximo — padrão 7h20
+  cctMaxWorkMinutes: number; // trabalho efetivo máximo — padrão 7h20
 
   @Column({ name: 'cct_max_driving_minutes', default: 270 })
-  cctMaxDrivingMinutes: number;        // direção contínua máxima — padrão 4h30
+  cctMaxDrivingMinutes: number; // direção contínua máxima — padrão 4h30
 
   @Column({ name: 'cct_min_break_minutes', default: 30 })
-  cctMinBreakMinutes: number;          // intervalo mínimo entre trechos — padrão 30min
+  cctMinBreakMinutes: number; // intervalo mínimo entre trechos — padrão 30min
 
   @Column({ name: 'cct_min_layover_minutes', default: 8 })
-  cctMinLayoverMinutes: number;        // pausa mínima no terminal mesmo bloco — padrão 8min
+  cctMinLayoverMinutes: number; // pausa mínima no terminal mesmo bloco — padrão 8min
 
   @Column({ name: 'cct_max_duties_per_day', default: 1 })
   cctMaxDutiesPerDay: number;
 
   @Column({ name: 'apply_cct', default: true })
-  applyCct: boolean;                   // se false, ignora restrições CCT (modo só custo)
+  applyCct: boolean; // se false, ignora restrições CCT (modo só custo)
 
   // Soltura e recolhimento (garagem)
   @Column({ name: 'pullout_minutes', default: 10 })
-  pulloutMinutes: number;              // tempo para sair da garagem à 1ª viagem
+  pulloutMinutes: number; // tempo para sair da garagem à 1ª viagem
 
   @Column({ name: 'pullback_minutes', default: 10 })
-  pullbackMinutes: number;             // tempo após última viagem para retornar à garagem
+  pullbackMinutes: number; // tempo após última viagem para retornar à garagem
 
   // Veículo
   @Column({ name: 'max_vehicle_shift_minutes', default: 960 })
-  maxVehicleShiftMinutes: number;      // turno máximo de um veículo — padrão 16h
+  maxVehicleShiftMinutes: number; // turno máximo de um veículo — padrão 16h
+
+  // Custos VSP
+  @Column({
+    name: 'fixed_vehicle_activation_cost',
+    type: 'decimal',
+    precision: 10,
+    scale: 2,
+    default: 800,
+  })
+  fixedVehicleActivationCost: number;
+
+  @Column({
+    name: 'deadhead_cost_per_minute',
+    type: 'decimal',
+    precision: 10,
+    scale: 4,
+    default: 0.85,
+  })
+  deadheadCostPerMinute: number;
+
+  @Column({
+    name: 'idle_cost_per_minute',
+    type: 'decimal',
+    precision: 10,
+    scale: 4,
+    default: 0.5,
+  })
+  idleCostPerMinute: number;
+
+  @Column({ name: 'allow_vehicle_split_shifts', default: true })
+  allowVehicleSplitShifts: boolean;
 
   // Relief Points (mid-route driver change)
   @Column({ name: 'allow_relief_points', default: false })
@@ -161,7 +192,13 @@ export class OptimizationSettingsEntity extends BaseCompanyEntity {
   cctIdleTimeIsPaid: boolean;
 
   /** Tempo de espera remunerado em percentual do salário-hora */
-  @Column({ name: 'cct_waiting_time_pay_pct', type: 'decimal', precision: 6, scale: 4, default: 0.30 })
+  @Column({
+    name: 'cct_waiting_time_pay_pct',
+    type: 'decimal',
+    precision: 6,
+    scale: 4,
+    default: 0.3,
+  })
   cctWaitingTimePayPct: number;
 
   /** Garantia mínima de horas remuneradas */
@@ -177,15 +214,33 @@ export class OptimizationSettingsEntity extends BaseCompanyEntity {
   enforceSingleLineDuty: boolean;
 
   /** Peso de equidade entre motoristas */
-  @Column({ name: 'fairness_weight', type: 'decimal', precision: 8, scale: 4, default: 0 })
+  @Column({
+    name: 'fairness_weight',
+    type: 'decimal',
+    precision: 8,
+    scale: 4,
+    default: 0,
+  })
   fairnessWeight: number;
 
   /** Peso para domingos livres */
-  @Column({ name: 'sunday_off_weight', type: 'decimal', precision: 8, scale: 4, default: 0 })
+  @Column({
+    name: 'sunday_off_weight',
+    type: 'decimal',
+    precision: 8,
+    scale: 4,
+    default: 0,
+  })
   sundayOffWeight: number;
 
   /** Adicional de feriado */
-  @Column({ name: 'holiday_extra_pct', type: 'decimal', precision: 6, scale: 4, default: 1.0 })
+  @Column({
+    name: 'holiday_extra_pct',
+    type: 'decimal',
+    precision: 6,
+    scale: 4,
+    default: 1.0,
+  })
   holidayExtraPct: number;
 
   /** Início período noturno = 22h — CLT art.73 */
@@ -197,11 +252,23 @@ export class OptimizationSettingsEntity extends BaseCompanyEntity {
   cctNocturnalEndHour: number;
 
   /** Fator hora noturna (52.5 min = 1h) — CLT art.73 §1 */
-  @Column({ name: 'cct_nocturnal_factor', type: 'decimal', precision: 6, scale: 4, default: 0.875 })
+  @Column({
+    name: 'cct_nocturnal_factor',
+    type: 'decimal',
+    precision: 6,
+    scale: 4,
+    default: 0.875,
+  })
   cctNocturnalFactor: number;
 
   /** Adicional noturno +20% — CLT art.73 §2 */
-  @Column({ name: 'cct_nocturnal_extra_pct', type: 'decimal', precision: 6, scale: 4, default: 0.20 })
+  @Column({
+    name: 'cct_nocturnal_extra_pct',
+    type: 'decimal',
+    precision: 6,
+    scale: 4,
+    default: 0.2,
+  })
   cctNocturnalExtraPct: number;
 
   /** VSP: exigir mesmo depósito início/fim de bloco */
@@ -213,11 +280,23 @@ export class OptimizationSettingsEntity extends BaseCompanyEntity {
   maxSimultaneousChargers: number;
 
   /** EV: tarifa pico */
-  @Column({ name: 'peak_energy_cost_per_kwh', type: 'decimal', precision: 10, scale: 4, default: 0 })
+  @Column({
+    name: 'peak_energy_cost_per_kwh',
+    type: 'decimal',
+    precision: 10,
+    scale: 4,
+    default: 0,
+  })
   peakEnergyCostPerKwh: number;
 
   /** EV: tarifa fora de pico */
-  @Column({ name: 'offpeak_energy_cost_per_kwh', type: 'decimal', precision: 10, scale: 4, default: 0 })
+  @Column({
+    name: 'offpeak_energy_cost_per_kwh',
+    type: 'decimal',
+    precision: 10,
+    scale: 4,
+    default: 0,
+  })
   offpeakEnergyCostPerKwh: number;
 
   /** Workpiece mínimo */
@@ -248,6 +327,18 @@ export class OptimizationSettingsEntity extends BaseCompanyEntity {
   @Column({ name: 'preserve_preferred_pairs', default: true })
   preservePreferredPairs: boolean;
 
+  /** Forçar pares ida/volta no mesmo tripulante (hard constraint) */
+  @Column({ name: 'enforce_trip_groups_hard', default: true })
+  enforceTripGroupsHard: boolean;
+
+  /** Operador troca de veículo somente em terminais */
+  @Column({ name: 'operator_change_terminals_only', default: true })
+  operatorChangeTerminalsOnly: boolean;
+
+  /** Operador permanece em um único veículo por jornada */
+  @Column({ name: 'operator_single_vehicle_only', default: false })
+  operatorSingleVehicleOnly: boolean;
+
   /** Máximo de sucessores candidatos por tarefa na geração de colunas */
   @Column({ name: 'max_candidate_successors_per_task', default: 5 })
   maxCandidateSuccessorsPerTask: number;
@@ -263,4 +354,26 @@ export class OptimizationSettingsEntity extends BaseCompanyEntity {
   /** Máximo de colunas adicionadas por rodada de pricing */
   @Column({ name: 'max_pricing_additions', default: 192 })
   maxPricingAdditions: number;
+
+  @AfterLoad()
+  convertDecimals() {
+    const decimals = [
+      'fixedVehicleActivationCost',
+      'deadheadCostPerMinute',
+      'idleCostPerMinute',
+      'cctWaitingTimePayPct',
+      'fairnessWeight',
+      'sundayOffWeight',
+      'holidayExtraPct',
+      'cctNocturnalFactor',
+      'cctNocturnalExtraPct',
+      'peakEnergyCostPerKwh',
+      'offpeakEnergyCostPerKwh',
+    ] as const;
+    for (const key of decimals) {
+      if (typeof (this as any)[key] === 'string') {
+        (this as any)[key] = parseFloat((this as any)[key]);
+      }
+    }
+  }
 }

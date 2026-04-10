@@ -29,6 +29,7 @@ def _trip_from_dict(item: dict) -> Trip:
         id=int(item.get("id", 0)),
         line_id=int(item.get("line_id", 0)),
         trip_group_id=item.get("trip_group_id"),
+        direction=item.get("direction"),
         start_time=int(item.get("start_time", 0)),
         end_time=int(item.get("end_time", 0)),
         origin_id=int(item.get("origin_id", 0)),

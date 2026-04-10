@@ -28,7 +28,7 @@ interface menuType {
 const Search = () => {
   // drawer top
   const [showDrawer2, setShowDrawer2] = useState(false);
-  const [search, setSerach] = useState('');
+  const [search, setSearch] = useState('');
 
   const handleDrawerClose2 = () => {
     setShowDrawer2(false);
@@ -71,7 +71,7 @@ const Search = () => {
               id="tb-search"
               placeholder="Pesquisar..."
               fullWidth
-              onChange={(e) => setSerach(e.target.value)}
+              onChange={(e) => setSearch(e.target.value)}
               inputProps={{ 'aria-label': 'Pesquisar' }}
             />
             <IconButton size="small" onClick={handleDrawerClose2}>

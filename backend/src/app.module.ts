@@ -14,6 +14,13 @@ import { VehicleRoutesModule } from './modules/vehicle-routes/vehicle-routes.mod
 import { CrewShiftsModule } from './modules/crew-shifts/crew-shifts.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { OptimizationSettingsModule } from './modules/optimization-settings/optimization-settings.module';
+import { TimeBandsModule } from './modules/time-bands/time-bands.module';
+import { LineTripProfilesModule } from './modules/line-trip-profiles/line-trip-profiles.module';
+import { TimetableRulesModule } from './modules/timetable-rules/timetable-rules.module';
+import { ScheduleGroupsModule } from './modules/schedule-groups/schedule-groups.module';
+import { TripTimeConfigsModule } from './modules/trip-time-configs/trip-time-configs.module';
+import { PassengerConfigsModule } from './modules/passenger-configs/passenger-configs.module';
+import { TimetablesModule } from './modules/timetables/timetables.module';
 import appConfig from './config/app.config';
 import databaseConfig from './config/database.config';
 
@@ -38,6 +45,13 @@ import databaseConfig from './config/database.config';
     CrewShiftsModule,
     ReportsModule,
     OptimizationSettingsModule,
+    TimeBandsModule,
+    LineTripProfilesModule,
+    TimetableRulesModule,
+    ScheduleGroupsModule,
+    TripTimeConfigsModule,
+    PassengerConfigsModule,
+    TimetablesModule,
   ],
 })
 export class AppModule {}

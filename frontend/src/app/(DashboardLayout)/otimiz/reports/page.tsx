@@ -12,13 +12,12 @@ import PageContainer from '@/app/components/container/PageContainer';
 import DashboardCard from '@/app/components/shared/DashboardCard';
 import KpiCard from '../_components/KpiCard';
 import { NotifyProvider, useNotify } from '../_components/Notify';
-import { reportsApi } from '@/lib/api';
+import { reportsApi, getSessionUser } from '@/lib/api';
 import type { KpiData, HistoryPoint } from '../_types';
 
 const Chart = dynamic(() => import('react-apexcharts'), { ssr: false });
 
 type Period = 7 | 30 | 90;
-const COMPANY_ID = '1'; // TODO: pegar do contexto de auth
 
 function fmtDate(d: string) {
   return new Date(d).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
@@ -47,14 +46,14 @@ function ReportsInner() {
 
   const loadKpis = useCallback(async () => {
     setLoadingKpis(true);
-    try { setKpis(await reportsApi.getKpis(COMPANY_ID)); }
+    try { setKpis(await reportsApi.getKpis(getSessionUser()?.companyId ?? 1)); }
     catch { notify.error('Falha ao carregar KPIs.'); }
     finally { setLoadingKpis(false); }
   }, [notify]);
 
   const loadHistory = useCallback(async (p: Period) => {
     setLoadingHistory(true);
-    try { setHistory(await reportsApi.getHistory(COMPANY_ID, p)); }
+    try { setHistory(await reportsApi.getHistory(getSessionUser()?.companyId ?? 1, p)); }
     catch { /* silently ignore */ }
     finally { setLoadingHistory(false); }
   }, []);

@@ -105,6 +105,7 @@ def _run_optimizer(
     cct: dict | None = None,
     vsp: dict | None = None,
     electric: bool = False,
+    time_budget_s: float = 30.0,
 ):
     service = OptimizerService()
     return service.run(
@@ -113,6 +114,7 @@ def _run_optimizer(
         algorithm=algorithm,
         cct_params=cct or {},
         vsp_params=vsp or {},
+        time_budget_s=time_budget_s,
     )
 
 
@@ -142,6 +144,7 @@ def check_daily_shift_limit() -> tuple[bool, str]:
         trips,
         cct={"max_shift_minutes": 480, "strict_hard_validation": True},
         vsp={"min_layover_minutes": 10},
+        time_budget_s=30.0,
     )
     spreads = [d.spread_time for d in result.csp.duties]
     ok = bool(spreads) and max(spreads) <= 480
@@ -159,6 +162,7 @@ def check_intershift_11h() -> tuple[bool, str]:
         trips,
         cct={"inter_shift_rest_minutes": 660, "strict_hard_validation": True},
         vsp={"min_layover_minutes": 10},
+        time_budget_s=30.0,
     )
     rosters = {}
     for duty in result.csp.duties:
@@ -193,8 +197,8 @@ def check_break_30_each_4h() -> tuple[bool, str]:
             "min_break_minutes": 30,
             "strict_hard_validation": True,
         },
-        vsp={"min_layover_minutes": 10},
-    )
+        vsp={"min_layover_minutes": 10}, time_budget_s=30.0,
+)
     max_cont = max((int(d.meta.get("max_continuous_drive_minutes", 0)) for d in result.csp.duties), default=0)
     return max_cont <= 240, f"max_continuous_drive={max_cont}"
 
@@ -213,8 +217,8 @@ def check_meal_break_1h() -> tuple[bool, str]:
             "min_break_minutes": 30,
             "strict_hard_validation": True,
         },
-        vsp={"min_layover_minutes": 10},
-    )
+        vsp={"min_layover_minutes": 10}, time_budget_s=30.0,
+)
     issues = (((result.meta or {}).get("hard_constraint_report") or {}).get("output") or {}).get("issues", [])
     missing_meal = [i for i in issues if "MEAL_BREAK_MISSING" in i]
     return len(missing_meal) == 0, f"meal_break_issues={len(missing_meal)}"
@@ -229,7 +233,7 @@ def check_no_overlap_vehicle_and_driver() -> tuple[bool, str]:
         _trip(3, 500, 50, line=20, origin=1, dest=2),
         _trip(4, 570, 50, line=20, origin=2, dest=1),
     ]
-    result = _run_optimizer(trips, cct={"strict_hard_validation": True}, vsp={"min_layover_minutes": 10})
+    result = _run_optimizer(trips, cct={"strict_hard_validation": True}, vsp={"min_layover_minutes": 10}, time_budget_s=30.0)
     overlap_blocks = 0
     for block in result.vsp.blocks:
         overlap_blocks += len(block.verify_no_overlap())
@@ -251,8 +255,8 @@ def check_relief_points_terminal_only() -> tuple[bool, str]:
     result = _run_optimizer(
         trips,
         cct={"operator_change_terminals_only": True, "allow_relief_points": False, "strict_hard_validation": True},
-        vsp={"min_layover_minutes": 10, "allow_multi_line_block": True},
-    )
+        vsp={"min_layover_minutes": 10, "allow_multi_line_block": True}, time_budget_s=30.0,
+)
     # Esperado: sem boundary inválido (normalmente vira 2 duties distintas)
     output_issues = (((result.meta or {}).get("hard_constraint_report") or {}).get("output") or {}).get("issues", [])
     bad = [i for i in output_issues if "OPERATOR_CHANGE_NON_TERMINAL" in i]
@@ -264,7 +268,7 @@ def check_deadhead_realistic() -> tuple[bool, str]:
     t2 = _trip(2, 425, 60, line=22, origin=3, dest=1)
     t1.deadhead_times[3] = 25
     t1.deadhead_times[1] = 25
-    result = _run_optimizer([t1, t2], cct={"strict_hard_validation": True}, vsp={"min_layover_minutes": 10})
+    result = _run_optimizer([t1, t2], cct={"strict_hard_validation": True}, vsp={"min_layover_minutes": 10}, time_budget_s=30.0)
     return len(result.vsp.blocks) == 2, f"vehicles={len(result.vsp.blocks)} expected=2"
 
 
@@ -278,8 +282,8 @@ def check_single_vehicle_per_operator() -> tuple[bool, str]:
     result = _run_optimizer(
         trips,
         cct={"operator_single_vehicle_only": True, "strict_hard_validation": True},
-        vsp={"min_layover_minutes": 10},
-    )
+        vsp={"min_layover_minutes": 10}, time_budget_s=30.0,
+)
     max_sources = 0
     for duty in result.csp.duties:
         sources = {int(x) for x in duty.meta.get("source_block_ids", []) if x is not None}
@@ -298,8 +302,8 @@ def check_ev_soc_safety() -> tuple[bool, str]:
         trips,
         cct={"strict_hard_validation": True},
         vsp={"min_layover_minutes": 10, "max_simultaneous_chargers": 1},
-        electric=True,
-    )
+        electric=True, time_budget_s=30.0,
+)
     low_soc = 0
     min_soc_kwh = _vehicle(electric=True)[0].minimum_soc * _vehicle(electric=True)[0].battery_capacity_kwh
     for block in result.vsp.blocks:
@@ -320,8 +324,8 @@ def check_ev_charger_capacity_validation() -> tuple[bool, str]:
         trips,
         cct={"strict_hard_validation": False},
         vsp={"min_layover_minutes": 10, "max_simultaneous_chargers": 1, "allow_multi_line_block": False},
-        electric=True,
-    )
+        electric=True, time_budget_s=30.0,
+)
     warnings = list(result.vsp.warnings or [])
     has_cap_warning = any("CHARGER_CAPACITY_EXCEEDED" in w for w in warnings)
     return has_cap_warning, f"charger_capacity_warning={'yes' if has_cap_warning else 'no'}"
@@ -349,8 +353,8 @@ def check_marginal_cost_monotonicity() -> tuple[bool, str]:
     ]
     high_cost_trips[0].deadhead_times[2] = 35
 
-    base = _run_optimizer(base_trips, cct={"strict_hard_validation": True}, vsp={"min_layover_minutes": 10})
-    high = _run_optimizer(high_cost_trips, cct={"strict_hard_validation": True}, vsp={"min_layover_minutes": 10})
+    base = _run_optimizer(base_trips, cct={"strict_hard_validation": True}, vsp={"min_layover_minutes": 10}, time_budget_s=30.0)
+    high = _run_optimizer(high_cost_trips, cct={"strict_hard_validation": True}, vsp={"min_layover_minutes": 10}, time_budget_s=30.0)
 
     base_conn = sum(float(b.meta.get("connection_cost", 0.0)) for b in base.vsp.blocks)
     high_conn = sum(float(b.meta.get("connection_cost", 0.0)) for b in high.vsp.blocks)
@@ -372,8 +376,8 @@ def check_fairness_target_and_tolerance() -> tuple[bool, str]:
             "fairness_tolerance_minutes": 30,
             "strict_hard_validation": True,
         },
-        vsp={"min_layover_minutes": 10, "allow_multi_line_block": False},
-    )
+        vsp={"min_layover_minutes": 10, "allow_multi_line_block": False}, time_budget_s=30.0,
+)
     work = [d.work_time for d in result.csp.duties]
     if not work:
         return False, "nenhuma duty gerada"
@@ -393,8 +397,8 @@ def check_minimize_stretches() -> tuple[bool, str]:
     result = _run_optimizer(
         trips,
         cct={"operator_single_vehicle_only": True, "strict_hard_validation": True},
-        vsp={"min_layover_minutes": 10},
-    )
+        vsp={"min_layover_minutes": 10}, time_budget_s=30.0,
+)
     stretch = (((result.meta or {}).get("operational_kpis") or {}).get("stretch_kpi") or {})
     avg = float(stretch.get("avg_vehicle_changes_per_operator", 0.0) or 0.0)
     return avg <= 0.0, f"avg_vehicle_changes_per_operator={avg:.3f}"
@@ -480,8 +484,8 @@ def check_integrated_joint_behavior() -> tuple[bool, str]:
         trips,
         algorithm=AlgorithmType.JOINT_SOLVER,
         cct={"strict_hard_validation": True, "operator_single_vehicle_only": True},
-        vsp={"min_layover_minutes": 10},
-    )
+        vsp={"min_layover_minutes": 10}, time_budget_s=30.0,
+)
     ok = len(result.vsp.unassigned_trips) == 0 and result.csp.cct_violations == 0
     return ok, f"vehicles={len(result.vsp.blocks)} crew={len(result.csp.duties)} unassigned={len(result.vsp.unassigned_trips)} cct_viol={result.csp.cct_violations}"
 

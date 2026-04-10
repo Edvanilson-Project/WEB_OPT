@@ -15,6 +15,7 @@ class AlgorithmType(str, Enum):
     SIMULATED_ANNEALING = "simulated_annealing"
     TABU_SEARCH = "tabu_search"
     SET_PARTITIONING = "set_partitioning"
+    MCNF = "mcnf"
     JOINT_SOLVER = "joint_solver"
     HYBRID_PIPELINE = "hybrid_pipeline"
 
@@ -34,6 +35,7 @@ class Trip:
     origin_id: int
     destination_id: int
     trip_group_id: Optional[int] = None
+    direction: Optional[str] = None  # 'outbound' | 'return' — sent by backend
     duration: int = 0
     distance_km: float = 0.0
     depot_id: Optional[int] = None
@@ -50,6 +52,10 @@ class Trip:
     sent_to_driver_terminal: Optional[bool] = None
     gps_valid: Optional[bool] = None
     deadhead_times: Dict[int, int] = field(default_factory=dict)
+    idle_before_minutes: int = 0
+    idle_after_minutes: int = 0
+    is_pull_out: bool = False
+    is_pull_back: bool = False
 
     def __post_init__(self):
         if self.duration == 0:
@@ -253,6 +259,20 @@ class OptimizationResult:
     meta: Dict[str, Any] = field(default_factory=dict)
 
     def as_dict(self) -> dict:
+        merged_meta = {**(self.vsp.meta or {}), **(self.csp.meta or {}), **(self.meta or {})}
+        cost_breakdown = merged_meta.get("cost_breakdown") or {}
+        vsp_breakdown = cost_breakdown.get("vsp") or {}
+        csp_breakdown = cost_breakdown.get("csp") or {}
+        block_costs = {
+            int(item.get("block_id")): item
+            for item in (vsp_breakdown.get("blocks") or [])
+            if item.get("block_id") is not None
+        }
+        duty_costs = {
+            int(item.get("duty_id")): item
+            for item in (csp_breakdown.get("duties") or [])
+            if item.get("duty_id") is not None
+        }
         return {
             "vehicles": self.vsp.num_vehicles,
             "crew": self.csp.num_crew,
@@ -265,7 +285,12 @@ class OptimizationResult:
             "csp_algorithm": self.csp.algorithm,
             "elapsed_ms": round(self.total_elapsed_ms, 1),
             "warnings": [*self.vsp.warnings, *self.csp.warnings],
-            "meta": {**(self.vsp.meta or {}), **(self.csp.meta or {}), **(self.meta or {})},
+            "cost_breakdown": cost_breakdown,
+            "solver_explanation": merged_meta.get("solver_explanation"),
+            "phase_summary": merged_meta.get("phase_summary"),
+            "trip_group_audit": merged_meta.get("trip_group_audit"),
+            "reproducibility": merged_meta.get("reproducibility"),
+            "meta": merged_meta,
             "blocks": [
                 {
                     "block_id": b.id,
@@ -275,6 +300,14 @@ class OptimizationResult:
                     "end_time": b.end_time,
                     "warnings": b.warnings,
                     "meta": b.meta,
+                    **{
+                        "activation_cost": round(float(block_costs.get(int(b.id), {}).get("activation", 0.0) or 0.0), 2),
+                        "connection_cost": round(float(block_costs.get(int(b.id), {}).get("connection", 0.0) or 0.0), 2),
+                        "distance_cost": round(float(block_costs.get(int(b.id), {}).get("distance", 0.0) or 0.0), 2),
+                        "time_cost": round(float(block_costs.get(int(b.id), {}).get("time", 0.0) or 0.0), 2),
+                        "idle_cost": round(float(block_costs.get(int(b.id), {}).get("idle_cost", 0.0) or 0.0), 2),
+                        "total_cost": round(float(block_costs.get(int(b.id), {}).get("total", 0.0) or 0.0), 2),
+                    },
                 }
                 for b in self.vsp.blocks
             ],
@@ -291,6 +324,17 @@ class OptimizationResult:
                     "overtime_minutes": d.overtime_minutes,
                     "nocturnal_minutes": d.nocturnal_minutes,
                     "meta": d.meta,
+                    **{
+                        "work_cost": round(float(duty_costs.get(int(d.id), {}).get("work_cost", 0.0) or 0.0), 2),
+                        "guaranteed_cost": round(float(duty_costs.get(int(d.id), {}).get("guaranteed_cost", 0.0) or 0.0), 2),
+                        "waiting_cost": round(float(duty_costs.get(int(d.id), {}).get("waiting_cost", 0.0) or 0.0), 2),
+                        "overtime_cost": round(float(duty_costs.get(int(d.id), {}).get("overtime_cost", 0.0) or 0.0), 2),
+                        "long_unpaid_break_penalty": round(float(duty_costs.get(int(d.id), {}).get("long_unpaid_break_penalty", 0.0) or 0.0), 2),
+                        "nocturnal_extra_cost": round(float(duty_costs.get(int(d.id), {}).get("nocturnal_extra", 0.0) or 0.0), 2),
+                        "holiday_extra_cost": round(float(duty_costs.get(int(d.id), {}).get("holiday_extra", 0.0) or 0.0), 2),
+                        "cct_penalties_cost": round(float(duty_costs.get(int(d.id), {}).get("cct_penalties", 0.0) or 0.0), 2),
+                        "total_cost": round(float(duty_costs.get(int(d.id), {}).get("total", 0.0) or 0.0), 2),
+                    },
                 }
                 for d in self.csp.duties
             ],

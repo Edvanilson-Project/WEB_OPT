@@ -1,1 +1,0 @@
-sed -i 's/max_vehicle_shift_minutes: activeSettings?.maxVehicleShiftMinutes ?? 960/max_vehicle_shift_minutes: activeSettings?.maxVehicleShiftMinutes ?? 1440/g' backend/src/modules/optimization/optimization.service.ts

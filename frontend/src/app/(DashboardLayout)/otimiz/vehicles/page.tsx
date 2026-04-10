@@ -18,7 +18,7 @@ import StatusChip from '../_components/StatusChip';
 import { NotifyProvider, useNotify } from '../_components/Notify';
 import { vehicleTypesApi, getSessionUser } from '@/lib/api';
 import type { VehicleType } from '../_types';
-import { extractArray } from '../_types';
+import { extractArray, numVal } from '../_types';
 
 interface VehicleForm {
   name: string; code: string; passengerCapacity: string; costPerKm: string;
@@ -184,16 +184,16 @@ function VehiclesInner() {
             <TextField label="Nome do Tipo" required fullWidth placeholder="Ex: Ônibus Padrão, Articulado" value={form.name} onChange={vf('name')} />
             <Stack direction="row" spacing={2}>
               <TextField label="Código" sx={{ width: 140 }} value={form.code} onChange={vf('code')} inputProps={{ maxLength: 20, style: { textTransform: 'uppercase' } }} />
-              <TextField label="Capacidade de Passageiros" required fullWidth type="number" value={form.passengerCapacity} onChange={vf('passengerCapacity')}
+              <TextField label="Capacidade de Passageiros" required fullWidth type="number" value={numVal(form.passengerCapacity)} onChange={vf('passengerCapacity')}
                 InputProps={{ endAdornment: <InputAdornment position="end">pass.</InputAdornment> }} />
             </Stack>
             <Stack direction="row" spacing={2}>
-              <TextField label="Custo por km" fullWidth type="number" value={form.costPerKm} onChange={vf('costPerKm')}
+              <TextField label="Custo por km" fullWidth type="number" value={numVal(form.costPerKm)} onChange={vf('costPerKm')}
                 InputProps={{ startAdornment: <InputAdornment position="start">R$</InputAdornment> }} inputProps={{ step: 0.01 }} />
-              <TextField label="Custo por hora" fullWidth type="number" value={form.costPerHour} onChange={vf('costPerHour')}
+              <TextField label="Custo por hora" fullWidth type="number" value={numVal(form.costPerHour)} onChange={vf('costPerHour')}
                 InputProps={{ startAdornment: <InputAdornment position="start">R$</InputAdornment> }} inputProps={{ step: 0.01 }} />
             </Stack>
-            <TextField label="Custo Fixo Diário" fullWidth type="number" value={form.fixedCost} onChange={vf('fixedCost')}
+            <TextField label="Custo Fixo Diário" fullWidth type="number" value={numVal(form.fixedCost)} onChange={vf('fixedCost')}
               InputProps={{ startAdornment: <InputAdornment position="start">R$</InputAdornment> }} inputProps={{ step: 0.01 }} />
             <FormControlLabel control={<Switch checked={form.isActive} onChange={(e) => setForm((p) => ({ ...p, isActive: e.target.checked }))} />} label="Tipo ativo" />
           </Stack>

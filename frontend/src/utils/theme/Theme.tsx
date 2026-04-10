@@ -1,7 +1,6 @@
 import _ from 'lodash';
 import { createTheme } from '@mui/material/styles';
 import { useSelector } from '@/store/hooks';
-import { useEffect } from 'react';
 import { AppState } from '@/store/store';
 import components from './Components';
 import typography from './Typography';
@@ -45,9 +44,6 @@ const ThemeSettings = () => {
     direction: activDir,
     theme: activeTheme,
   });
-  useEffect(() => {
-    document.dir = activDir;
-  }, [activDir]);
 
   return theme;
 };

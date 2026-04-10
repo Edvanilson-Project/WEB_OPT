@@ -1,4 +1,4 @@
-import { Entity, Column } from 'typeorm';
+import { Entity, Column, Index } from 'typeorm';
 import { BaseCompanyEntity } from '../../../common/entities/base.entity';
 
 export enum ShiftStatus {
@@ -9,9 +9,11 @@ export enum ShiftStatus {
 
 @Entity('crew_shifts')
 export class CrewShiftEntity extends BaseCompanyEntity {
+  @Index()
   @Column({ name: 'optimization_run_id' })
   optimizationRunId: number;
 
+  @Index()
   @Column({ name: 'vehicle_route_id', nullable: true })
   vehicleRouteId: number;
 

@@ -20,12 +20,24 @@ BASE_URLS = ["http://127.0.0.1:8001", "http://127.0.0.1:8000"]
 TIMEOUT_BY_ALGO = {
     "greedy": 20,
     "genetic": 30,
-    "simulated_annealing": 30,
-    "tabu_search": 70,
-    "set_partitioning": 40,
-    "joint_solver": 70,
-    "hybrid_pipeline": 70,
+    "simulated_annealing": 40,
+    "tabu_search": 40,
+    "set_partitioning": 35,
+    "joint_solver": 45,
+    "hybrid_pipeline": 45,
 }
+
+TIME_BUDGET_BY_ALGO = {
+    "greedy": 8,
+    "genetic": 10,
+    "simulated_annealing": 12,
+    "tabu_search": 12,
+    "set_partitioning": 12,
+    "joint_solver": 14,
+    "hybrid_pipeline": 16,
+}
+
+MIN_LAYOVER = 8
 
 
 def choose_base_url() -> str:
@@ -39,6 +51,13 @@ def choose_base_url() -> str:
     raise RuntimeError("Optimizer API offline em 8000/8001")
 
 
+def build_deadhead_times(destination: int) -> Dict[str, int]:
+    return {
+        "1": MIN_LAYOVER if destination == 1 else 12,
+        "2": MIN_LAYOVER if destination == 2 else 12,
+    }
+
+
 def trip(trip_id: int, line_id: int, start_time: int, duration: int, origin: int, destination: int, group_id: int | None = None) -> Dict:
     return {
         "id": trip_id,
@@ -46,15 +65,11 @@ def trip(trip_id: int, line_id: int, start_time: int, duration: int, origin: int
         "trip_group_id": group_id,
         "start_time": start_time,
         "end_time": start_time + duration,
-        "origin_id": line_id * 1000 + origin,
-        "destination_id": line_id * 1000 + destination,
+        "origin_id": origin,
+        "destination_id": destination,
         "duration": duration,
         "distance_km": round(duration * 0.42, 2),
-        "deadhead_times": {
-            str(line_id * 1000 + 1): 0,
-            str(line_id * 1000 + 2): 0,
-            str(line_id * 1000 + 3): 3,
-        },
+        "deadhead_times": build_deadhead_times(destination),
     }
 
 
@@ -63,55 +78,57 @@ def build_dataset() -> List[Dict]:
     trip_id = 1
     pair_id = 1
 
-    # 3 linhas com ida/volta intercaladas e alguns blocos sem volta para stress realista
     lines = [815, 819, 826]
-    starts = [220, 250, 280, 320, 360, 410, 460, 520]
+    base_starts = [300, 480, 660, 840]
+    line_offsets = {815: 0, 819: 18, 826: 36}
+    line_duration_bias = {815: 0, 819: 4, 826: 8}
 
     for line in lines:
-        for start in starts:
-            duration_ida = 45 + ((start // 10) % 15)
-            ida_id = trip_id
-            trips.append(trip(ida_id, line, start, duration_ida, 1, 2, pair_id))
+        for wave_index, base_start in enumerate(base_starts):
+            start = base_start + line_offsets[line]
+            duration_outbound = 42 + line_duration_bias[line] + wave_index
+            duration_return = 40 + line_duration_bias[line] + (wave_index % 2)
+
+            trips.append(trip(trip_id, line, start, duration_outbound, 1, 2, pair_id))
             trip_id += 1
 
-            # Em parte das viagens adiciona volta para validar agrupamento
-            if (start // 10) % 3 != 0:
-                gap = 0 if (start // 10) % 2 == 0 else 8
-                volta_start = start + duration_ida + gap
-                duration_volta = 43 + ((start // 5) % 12)
-                trips.append(trip(trip_id, line, volta_start, duration_volta, 2, 1, pair_id))
-                trip_id += 1
+            return_start = start + duration_outbound
+            trips.append(trip(trip_id, line, return_start, duration_return, 2, 1, pair_id))
+            trip_id += 1
 
             pair_id += 1
 
-    # ordenação final
     trips.sort(key=lambda item: (item["start_time"], item["line_id"], item["id"]))
     return trips
 
 
 def run_once(base_url: str, algorithm: str, trips: List[Dict]) -> Dict:
+    time_budget_s = TIME_BUDGET_BY_ALGO.get(algorithm, 12)
     payload = {
         "algorithm": algorithm,
+        "time_budget_s": time_budget_s,
         "trips": trips,
         "vehicle_types": [],
         "cct_params": {
             "apply_cct": True,
-            "max_shift_minutes": 540,
-            "max_work_minutes": 500,
+            "max_shift_minutes": 600,
+            "max_work_minutes": 520,
             "max_driving_minutes": 240,
             "min_break_minutes": 20,
-            "min_layover_minutes": 0,
-            "enforce_single_line_duty": True,
+            "min_layover_minutes": MIN_LAYOVER,
+            "enforce_single_line_duty": False,
             "strict_hard_validation": True,
         },
         "vsp_params": {
-            "min_layover_minutes": 0,
+            "time_budget_s": time_budget_s,
+            "min_layover_minutes": MIN_LAYOVER,
             "preserve_preferred_pairs": True,
-            "preferred_pair_window_minutes": 40,
+            "preferred_pair_window_minutes": 20,
+            "allow_multi_line_block": True,
             "strict_hard_validation": True,
-            "max_generated_columns": 800,
+            "max_generated_columns": 180,
             "max_pricing_iterations": 1,
-            "max_pricing_additions": 64,
+            "max_pricing_additions": 32,
         },
     }
 

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useState, useCallback } from 'react';
+import React, { createContext, useContext, useState, useCallback, useMemo } from 'react';
 import { Snackbar, Alert, AlertColor } from '@mui/material';
 
 // ─── Context ─────────────────────────────────────────────────────────────────
@@ -30,12 +30,12 @@ export function NotifyProvider({ children }: { children: React.ReactNode }) {
     setOpen(true);
   }, []);
 
-  const value: NotifyCtx = {
-    success: (msg) => show(msg, 'success'),
-    error: (msg) => show(msg, 'error'),
-    info: (msg) => show(msg, 'info'),
-    warning: (msg) => show(msg, 'warning'),
-  };
+  const value: NotifyCtx = useMemo(() => ({
+    success: (msg: string) => show(msg, 'success'),
+    error: (msg: string) => show(msg, 'error'),
+    info: (msg: string) => show(msg, 'info'),
+    warning: (msg: string) => show(msg, 'warning'),
+  }), [show]);
 
   return (
     <Ctx.Provider value={value}>

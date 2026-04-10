@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, OnModuleInit, Logger } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { OptimizationService } from './optimization.service';
 import { OptimizationController } from './optimization.controller';
@@ -16,4 +16,18 @@ import { OptimizationSettingsModule } from '../optimization-settings/optimizatio
   providers: [OptimizationService],
   exports: [OptimizationService],
 })
-export class OptimizationModule {}
+export class OptimizationModule implements OnModuleInit {
+  private readonly logger = new Logger(OptimizationModule.name);
+
+  constructor(private readonly optimizationService: OptimizationService) {}
+
+  async onModuleInit(): Promise<void> {
+    try {
+      await this.optimizationService.recoverStaleRuns();
+    } catch (err) {
+      this.logger.error(
+        `Falha ao recuperar runs presos: ${(err as Error).message}`,
+      );
+    }
+  }
+}

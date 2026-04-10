@@ -5,9 +5,11 @@ import {
   IsEnum,
   IsInt,
   IsNumber,
+  Min,
+  Max,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { LineStatus } from '../entities/line.entity';
+import { LineStatus, LineOperationMode } from '../entities/line.entity';
 
 export class CreateLineDto {
   @ApiProperty({ example: '214' })
@@ -35,11 +37,14 @@ export class CreateLineDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsNumber()
+  @Min(0)
   distanceKm?: number;
 
   @ApiPropertyOptional()
   @IsOptional()
   @IsInt()
+  @Min(1)
+  @Max(2880)
   avgTripDurationMinutes?: number;
 
   @ApiPropertyOptional()
@@ -51,4 +56,51 @@ export class CreateLineDto {
   @IsOptional()
   @IsEnum(LineStatus)
   status?: LineStatus;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  returnDistanceKm?: number;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsInt()
+  idleTerminalId?: number;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  idleDistanceKm?: number;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  idleReturnDistanceKm?: number;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsInt()
+  garageTerminalId?: number;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  garageDistanceKm?: number;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsInt()
+  vehicleTypeId?: number;
+
+  @ApiPropertyOptional({
+    enum: LineOperationMode,
+    default: LineOperationMode.ROUNDTRIP,
+  })
+  @IsOptional()
+  @IsEnum(LineOperationMode)
+  operationMode?: LineOperationMode;
 }

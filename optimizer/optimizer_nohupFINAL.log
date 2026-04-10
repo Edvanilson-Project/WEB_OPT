@@ -1,7 +1,0 @@
-INFO:     Started server process [290065]
-INFO:     Waiting for application startup.
-{"version": "2.0.0", "algorithms": ["greedy", "genetic", "simulated_annealing", "tabu_search", "set_partitioning", "joint_solver", "hybrid_pipeline"], "event": "optimizer_starting", "level": "info", "logger": "main", "timestamp": "2026-04-01T18:04:42.758037Z"}
-{"interval_seconds": 300, "event": "strategy_auto_reconcile_enabled", "level": "info", "logger": "main", "timestamp": "2026-04-01T18:04:42.758143Z"}
-{"scenario_id": 3, "source_snapshot_id": 3, "event": "strategy_auto_reconcile_ok", "level": "info", "logger": "main", "timestamp": "2026-04-01T18:04:42.759217Z"}
-INFO:     Application startup complete.
-INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)

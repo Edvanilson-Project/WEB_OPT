@@ -19,15 +19,22 @@ from ...core.config import get_settings
 from ...domain.interfaces import IVSPAlgorithm
 from ...domain.models import Block, Trip, VehicleType, VSPSolution
 from ..base import BaseAlgorithm
-from ..utils import quick_cost_sorted, sort_block_trips, blocks_are_feasible
-from .greedy import GreedyVSP
+from ..utils import blocks_are_feasible, preferred_pair_penalty, quick_cost_sorted, sort_block_trips
+from .greedy import GreedyVSP, build_preferred_pairs
 
 settings = get_settings()
 
 
-def _quick_cost(blocks: List[Block]) -> float:
-    """Estimativa de custo — usa quick_cost_sorted (corrige bug B4: trips fora de ordem)."""
-    return quick_cost_sorted(blocks)
+def _quick_cost(
+    blocks: List[Block],
+    fixed_vehicle_cost: float = 800.0,
+    idle_cost_per_minute: float = 0.5,
+    max_work_minutes: float = 480.0,
+    crew_cost_weight: float = 400.0,
+) -> float:
+    """Estimativa de custo parametrizável (vehicle + idle + crew)."""
+    return quick_cost_sorted(blocks, fixed_vehicle_cost, idle_cost_per_minute,
+                             max_work_minutes, crew_cost_weight)
 
 
 def _reloc(blocks: List[Block]) -> List[Block]:
@@ -85,7 +92,22 @@ def _split(blocks: List[Block], next_id: int) -> List[Block]:
     return blocks
 
 
-_OPERATORS = [_reloc, _swap2, _split]
+def _merge(blocks: List[Block]) -> List[Block]:
+    """Combina dois blocos em um, reduzindo o número de veículos."""
+    if len(blocks) < 2:
+        return blocks
+    original = blocks
+    blocks = deepcopy(blocks)
+    i, j = random.sample(range(len(blocks)), 2)
+    blocks[i].trips.extend(blocks[j].trips)
+    del blocks[j]
+    sort_block_trips(blocks)
+    if not blocks_are_feasible(blocks):
+        return original
+    return blocks
+
+
+_OPERATORS = [_reloc, _swap2, _split, _merge]
 
 
 class SimulatedAnnealingVSP(BaseAlgorithm, IVSPAlgorithm):
@@ -106,11 +128,43 @@ class SimulatedAnnealingVSP(BaseAlgorithm, IVSPAlgorithm):
         self._start_timer()
         if not trips:
             return VSPSolution(algorithm=self.name)
+        random_seed = self.vsp_params.get("random_seed")
+        if random_seed is not None:
+            random.seed(int(random_seed))
+
+        # Custos parametrizáveis a partir de vsp_params
+        fvc = float(self.vsp_params.get("fixed_vehicle_activation_cost", 800.0))
+        icpm = float(self.vsp_params.get("idle_cost_per_minute", 0.5))
+        max_work = float(self.vsp_params.get("max_work_minutes", 480.0))
+        crew_cw = float(self.vsp_params.get("crew_cost_weight", fvc * 0.5))
+        pair_break_penalty = float(self.vsp_params.get("pair_break_penalty", fvc * 1.25))
+        paired_trip_bonus = float(self.vsp_params.get("paired_trip_bonus", fvc * 0.05))
+        preferred_pairs = (
+            build_preferred_pairs(
+                trips,
+                int(self.vsp_params.get("min_layover_minutes", 8) or 8),
+                int(self.vsp_params.get("preferred_pair_window_minutes", 120) or 120),
+            )
+            if bool(self.vsp_params.get("preserve_preferred_pairs", True))
+            else {}
+        )
+        hard_pairing_penalty = (
+            float(self.vsp_params.get("hard_pairing_penalty", max(pair_break_penalty * 10.0, fvc * 25.0)))
+            if bool(self.vsp_params.get("hard_pairing_vehicle_level", False))
+            else 0.0
+        )
+        cost_fn = lambda blks: _quick_cost(blks, fvc, icpm, max_work, crew_cw) + preferred_pair_penalty(
+            blks,
+            preferred_pairs,
+            pair_break_penalty,
+            paired_trip_bonus,
+            hard_pairing_penalty,
+        )
 
         # Estado inicial via Greedy
         current_sol = GreedyVSP(vsp_params=self.vsp_params).solve(trips, vehicle_types)
         current_blocks = deepcopy(current_sol.blocks)
-        current_cost = _quick_cost(current_blocks)
+        current_cost = cost_fn(current_blocks)
 
         best_blocks = deepcopy(current_blocks)
         best_cost = current_cost
@@ -135,7 +189,7 @@ class SimulatedAnnealingVSP(BaseAlgorithm, IVSPAlgorithm):
                         perturbed = op(current_blocks)
                     if perturbed:
                         current_blocks = perturbed
-                        current_cost = _quick_cost(current_blocks)
+                        current_cost = cost_fn(current_blocks)
 
             while temp > min_temp and not self._check_timeout():
                 iteration += 1
@@ -151,7 +205,7 @@ class SimulatedAnnealingVSP(BaseAlgorithm, IVSPAlgorithm):
                     temp *= self.cooling_rate
                     continue
 
-                candidate_cost = _quick_cost(candidate)
+                candidate_cost = cost_fn(candidate)
                 delta = candidate_cost - current_cost
 
                 if delta < 0 or math.exp(-delta / temp) > random.random():

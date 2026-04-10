@@ -127,21 +127,22 @@ class HardConstraintValidator:
 
         mandatory_groups = cct_params.get("mandatory_trip_groups_same_duty") or []
         if mandatory_groups:
-            duty_by_trip: Dict[int, int] = {}
+            roster_by_trip: Dict[int, Optional[int]] = {}
             for duty in result.csp.duties:
+                rid = duty.meta.get("roster_id")
                 for task in duty.tasks:
                     for trip in task.trips:
-                        duty_by_trip[trip.id] = duty.id
+                        roster_by_trip[trip.id] = rid
             for group in mandatory_groups:
                 group_ids = [int(item) for item in group]
-                assigned = {duty_by_trip.get(trip_id) for trip_id in group_ids}
+                assigned = {roster_by_trip.get(trip_id) for trip_id in group_ids}
                 if None in assigned or len(assigned) > 1:
                     issues.append(f"MANDATORY_GROUP_SPLIT {group_ids}")
 
         issues.extend(self._audit_operator_assignment(result, cct_params))
 
         # Separar violações hard (bloqueantes) de soft (avisos)
-        _SOFT_PREFIXES = ("MEAL_BREAK_MISSING", "CONTINUOUS_DRIVING_EXCEEDED")
+        _SOFT_PREFIXES = ("MEAL_BREAK_MISSING", "CONTINUOUS_DRIVING_EXCEEDED", "MANDATORY_GROUP_SPLIT")
         hard_issues = [i for i in issues if not any(i.startswith(p) for p in _SOFT_PREFIXES)]
         soft_issues = [i for i in issues if any(i.startswith(p) for p in _SOFT_PREFIXES)]
 

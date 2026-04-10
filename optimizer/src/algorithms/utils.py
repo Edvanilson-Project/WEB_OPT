@@ -10,7 +10,7 @@ Funções:
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import List, Tuple
+from typing import Dict, List, Tuple
 
 from ..domain.models import Block
 
@@ -25,7 +25,7 @@ def sort_block_trips(blocks: List[Block]) -> List[Block]:
     return blocks
 
 
-def block_is_feasible(block: Block, min_gap: int = 10) -> bool:
+def block_is_feasible(block: Block, min_gap: int = 8) -> bool:
     """
     Retorna True se as viagens no bloco não se sobrepõem e o gap é suficiente.
     - gap >= max(min_gap, deadhead_times) entre o fim de uma viagem e o início da próxima
@@ -61,34 +61,77 @@ def blocks_are_feasible(blocks: List[Block]) -> bool:
     return all(block_is_feasible(b) for b in blocks)
 
 
-def quick_cost_sorted(blocks: List[Block]) -> float:
+def quick_cost_sorted(
+    blocks: List[Block],
+    fixed_vehicle_cost: float = 800.0,
+    idle_cost_per_minute: float = 0.5,
+    max_work_minutes: float = 480.0,
+    crew_cost_weight: float = 400.0,
+) -> float:
     """
-    Estimativa de custo: igual a _quick_cost em sa.py mas ORDENA trips primeiro.
-    Corrige o bug B4 (SPREAD_NEGATIVO) onde trips fora de ordem geravam gaps negativos.
-    Cross-line é permitido para minimizar veículos.
+    Estimativa de custo rápida para SA/Tabu/GA.
+    Considera veículos, ociosidade E tripulação estimada.
+    - crew_cost_weight: custo de cada tripulante extra necessário no bloco
+    - max_work_minutes: jornada máxima de trabalho (além disso, precisa outro tripulante)
     """
     total = 0.0
     for b in blocks:
-        # Ordena antes de calcular — CORREÇÃO BUG B4
         sorted_trips = sorted(b.trips, key=lambda t: t.start_time)
-        total += 10000.0  # custo fixo por veículo (alto para priorizar minimização de frota)
-        for i in range(len(sorted_trips) - 1):
-            gap = sorted_trips[i + 1].start_time - sorted_trips[i].end_time
-            total += max(0, gap) * 0.5  # penalidade por tempo ocioso
-        # Penaliza sobreposições pesadamente
+        total += fixed_vehicle_cost
+        block_work = sum(t.duration for t in sorted_trips)
+        if sorted_trips and max_work_minutes > 0:
+            block_spread = sorted_trips[-1].end_time - sorted_trips[0].start_time
+            min_crew = max(
+                -(-block_work // int(max_work_minutes)),  # ceil division by work
+                -(-block_spread // int(max_work_minutes + 80)),  # ceil division by spread
+            )
+            total += max(0, min_crew - 1) * crew_cost_weight
         for i in range(len(sorted_trips) - 1):
             gap = sorted_trips[i + 1].start_time - sorted_trips[i].end_time
             if gap < 0:
                 total += abs(gap) * 50.0  # penalidade forte por overlap
-        # Cross-line é permitido — não penalizar
+            else:
+                total += gap * idle_cost_per_minute
     return total
 
 
-def sort_and_filter(blocks: List[Block]) -> Tuple[List[Block], bool]:
-    """
-    Ordena trips em todos os blocos e verifica factibilidade.
-    Retorna (blocks_ordenados, is_feasible).
-    """
-    sort_block_trips(blocks)
-    feasible = blocks_are_feasible(blocks)
-    return blocks, feasible
+def preferred_pair_penalty(
+    blocks: List[Block],
+    preferred_pairs: Dict[int, int],
+    pair_break_penalty: float = 1000.0,
+    paired_trip_bonus: float = 40.0,
+    hard_pairing_penalty: float = 0.0,
+) -> float:
+    """Pontua preservação de pares preferenciais/trip_group no VSP."""
+    if not preferred_pairs:
+        return 0.0
+
+    trip_to_block: Dict[int, int] = {}
+    consecutive_pairs: set[Tuple[int, int]] = set()
+    for block in blocks:
+        for trip in block.trips:
+            trip_to_block[trip.id] = block.id
+        for index in range(len(block.trips) - 1):
+            current = block.trips[index]
+            nxt = block.trips[index + 1]
+            if preferred_pairs.get(current.id) == nxt.id:
+                consecutive_pairs.add(tuple(sorted((current.id, nxt.id))))
+
+    total = 0.0
+    seen_pairs: set[Tuple[int, int]] = set()
+    for trip_id, pair_id in preferred_pairs.items():
+        signature = tuple(sorted((trip_id, pair_id)))
+        if signature in seen_pairs:
+            continue
+        seen_pairs.add(signature)
+
+        block_a = trip_to_block.get(trip_id)
+        block_b = trip_to_block.get(pair_id)
+        if signature in consecutive_pairs:
+            total -= paired_trip_bonus
+        elif block_a is None or block_b is None or block_a != block_b:
+            total += hard_pairing_penalty or pair_break_penalty
+        else:
+            total += pair_break_penalty
+
+    return total

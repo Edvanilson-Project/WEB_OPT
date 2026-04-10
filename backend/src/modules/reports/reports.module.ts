@@ -8,11 +8,7 @@ import { LineEntity } from '../lines/entities/line.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([
-      OptimizationRunEntity,
-      TripEntity,
-      LineEntity,
-    ]),
+    TypeOrmModule.forFeature([OptimizationRunEntity, TripEntity, LineEntity]),
   ],
   controllers: [ReportsController],
   providers: [ReportsService],
