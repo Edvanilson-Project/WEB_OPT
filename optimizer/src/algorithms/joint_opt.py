@@ -17,6 +17,7 @@ def _try_merge_vsp_blocks(vsp_sol: VSPSolution, vsp_params: Dict[str, Any]) -> V
     min_layover = int(vsp_params.get("min_layover_minutes", 8))
     max_vehicle_shift = int(vsp_params.get("max_vehicle_shift_minutes", 960))
     allow_multi_line = bool(vsp_params.get("allow_multi_line_block", True))
+    connection_tolerance = int(vsp_params.get("connection_tolerance_minutes", 0))
 
     blocks = copy.deepcopy(vsp_sol.blocks)
     changed = True
@@ -43,10 +44,10 @@ def _try_merge_vsp_blocks(vsp_sol: VSPSolution, vsp_params: Dict[str, Any]) -> V
                 if gap < 0:
                     continue
 
-                # Verificar deadhead
+                # Verificar deadhead — respeita connection_tolerance_minutes para flexibilidade operacional
                 deadhead = int(last_t.deadhead_times.get(first_t.origin_id, 0))
                 needed = max(min_layover, deadhead)
-                if gap < needed:
+                if gap + connection_tolerance < needed:
                     continue
 
                 # Verificar duração total do bloco consolidado

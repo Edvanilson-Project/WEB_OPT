@@ -6,6 +6,8 @@ import {
   IsBoolean,
   IsArray,
   IsNumber,
+  Min,
+  Max,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { OptimizationAlgorithm } from '../entities/optimization-run.entity';
@@ -109,8 +111,10 @@ export class RunOptimizationDto {
   @IsBoolean()
   dryRun?: boolean;
 
-  @ApiPropertyOptional({ description: 'Budget global de tempo em segundos (atalho para vspParams.timeBudgetSeconds + cspParams.timeLimitSeconds)', default: 30 })
+  @ApiPropertyOptional({ description: 'Budget global de tempo em segundos (atalho para vspParams.timeBudgetSeconds + cspParams.timeLimitSeconds). Min: 5s, Max: 600s', default: 30, minimum: 5, maximum: 600 })
   @IsOptional()
   @IsNumber()
+  @Min(5, { message: 'timeBudgetSeconds deve ser no mínimo 5 segundos.' })
+  @Max(600, { message: 'timeBudgetSeconds não pode exceder 600 segundos (10 minutos).' })
   timeBudgetSeconds?: number;
 }

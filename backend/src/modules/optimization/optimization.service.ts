@@ -1379,9 +1379,17 @@ export class OptimizationService {
       ? finishedAt.getTime() - run.startedAt.getTime()
       : 0;
 
-    const cctViolations = Number(
-      result.cct_violations ?? result.cctViolations ?? 0,
-    );
+    // Sanitize numeric fields — prevent NaN/Infinity from corrupting the DB
+    const safeNumber = (v: any, fallback = 0): number => {
+      const n = Number(v ?? fallback);
+      return Number.isFinite(n) ? n : fallback;
+    };
+
+    const cctViolations = safeNumber(result.cct_violations ?? result.cctViolations, 0);
+    const totalCost = safeNumber(result.total_cost ?? result.totalCost, 0);
+    const totalVehicles = safeNumber(result.vehicles ?? result.num_vehicles, 0);
+    const totalCrew = safeNumber(result.crew ?? result.num_crew, 0);
+
     const hardOutputOk = result?.meta?.hard_constraint_report?.output?.ok;
     const hasHardViolation = hardOutputOk === false;
 
@@ -1390,10 +1398,10 @@ export class OptimizationService {
         status: OptimizationStatus.FAILED,
         finishedAt,
         durationMs,
-        totalVehicles: result.vehicles || result.num_vehicles || 0,
-        totalCrew: result.crew || result.num_crew || 0,
+        totalVehicles,
+        totalCrew,
         totalTrips,
-        totalCost: Number(result.total_cost ?? result.totalCost ?? 0),
+        totalCost,
         cctViolations,
         errorMessage:
           'Execução encerrada por hard constraints inválidas. Ajuste parâmetros operacionais antes de publicar a escala.',
@@ -1406,10 +1414,10 @@ export class OptimizationService {
       status: OptimizationStatus.COMPLETED,
       finishedAt,
       durationMs,
-      totalVehicles: result.vehicles || result.num_vehicles || 0,
-      totalCrew: result.crew || result.num_crew || 0,
+      totalVehicles,
+      totalCrew,
       totalTrips,
-      totalCost: Number(result.total_cost ?? result.totalCost ?? 0),
+      totalCost,
       cctViolations,
       resultSummary: result,
     });
