@@ -11,6 +11,9 @@ import {
 import { RunOptimizationDto } from './dto/run-optimization.dto';
 import { TripsService } from '../trips/trips.service';
 import { OptimizationSettingsService } from '../optimization-settings/optimization-settings.service';
+import { LinesService } from '../lines/lines.service';
+import { TerminalsService } from '../terminals/terminals.service';
+import { VehicleTypesService } from '../vehicle-types/vehicle-types.service';
 import { EntityNotFoundException } from '../../common/exceptions/not-found.exception';
 
 export interface ActiveSettingsDto {
@@ -22,18 +25,25 @@ export interface ActiveSettingsDto {
   preservePreferredPairs?: boolean;
   enforceSingleLineDuty?: boolean;
   timeBudgetSeconds?: number;
-  [key: string]: unknown;
+  operationMode?: 'urban' | 'charter';
+  [key: string]: any;
 }
 
 export interface OptimizationResultPayload {
-  cct_violations?: number;
-  cctViolations?: number;
-  num_vehicles?: number;
   vehicles?: number;
-  num_crew?: number;
+  num_vehicles?: number;
   crew?: number;
+  num_crew?: number;
   total_cost?: number | string;
   totalCost?: number | string;
+  cct_violations?: number;
+  cctViolations?: number;
+  total_trips?: number;
+  totalTrips?: number;
+  blocks?: any[];
+  duties?: any[];
+  unassigned_trips?: any[];
+  warnings?: any[];
   meta?: {
     hard_constraint_report?: {
       output?: {
@@ -56,6 +66,9 @@ export class OptimizationService {
     private readonly tripsService: TripsService,
     private readonly settingsService: OptimizationSettingsService,
     private readonly configService: ConfigService,
+    private readonly linesService: LinesService,
+    private readonly terminalsService: TerminalsService,
+    private readonly vehicleTypesService: VehicleTypesService,
   ) {}
 
   /**
@@ -131,8 +144,9 @@ export class OptimizationService {
         ),
       );
       const trips = tripsArrays.flat();
+      const totalTripsCount = trips.length;
 
-      if (!trips.length) {
+      if (!totalTripsCount) {
         const desc =
           lineIdsToFetch.length > 1
             ? 'as linhas selecionadas'
@@ -256,7 +270,12 @@ export class OptimizationService {
           ...(cctOverride.breakMinutes !== undefined && {
             min_break_minutes: 12,
           }),
-          ...((cctOverride as any).maxUnpaidBreakMinutes !== undefined ? { max_unpaid_break_minutes: (cctOverride as any).maxUnpaidBreakMinutes } : { max_unpaid_break_minutes: opMode === 'charter' ? 600 : 360 }),
+          ...((cctOverride as any).maxUnpaidBreakMinutes !== undefined
+            ? {
+                max_unpaid_break_minutes: (cctOverride as any)
+                  .maxUnpaidBreakMinutes,
+              }
+            : { max_unpaid_break_minutes: opMode === 'charter' ? 600 : 360 }),
           ...(cctOverride.minShiftMinutes !== undefined && {
             min_shift_minutes: cctOverride.minShiftMinutes,
           }),
@@ -369,6 +388,9 @@ export class OptimizationService {
         };
         const vspParams = {
           ...vspBase,
+          ...(dto.timeBudgetSeconds !== undefined && {
+            time_budget_s: dto.timeBudgetSeconds,
+          }),
           ...(dto.vspParams?.timeBudgetSeconds !== undefined && {
             time_budget_s: dto.vspParams.timeBudgetSeconds,
           }),
@@ -491,6 +513,7 @@ export class OptimizationService {
               : (dto.lineId ?? dto.lineIds?.[0] ?? null),
           company_id: dto.companyId,
           time_budget_s:
+            dto.timeBudgetSeconds ??
             dto.vspParams?.timeBudgetSeconds ??
             activeSettings?.timeBudgetSeconds ??
             null,
@@ -568,7 +591,10 @@ export class OptimizationService {
         result = await this._runInlineOptimization(trips, dto);
       }
 
-      await this._saveResults(runId, result, trips.length);
+      // Enrich blocks with full trip details so the frontend can display them
+      this._enrichBlockTrips(result, trips);
+
+      await this._saveResults(runId, result, totalTripsCount);
     } catch (err) {
       const diagnostics = this._buildFailureDiagnostics(
         (err as Error).message,
@@ -983,52 +1009,81 @@ export class OptimizationService {
       }
     }
 
-    // ── 7. Formatar resultado ─────────────────────────────────────────────────
+    // ── 7. Buscar nomes dos terminais para o resultado ────────────────────────
+    const companyId = (await this.tripsService.findOne(sorted[0].id))?.companyId ?? 1;
+    const allTerms = await this.terminalsService.findAll(companyId);
+    const termMap = new Map(allTerms.map(t => [t.id, t.shortName || t.name]));
+
+    // ── 8. Formatar resultado ─────────────────────────────────────────────────
     const blocksOut = allBlocks.map((blk) => {
       const tripsSorted = [...blk.trips].sort(
         (a, b) => (a.startTimeMinutes ?? 0) - (b.startTimeMinutes ?? 0),
       );
       const spread = blk.endTime - blk.startTime;
+      const tripsDetails = tripsSorted.map((t) => ({
+        id: t.id,
+        trip_id: t.id,
+        start_time: t.startTimeMinutes ?? 0,
+        end_time: t.endTimeMinutes ?? 0,
+        origin_id: t.originTerminalId ?? 1,
+        destination_id: t.destinationTerminalId ?? 2,
+        origin_name: termMap.get(t.originTerminalId ?? 1) || 'T#1',
+        destination_name: termMap.get(t.destinationTerminalId ?? 2) || 'T#2',
+        duration: t.durationMinutes ?? 0,
+        line_id: t.lineId ?? null,
+        is_paired: pairedTrips.has(t.id),
+        direction:
+          (t.originTerminalId ?? 1) < (t.destinationTerminalId ?? 2)
+            ? ('outbound' as const)
+            : ('inbound' as const),
+      }));
+
       return {
         block_id: blk.blockId,
-        trips: tripsSorted.map((t) => t.id),
+        trips: tripsDetails,
         num_trips: tripsSorted.length,
         start_time: blk.startTime,
         end_time: blk.endTime,
         spread_minutes: spread,
         idle_minutes: spread - blk.workMinutes,
-        trip_details: tripsSorted.map((t) => ({
-          trip_id: t.id,
-          start_time: t.startTimeMinutes ?? 0,
-          end_time: t.endTimeMinutes ?? 0,
-          origin_id: t.originTerminalId ?? 1,
-          destination_id: t.destinationTerminalId ?? 2,
-          duration: t.durationMinutes ?? 0,
-          line_id: t.lineId ?? null,
-          is_paired: pairedTrips.has(t.id),
-          direction:
-            (t.originTerminalId ?? 1) < (t.destinationTerminalId ?? 2)
-              ? 'outbound'
-              : 'inbound',
-        })),
+        trip_details: tripsDetails,
       };
     });
 
-    const dutiesOut = duties.map((d) => ({
-      duty_id: d.dutyId,
-      blocks: [...new Set(d.segments.map((s) => s.blockId))],
-      trip_ids: d.segments.flatMap((s) => s.trips.map((t) => t.id)),
-      work_time: d.workTime,
-      spread_time: d.lastTripEnd - d.spreadFrom,
-      shift_violations: d.shiftViolations,
-      continuous_driving_violation: false,
-      warnings: d.warnings,
-      segments: d.segments.map((s) => ({
-        block_id: s.blockId,
-        drive_minutes: s.driveMin,
-        trip_ids: s.trips.map((t) => t.id),
-      })),
-    }));
+    const dutiesOut = duties.map((d) => {
+      const dutyTrips = d.segments.flatMap((s) => s.trips).map(t => ({
+        id: t.id,
+        trip_id: t.id,
+        start_time: t.startTimeMinutes ?? 0,
+        end_time: t.endTimeMinutes ?? 0,
+        origin_id: t.originTerminalId ?? 1,
+        destination_id: t.destinationTerminalId ?? 2,
+        duration: t.durationMinutes ?? 0,
+        line_id: t.lineId ?? null,
+      }));
+
+      return {
+        duty_id: d.dutyId,
+        blocks: [...new Set(d.segments.map((s) => s.blockId))],
+        trip_ids: d.segments.flatMap((s) => s.trips.map((t) => t.id)),
+        trips: dutyTrips,
+        work_time: d.workTime,
+        spread_time: d.lastTripEnd - d.spreadFrom,
+        shift_violations: d.shiftViolations,
+        continuous_driving_violation: false,
+        warnings: d.warnings,
+        segments: d.segments.map((s) => ({
+          block_id: s.blockId,
+          drive_minutes: s.driveMin,
+          trip_ids: s.trips.map((t) => t.id),
+          trips: s.trips.map(t => ({
+            id: t.id,
+            start_time: t.startTimeMinutes ?? 0,
+            end_time: t.endTimeMinutes ?? 0,
+          })),
+        })),
+      };
+    });
 
     const qaWarnings = warnings.slice(0, 20).map((msg) => ({
       type: msg.startsWith('OVERLAP')
@@ -1288,6 +1343,31 @@ export class OptimizationService {
     );
   }
 
+  /** Enriquece result.blocks[].trips com objetos TripDetail completos para exibição no frontend. */
+  private _enrichBlockTrips(result: any, trips: any[]): void {
+    if (!result?.blocks || !Array.isArray(result.blocks)) return;
+    const tripMap = new Map<number, any>(trips.map((t: any) => [t.id, t]));
+    result.blocks = result.blocks.map((block: any) => ({
+      ...block,
+      trips: (block.trips ?? []).map((tripIdOrObj: any) => {
+        const id = typeof tripIdOrObj === 'object' ? tripIdOrObj.id : tripIdOrObj;
+        const t = tripMap.get(id);
+        if (!t) return tripIdOrObj;
+        return {
+          id: t.id,
+          trip_id: t.id,
+          start_time: t.startTimeMinutes ?? null,
+          end_time: t.endTimeMinutes ?? null,
+          origin_id: String(t.originTerminalId ?? '--'),
+          destination_id: String(t.destinationTerminalId ?? '--'),
+          duration: t.durationMinutes ?? 0,
+          block_id: block.block_id,
+          status: 'assigned',
+        };
+      }),
+    }));
+  }
+
   private async _saveResults(
     runId: number,
     result: OptimizationResultPayload,
@@ -1393,19 +1473,28 @@ export class OptimizationService {
   }
 
   async getDashboardStats(companyId: number): Promise<any> {
-    const runs = await this.runRepo.find({
-      where: { companyId, status: OptimizationStatus.COMPLETED },
-      order: { createdAt: 'DESC' },
-      take: 10,
-    });
+    const [runs, totalRuns, completedRuns, totalLines, totalTerminals, totalVehicleTypes] = await Promise.all([
+      this.runRepo.find({
+        where: { companyId, status: OptimizationStatus.COMPLETED },
+        order: { createdAt: 'DESC' },
+        take: 10,
+      }),
+      this.runRepo.count({ where: { companyId } }),
+      this.runRepo.count({ where: { companyId, status: OptimizationStatus.COMPLETED } }),
+      this.linesService['lineRepo'].count({ where: { companyId } }),
+      this.terminalsService['terminalRepo'].count({ where: { companyId } }),
+      this.vehicleTypesService['vehicleTypeRepo'].count({ where: { companyId } }),
+    ]);
 
     const lastRun = runs[0];
 
     return {
-      totalRuns: await this.runRepo.count({ where: { companyId } }),
-      completedRuns: await this.runRepo.count({
-        where: { companyId, status: OptimizationStatus.COMPLETED },
-      }),
+      totalRuns,
+      completedRuns,
+      totalLines,
+      totalTerminals,
+      totalVehicleTypes,
+      totalOptimizationRuns: totalRuns,
       lastOptimization: lastRun
         ? {
             id: lastRun.id,
@@ -1426,6 +1515,9 @@ export class OptimizationService {
         duration: r.durationMs,
         createdAt: r.createdAt,
       })),
+      // Campos extras para garantir compatibilidade com cockpit
+      total_lines: totalLines,
+      total_terminals: totalTerminals,
     };
   }
 }

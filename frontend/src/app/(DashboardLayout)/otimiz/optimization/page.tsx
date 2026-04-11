@@ -3,7 +3,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   Box, Grid, Typography, Button, Stack, Tooltip,
   IconButton, Chip, Divider, LinearProgress, Alert, AlertTitle,
-  TextField, MenuItem, useTheme, Card, CardContent,
+  TextField, MenuItem, Card,
   Paper, Collapse, Tabs, Tab, Table, TableHead, TableBody, TableRow, TableCell,
   TableContainer, Badge,
 } from '@mui/material';
@@ -12,12 +12,16 @@ import {
   IconRobot, IconCurrencyDollar,
   IconBus, IconUsers, IconAlertTriangle,
   IconChevronDown, IconChevronUp, IconRoute, IconListDetails,
-  IconFileCode, IconShieldCheck, IconX,
+  IconFileCode, IconShieldCheck, IconX, IconCheck,
 } from '@tabler/icons-react';
 import PageContainer from '@/app/components/container/PageContainer';
 import { NotifyProvider, useNotify } from '../_components/Notify';
 import { optimizationApi, optimizationSettingsApi, linesApi, getSessionUser } from '@/lib/api';
-import type { Line, OptimizationRun, OptimizationSettings } from '../_types';
+import type {
+  Line, OptimizationRun, OptimizationSettings, OptimizationResultSummary,
+  OptimizationBlock, OptimizationDuty, TripDetail, OptimizationAlgorithm,
+  OptimizationStructuredIssue
+} from '../_types';
 import { extractArray } from '../_types';
 
 // ─── Utils ───
@@ -46,7 +50,7 @@ function minToHHMM(minutes?: number | null): string {
 }
 
 // ─── Component: Timeline Graphic ───
-function TripTimeline({ trips, start, end, totalDuration }: { trips: any[], start: number, end: number, totalDuration: number }) {
+function TripTimeline({ trips, start, end, totalDuration }: { trips: TripDetail[], start: number, end: number, totalDuration: number }) {
   if (!totalDuration || totalDuration <= 0) return null;
   
   return (
@@ -79,11 +83,11 @@ function TripTimeline({ trips, start, end, totalDuration }: { trips: any[], star
 }
 
 // ─── Component: Detailed Trip Table ───
-function TripDetailTable({ trips }: { trips: any[] }) {
+function TripDetailTable({ trips }: { trips: TripDetail[] }) {
   return (
     <TableContainer component={Paper} variant="outlined" sx={{ borderRadius: 2, mt: 1, maxHeight: 300 }}>
       <Table size="small">
-        <TableHead sx={{ bgcolor: 'grey.50' }}>
+        <TableHead>
           <TableRow>
             <TableCell sx={{ py: 1, fontWeight: 700 }}>Início</TableCell>
             <TableCell sx={{ py: 1, fontWeight: 700 }}>Fim</TableCell>
@@ -94,12 +98,12 @@ function TripDetailTable({ trips }: { trips: any[] }) {
           </TableRow>
         </TableHead>
         <TableBody>
-          {trips.sort((a,b) => a.start_time - b.start_time).map((t, i) => (
+          {trips.slice().sort((a,b) => (a.start_time ?? 0) - (b.start_time ?? 0)).map((t, i) => (
             <TableRow key={i} sx={{ '&:last-child td': { border: 0 } }}>
               <TableCell sx={{ py: 0.75 }}>{minToHHMM(t.start_time)}</TableCell>
               <TableCell sx={{ py: 0.75 }}>{minToHHMM(t.end_time)}</TableCell>
-              <TableCell sx={{ py: 0.75 }}>{t.origin_id || '--'}</TableCell>
-              <TableCell sx={{ py: 0.75 }}>{t.destination_id || '--'}</TableCell>
+              <TableCell sx={{ py: 0.75 }}>{t.origin_name || t.origin_id || '--'}</TableCell>
+              <TableCell sx={{ py: 0.75 }}>{t.destination_name || t.destination_id || '--'}</TableCell>
               <TableCell sx={{ py: 0.75 }}>{minToDuration(t.duration)}</TableCell>
               <TableCell sx={{ py: 0.75 }}><Typography variant="caption" fontWeight={700}>#{t.id}</Typography></TableCell>
             </TableRow>
@@ -111,12 +115,12 @@ function TripDetailTable({ trips }: { trips: any[] }) {
 }
 
 // ─── Sub: KPI Hero Cards ───
-function KpiStrip({ res }: { res: any }) {
+function KpiStrip({ res }: { res: OptimizationResultSummary }) {
   const items = [
-    { label: 'Custo Total', value: fmtCurrency(res.total_cost), color: 'primary.main', icon: <IconCurrencyDollar size={20} /> },
-    { label: 'Veículos (VSP)', value: res.vehicles ?? '--', color: 'info.main', icon: <IconBus size={20} /> },
-    { label: 'Tripulantes (CSP)', value: res.crew ?? '--', color: 'success.main', icon: <IconUsers size={20} /> },
-    { label: 'Violações CCT', value: res.cct_violations ?? 0, color: (res.cct_violations ?? 0) > 0 ? 'error.main' : 'success.main', icon: <IconShieldCheck size={20} /> },
+    { label: 'Custo Total', value: fmtCurrency(res.total_cost || res.totalCost), color: 'primary.main', icon: <IconCurrencyDollar size={20} /> },
+    { label: 'Veículos (VSP)', value: res.vehicles ?? res.num_vehicles ?? '--', color: 'info.main', icon: <IconBus size={20} /> },
+    { label: 'Tripulantes (CSP)', value: res.crew ?? res.num_crew ?? '--', color: 'success.main', icon: <IconUsers size={20} /> },
+    { label: 'Violações CCT', value: res.cct_violations ?? res.cctViolations ?? 0, color: (res.cct_violations ?? res.cctViolations ?? 0) > 0 ? 'error.main' : 'success.main', icon: <IconShieldCheck size={20} /> },
   ];
   return (
     <Grid container spacing={2} mb={3}>
@@ -136,212 +140,252 @@ function KpiStrip({ res }: { res: any }) {
 }
 
 // ─── Tab 0: Visão Geral (Duties / Crew) ───
-function TabOverview({ res, viewMode }: { res: any, viewMode: 'table' | 'graphic' }) {
-  const duties: any[] = res.duties || [];
+function TabOverview({ res }: { res: OptimizationResultSummary }) {
+  const duties = res.duties || [];
   if (!duties.length) return <Typography color="text.secondary" py={4} textAlign="center">Sem jornadas geradas nesta execução.</Typography>;
 
   return (
     <Box>
       <Typography variant="subtitle1" fontWeight={700} mb={2}>{duties.length} Escalas de Trabalho Geradas</Typography>
-      <Box sx={{ maxHeight: 600, overflowY: 'auto', pr: 0.5 }}>
-        {duties.map((duty: any, idx: number) => <DutyRow key={duty.duty_id ?? idx} duty={duty} viewMode={viewMode} />)}
-      </Box>
+      <TableContainer component={Paper} variant="outlined" sx={{ borderRadius: 3, maxHeight: 600 }}>
+        <Table stickyHeader size="small">
+          <TableHead>
+            <TableRow>
+              <TableCell sx={{ fontWeight: 700 }}>ID</TableCell>
+              <TableCell sx={{ fontWeight: 700 }}>Horário</TableCell>
+              <TableCell sx={{ fontWeight: 700 }}>Duração</TableCell>
+              <TableCell sx={{ fontWeight: 700 }}>Viagens</TableCell>
+              <TableCell sx={{ fontWeight: 700 }}>Custo Total</TableCell>
+              <TableCell sx={{ fontWeight: 700 }}>Alertas</TableCell>
+              <TableCell sx={{ width: 50 }} />
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {duties.map((duty, idx) => (
+              <DutyTableRow key={duty.duty_id ?? idx} duty={duty} />
+            ))}
+          </TableBody>
+        </Table>
+      </TableContainer>
     </Box>
   );
 }
 
-function DutyRow({ duty, viewMode = 'graphic' }: { duty: any, viewMode?: 'table' | 'graphic' }) {
+function DutyTableRow({ duty }: { duty: OptimizationDuty }) {
   const [open, setOpen] = useState(false);
   const maxShift = 900;
   const hasViolation = duty.spread_time > maxShift || (duty.cct_penalties_cost ?? 0) > 0 || (duty.rest_violations ?? 0) > 0;
   const hasOvertime = (duty.overtime_cost ?? 0) > 0 || (duty.overtime_minutes ?? 0) > 0;
-  const workPct = duty.spread_time > 0 ? Math.min(100, (duty.work_time / duty.spread_time) * 100) : 0;
-  const totalDur = duty.spread_time;
 
   return (
-    <Card variant="outlined" sx={{ mb: 1.5, transition: '0.2s', borderColor: hasViolation ? 'error.main' : 'divider', borderRadius: 2, '&:hover': { borderColor: 'primary.main' } }}>
-      <Box sx={{ p: 2, cursor: 'pointer', display: 'flex', alignItems: 'center', '&:hover': { bgcolor: 'action.hover' } }} onClick={() => setOpen(!open)}>
-        <Box sx={{ width: 40, height: 40, borderRadius: 2, bgcolor: hasViolation ? 'error.lighter' : 'primary.lighter', display: 'flex', alignItems: 'center', justifyContent: 'center', color: hasViolation ? 'error.main' : 'primary.main', mr: 2 }}>
-          <IconUsers size={20} />
-        </Box>
-        <Box flex={1}>
-          <Grid container alignItems="center">
-            <Grid item xs={12} sm={4}>
-              <Stack direction="row" alignItems="center" spacing={1}>
-                <Typography variant="subtitle2" fontWeight={700}>Plantão #{duty.duty_id}</Typography>
-                {hasViolation && <Chip size="small" color="error" label="Violação" sx={{ height: 18, fontSize: 10 }} />}
-                {hasOvertime && <Chip size="small" color="warning" label="HE" sx={{ height: 18, fontSize: 10 }} />}
-              </Stack>
-              <Typography variant="caption" color="text.secondary">
-                {minToHHMM(duty.start_time)} → {minToHHMM(duty.end_time)} · {minToDuration(duty.spread_time)}
-              </Typography>
-            </Grid>
-            <Grid item xs={12} sm={7}>
-               {viewMode === 'graphic' && (
-                 <TripTimeline trips={duty.trips || []} start={duty.start_time} end={duty.end_time} totalDuration={totalDur} />
-               )}
-            </Grid>
-          </Grid>
-        </Box>
-        <Box textAlign="right" mr={1} ml={1}>
-          <Typography variant="subtitle2" fontWeight={700} color={hasViolation ? 'error.main' : 'text.primary'}>{fmtCurrency(duty.total_cost || duty.work_cost)}</Typography>
-          <Typography variant="caption" color="text.secondary">{duty.trips?.length || 0} viagens</Typography>
-        </Box>
-        <IconButton size="small">{open ? <IconChevronUp size={16} /> : <IconChevronDown size={16} />}</IconButton>
-      </Box>
-      <Collapse in={open}>
-        <Divider />
-        <Box sx={{ p: 2.5, bgcolor: 'rgba(0,0,0,0.01)' }}>
-          <Grid container spacing={3}>
-             <Grid item xs={12} md={8}>
-               <Typography variant="caption" fontWeight={700} mb={1.5} display="block">Sequência de Atividades</Typography>
-               {duty.trips && duty.trips.length > 0 && (
-                 <TripDetailTable trips={duty.trips} />
-               )}
-             </Grid>
-             <Grid item xs={12} md={4}>
-               <Typography variant="caption" fontWeight={700} mb={1.5} display="block">Composição de Custos e Auditoria</Typography>
-               <Stack spacing={2}>
-                  <Box>
-                    <Typography variant="caption" color="text.secondary" display="block">Custo Total da Escala</Typography>
-                    <Typography variant="h6" fontWeight={800} color="primary.main">{fmtCurrency(duty.total_cost || duty.work_cost)}</Typography>
-                  </Box>
-                  <Divider />
-                  <Grid container spacing={1}>
-                    {[
-                      { l: 'Custo Trabalho', v: fmtCurrency(duty.work_cost || 0) },
-                      { l: 'HE / Adicionais', v: fmtCurrency((duty.overtime_cost || 0) + (duty.nocturnal_extra_cost || 0)) },
-                      { l: 'Min. Garantido', v: fmtCurrency(duty.guaranteed_cost || 0) },
-                      { l: 'Tempo Ocioso', v: fmtCurrency(duty.waiting_cost || 0) },
-                    ].map((c) => (
-                      <Grid item xs={6} key={c.l}>
-                        <Typography variant="caption" color="text.secondary" sx={{ fontSize: 10 }}>{c.l}</Typography>
-                        <Typography variant="body2" fontWeight={600} sx={{ fontSize: 13 }}>{c.v}</Typography>
-                      </Grid>
-                    ))}
-                  </Grid>
-               </Stack>
-               {(duty.warnings?.length > 0 || duty.rest_violations > 0) && (
-                 <Box mt={3} p={1.5} sx={{ bgcolor: 'error.lighter', borderRadius: 2, border: '1px solid', borderColor: 'error.light' }}>
-                   <Stack direction="row" spacing={1} mb={1}>
-                     <IconAlertTriangle size={16} color="red" />
-                     <Typography variant="caption" fontWeight={700} color="error.dark">Pendências Regulamentares</Typography>
-                   </Stack>
-                   {duty.warnings?.map((w: string, i: number) => (
-                     <Typography key={i} variant="caption" display="block" color="error.main" sx={{ pl: 3 }}>• {w}</Typography>
-                   ))}
-                   {duty.rest_violations > 0 && (
-                      <Typography variant="caption" display="block" color="error.main" sx={{ pl: 3 }}>• Violação de descanso: {duty.rest_violations} caso(s).</Typography>
-                   )}
-                 </Box>
-               )}
-             </Grid>
-          </Grid>
-        </Box>
-      </Collapse>
-    </Card>
+    <>
+      <TableRow
+        hover
+        onClick={() => setOpen(!open)}
+        sx={{
+          cursor: 'pointer',
+          '& > *': { borderBottom: 'unset !important' },
+          bgcolor: hasViolation ? 'error.lighter' : 'inherit',
+        }}
+      >
+        <TableCell>
+          <Stack direction="row" alignItems="center" spacing={1}>
+            <Box sx={{ width: 32, height: 32, borderRadius: 1.5, bgcolor: hasViolation ? 'error.main' : 'primary.main', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white' }}>
+              <IconUsers size={16} />
+            </Box>
+            <Typography variant="body2" fontWeight={700}>Plantão #{duty.duty_id}</Typography>
+          </Stack>
+        </TableCell>
+        <TableCell>
+          <Typography variant="body2" fontWeight={600}>{minToHHMM(duty.start_time)} → {minToHHMM(duty.end_time)}</Typography>
+        </TableCell>
+        <TableCell>
+          <Typography variant="body2">{minToDuration(duty.spread_time)}</Typography>
+        </TableCell>
+        <TableCell>
+          <Chip size="small" label={`${duty.trips?.length || 0} viagens`} sx={{ height: 20 }} />
+        </TableCell>
+        <TableCell>
+          <Typography variant="body2" fontWeight={700} color={hasViolation ? 'error.main' : 'primary.main'}>
+            {fmtCurrency(duty.total_cost || duty.work_cost)}
+          </Typography>
+        </TableCell>
+        <TableCell>
+          <Stack direction="row" spacing={0.5}>
+            {hasViolation && <Chip size="small" color="error" label="Violação" sx={{ height: 18, fontSize: 10 }} />}
+            {hasOvertime && <Chip size="small" color="warning" label="HE" sx={{ height: 18, fontSize: 10 }} />}
+            {!hasViolation && !hasOvertime && <IconCheck size={16} color="green" />}
+          </Stack>
+        </TableCell>
+        <TableCell align="right">
+          <IconButton size="small">{open ? <IconChevronUp size={16} /> : <IconChevronDown size={16} />}</IconButton>
+        </TableCell>
+      </TableRow>
+      <TableRow>
+        <TableCell sx={{ p: 0 }} colSpan={7}>
+          <Collapse in={open} timeout="auto" unmountOnExit>
+            <Box sx={{ p: 3, bgcolor: 'rgba(0,0,0,0.02)', borderBottom: '1px solid', borderColor: 'divider' }}>
+              <Grid container spacing={3}>
+                <Grid item xs={12} md={8}>
+                  <Typography variant="subtitle2" fontWeight={800} mb={1.5}>Itinerário Detalhado</Typography>
+                  {duty.trips && duty.trips.length > 0 && (
+                    <TripDetailTable trips={duty.trips as TripDetail[]} />
+                  )}
+                </Grid>
+                <Grid item xs={12} md={4}>
+                  <Typography variant="subtitle2" fontWeight={800} mb={1.5}>Composição Financeira</Typography>
+                  <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
+                    <Stack spacing={1.5}>
+                      {[
+                        { l: 'Custo Trabalho', v: fmtCurrency(duty.work_cost || 0) },
+                        { l: 'Horas Extras', v: fmtCurrency(duty.overtime_cost || 0) },
+                        { l: 'Adic. Noturno', v: fmtCurrency(duty.nocturnal_extra_cost || 0) },
+                        { l: 'Tempo Ocioso', v: fmtCurrency(duty.waiting_cost || 0) },
+                        { l: 'Min. Garantido', v: fmtCurrency(duty.guaranteed_cost || 0) },
+                      ].map((c) => (
+                        <Box key={c.l} display="flex" justifyContent="space-between">
+                          <Typography variant="caption" color="text.secondary">{c.l}</Typography>
+                          <Typography variant="body2" fontWeight={600}>{c.v}</Typography>
+                        </Box>
+                      ))}
+                      <Divider />
+                      <Box display="flex" justifyContent="space-between" alignItems="center">
+                        <Typography variant="subtitle2" fontWeight={800}>Custo Total</Typography>
+                        <Typography variant="h6" fontWeight={900} color="primary.main">{fmtCurrency(duty.total_cost || duty.work_cost)}</Typography>
+                      </Box>
+                    </Stack>
+                  </Paper>
+                  {((duty.warnings?.length || 0) > 0 || (duty.rest_violations || 0) > 0) && (
+                    <Box mt={2} p={1.5} sx={{ bgcolor: 'error.lighter', borderRadius: 2, border: '1px solid', borderColor: 'error.light' }}>
+                      <Stack direction="row" spacing={1} mb={1}>
+                        <IconAlertTriangle size={16} color="red" />
+                        <Typography variant="caption" fontWeight={700} color="error.dark">Pendências Regulamentares</Typography>
+                      </Stack>
+                      {duty.warnings?.map((w: string, i: number) => (
+                        <Typography key={i} variant="caption" display="block" color="error.main" sx={{ pl: 3 }}>• {w}</Typography>
+                      ))}
+                    </Box>
+                  )}
+                </Grid>
+              </Grid>
+            </Box>
+          </Collapse>
+        </TableCell>
+      </TableRow>
+    </>
   );
 }
 
 // ─── Tab 1: Visão por Veículo (Blocks / VSP) ───
-function TabVehicles({ res, viewMode }: { res: any, viewMode: 'table' | 'graphic' }) {
-  const [expanded, setExpanded] = useState<number | null>(null);
-  const blocks: any[] = res.blocks || [];
+function TabVehicles({ res }: { res: OptimizationResultSummary }) {
+  const blocks = res.blocks || [];
   if (!blocks.length) return <Typography color="text.secondary" py={4} textAlign="center">Sem dados de alocação veicular disponíveis.</Typography>;
 
   return (
     <Box>
       <Typography variant="subtitle1" fontWeight={700} mb={2}>{blocks.length} Blocos de Veículo</Typography>
-      <Grid container spacing={2}>
-        {blocks.map((block: any, idx: number) => {
-          const totalDur = block.end_time - block.start_time;
-          const isExpanded = expanded === block.block_id;
-          
-          return (
-            <Grid item xs={12} key={block.block_id ?? idx}>
-              <Card variant="outlined" sx={{ borderRadius: 2, transition: '0.2s', '&:hover': { borderColor: 'primary.main', boxShadow: '0 4px 12px rgba(0,0,0,0.05)' } }}>
-                <Box sx={{ p: 2, cursor: 'pointer' }} onClick={() => setExpanded(isExpanded ? null : block.block_id)}>
-                  <Grid container alignItems="center" spacing={2}>
-                    <Grid item xs={12} sm={3}>
-                      <Stack direction="row" alignItems="center" spacing={1.5}>
-                        <Box sx={{ width: 40, height: 40, borderRadius: 2, bgcolor: 'info.lighter', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'info.main' }}><IconBus size={22} /></Box>
-                        <Box>
-                          <Typography variant="subtitle2" fontWeight={800}>Veículo #{block.block_id}</Typography>
-                          <Typography variant="caption" color="text.secondary">{block.num_trips || block.trips?.length || '?'} viagens · {fmtCurrency(block.total_cost || block.cost)}</Typography>
-                        </Box>
-                      </Stack>
-                    </Grid>
-                    
-                    <Grid item xs={12} sm={7}>
-                      {viewMode === 'graphic' ? (
-                        <TripTimeline trips={block.trips || []} start={block.start_time} end={block.end_time} totalDuration={totalDur} />
-                      ) : (
-                        <Stack direction="row" spacing={3} divider={<Divider orientation="vertical" flexItem />}>
-                          <Box>
-                            <Typography variant="caption" color="text.secondary" display="block">Saída</Typography>
-                            <Typography variant="body2" fontWeight={700} color="primary.main">{minToHHMM(block.start_time)}</Typography>
-                          </Box>
-                          <Box>
-                            <Typography variant="caption" color="text.secondary" display="block">Retorno</Typography>
-                            <Typography variant="body2" fontWeight={700} color="primary.main">{minToHHMM(block.end_time)}</Typography>
-                          </Box>
-                          <Box>
-                            <Typography variant="caption" color="text.secondary" display="block">Duração Total</Typography>
-                            <Typography variant="body2" fontWeight={700}>{minToDuration(totalDur)}</Typography>
-                          </Box>
-                          <Box>
-                            <Typography variant="caption" color="text.secondary" display="block">KMs</Typography>
-                            <Typography variant="body2" fontWeight={700}>{(block.meta?.total_distance_km || 0).toFixed(1)} km</Typography>
-                          </Box>
-                        </Stack>
-                      )}
-                    </Grid>
-
-                    <Grid item xs={12} sm={2} sx={{ textAlign: 'right' }}>
-                      <IconButton size="small">{isExpanded ? <IconChevronUp size={20} /> : <IconChevronDown size={20} />}</IconButton>
-                    </Grid>
-                  </Grid>
-                </Box>
-                
-                <Collapse in={isExpanded}>
-                  <Divider />
-                  <Box sx={{ p: 2.5, bgcolor: 'rgba(0,0,0,0.01)' }}>
-                    <Typography variant="subtitle2" fontWeight={700} mb={1.5}>Composição do Bloco</Typography>
-                    {block.trips && Array.isArray(block.trips) && block.trips.length > 0 && (
-                       <TripDetailTable trips={block.trips} />
-                    )}
-                    
-                    <Grid container spacing={2} sx={{ mt: 2 }}>
-                      {[
-                        { l: 'Custo Ativação', v: fmtCurrency(block.activation_cost) },
-                        { l: 'Deadhead', v: fmtCurrency(block.connection_cost || block.deadhead_cost), err: (block.connection_cost || 0) > 100 },
-                        { l: 'Tempo Ocioso', v: fmtCurrency(block.idle_cost) },
-                        { l: 'Quilometragem', v: fmtCurrency(block.distance_cost) },
-                      ].map((c) => (
-                        <Grid item xs={6} sm={3} key={c.l}>
-                          <Typography variant="caption" color="text.secondary" display="block">{c.l}</Typography>
-                          <Typography variant="body2" fontWeight={600} color={c.err ? 'error.main' : 'text.primary'}>{c.v}</Typography>
-                        </Grid>
-                      ))}
-                    </Grid>
-                  </Box>
-                </Collapse>
-              </Card>
-            </Grid>
-          );
-        })}
-      </Grid>
+      <TableContainer component={Paper} variant="outlined" sx={{ borderRadius: 3, maxHeight: 600 }}>
+        <Table stickyHeader size="small">
+          <TableHead>
+            <TableRow>
+              <TableCell sx={{ fontWeight: 700 }}>Veículo</TableCell>
+              <TableCell sx={{ fontWeight: 700 }}>Saída / Retorno</TableCell>
+              <TableCell sx={{ fontWeight: 700 }}>Viagens</TableCell>
+              <TableCell sx={{ fontWeight: 700 }}>Duração</TableCell>
+              <TableCell sx={{ fontWeight: 700 }}>Distância</TableCell>
+              <TableCell sx={{ fontWeight: 700 }}>Custo</TableCell>
+              <TableCell sx={{ width: 50 }} />
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {blocks.map((block, idx) => (
+              <VehicleTableRow key={block.block_id ?? idx} block={block} />
+            ))}
+          </TableBody>
+        </Table>
+      </TableContainer>
     </Box>
   );
 }
 
+function VehicleTableRow({ block }: { block: any }) {
+  const [open, setOpen] = useState(false);
+  const totalDur = block.end_time - block.start_time;
+
+  return (
+    <>
+      <TableRow
+        hover
+        onClick={() => setOpen(!open)}
+        sx={{ cursor: 'pointer', '& > *': { borderBottom: 'unset !important' } }}
+      >
+        <TableCell>
+          <Stack direction="row" alignItems="center" spacing={1}>
+            <Box sx={{ width: 32, height: 32, borderRadius: 1.5, bgcolor: 'info.main', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white' }}>
+              <IconBus size={18} />
+            </Box>
+            <Typography variant="body2" fontWeight={700}>Veículo #{block.block_id}</Typography>
+          </Stack>
+        </TableCell>
+        <TableCell>
+          <Typography variant="body2" fontWeight={600}>{minToHHMM(block.start_time)} → {minToHHMM(block.end_time)}</Typography>
+        </TableCell>
+        <TableCell>
+          <Chip size="small" label={`${block.num_trips || block.trips?.length || 0} trips`} sx={{ height: 20 }} />
+        </TableCell>
+        <TableCell>
+          <Typography variant="body2">{minToDuration(totalDur)}</Typography>
+        </TableCell>
+        <TableCell>
+          <Typography variant="body2">{(block.meta?.total_distance_km || 0).toFixed(1)} km</Typography>
+        </TableCell>
+        <TableCell>
+          <Typography variant="body2" fontWeight={700} color="info.main">{fmtCurrency(block.total_cost || block.cost)}</Typography>
+        </TableCell>
+        <TableCell align="right">
+          <IconButton size="small">{open ? <IconChevronUp size={16} /> : <IconChevronDown size={16} />}</IconButton>
+        </TableCell>
+      </TableRow>
+      <TableRow>
+        <TableCell sx={{ p: 0 }} colSpan={7}>
+          <Collapse in={open} timeout="auto" unmountOnExit>
+            <Box sx={{ p: 3, bgcolor: 'rgba(0,0,0,0.02)', borderBottom: '1px solid', borderColor: 'divider' }}>
+              <Typography variant="subtitle2" fontWeight={800} mb={2}>Sequência de Viagens do Bloco</Typography>
+              {block.trips && Array.isArray(block.trips) && block.trips.length > 0 && (
+                 <TripDetailTable trips={block.trips as TripDetail[]} />
+              )}
+              
+              <Grid container spacing={2} sx={{ mt: 2 }}>
+                {[
+                  { l: 'Custo Ativação', v: fmtCurrency(block.activation_cost) },
+                  { l: 'Deadhead', v: fmtCurrency(block.connection_cost || block.deadhead_cost) },
+                  { l: 'Tempo Ocioso', v: fmtCurrency(block.idle_cost) },
+                  { l: 'Quilometragem', v: fmtCurrency(block.distance_cost) },
+                ].map((item) => (
+                  <Grid item xs={6} md={3} key={item.l}>
+                    <Paper variant="outlined" sx={{ p: 1.5, textAlign: 'center', borderRadius: 2 }}>
+                      <Typography variant="caption" color="text.secondary" display="block">{item.l}</Typography>
+                      <Typography variant="body2" fontWeight={700}>{item.v || 'R$ 0,00'}</Typography>
+                    </Paper>
+                  </Grid>
+                ))}
+              </Grid>
+            </Box>
+          </Collapse>
+        </TableCell>
+      </TableRow>
+    </>
+  );
+}
+
 // ─── Tab 2: Alertas e Sanções ───
-function TabAlerts({ res }: { res: any }) {
-  const warnings: string[] = res.warnings || [];
-  const unassigned: any[] = res.unassigned_trips || [];
-  const violations = res.cct_violations ?? 0;
-  const duties: any[] = res.duties || [];
-  const dutyWarnings = duties.flatMap((d: any) => (d.warnings || []).map((w: string) => ({ duty: d.duty_id, msg: w })));
+function TabAlerts({ res }: { res: OptimizationResultSummary }) {
+  const warningsRaw = res.warnings || [];
+  const warnings = Array.isArray(warningsRaw) ? (warningsRaw as (string | OptimizationStructuredIssue)[]).map(w => typeof w === 'string' ? w : w.message) : [];
+  const unassigned = res.unassigned_trips || [];
+  const violations = res.cct_violations ?? res.cctViolations ?? 0;
+  const duties = res.duties || [];
+  const dutyWarnings = duties.flatMap((d) => (d.warnings || []).map((w: string) => ({ duty: d.duty_id, msg: w })));
 
   if (warnings.length === 0 && unassigned.length === 0 && violations === 0 && dutyWarnings.length === 0) {
     return (
@@ -368,8 +412,8 @@ function TabAlerts({ res }: { res: any }) {
           O solver não conseguiu alocar {unassigned.length} viagen{unassigned.length > 1 ? 's' : ''} dentro dos limites impostos.
           <Box mt={1}>
             <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-              {unassigned.slice(0, 20).map((t: any, i: number) => (
-                <Chip key={i} size="small" label={`Trip #${typeof t === 'object' ? t.id : t}`} color="warning" variant="outlined" />
+              {unassigned.slice(0, 20).map((t, i) => (
+                <Chip key={i} size="small" label={`Trip #${typeof t === 'object' ? (t as TripDetail).id : t}`} color="warning" variant="outlined" />
               ))}
               {unassigned.length > 20 && <Chip size="small" label={`+${unassigned.length - 20} mais`} />}
             </Stack>
@@ -416,25 +460,30 @@ function TabAlerts({ res }: { res: any }) {
 }
 
 // ─── Tab 3: Inventário de Viagens ───
-function TabTrips({ res }: { res: any }) {
-  const blocks: any[] = res.blocks || [];
-  const unassigned: any[] = res.unassigned_trips || [];
+function TabTrips({ res }: { res: OptimizationResultSummary }) {
+  const blocks = res.blocks || [];
+  const unassigned = res.unassigned_trips || [];
   
   // Flatten all trips from blocks with their block assignment
-  const assignedTrips: { tripId: number; blockId: number; start: number; end: number; origin: number; dest: number }[] = [];
-  blocks.forEach((b: any) => {
-    const trips = b.trips || [];
-    trips.forEach((t: any) => {
-      assignedTrips.push({ tripId: t.id ?? t, blockId: b.block_id, start: t.start_time, end: t.end_time, origin: t.origin_id, dest: t.destination_id });
+  const assignedTrips: any[] = [];
+  blocks.forEach((b) => {
+    const rawTrips = b.trips || [];
+    rawTrips.forEach((t) => {
+      if (typeof t === 'number') {
+        // Formato legado (runs antigos): apenas ID disponível
+        assignedTrips.push({ id: t, trip_id: t, start_time: null, end_time: null, origin_id: '--', destination_id: '--', duration: 0, block_id: b.block_id, status: 'assigned' as const });
+      } else {
+        assignedTrips.push({ ...(t as TripDetail), block_id: b.block_id, status: 'assigned' as const });
+      }
     });
   });
-
-  // Also check duties for trips
-  const duties: any[] = res.duties || [];
+  
+  // Also check duties for trips (legacy fallback)
+  const duties = res.duties || [];
   if (assignedTrips.length === 0) {
-    duties.forEach((d: any) => {
-      (d.trip_ids || []).forEach((tid: number) => {
-        assignedTrips.push({ tripId: tid, blockId: 0, start: 0, end: 0, origin: 0, dest: 0 });
+    duties.forEach((d: OptimizationDuty) => {
+      (d.trips || []).forEach((t: TripDetail) => {
+        assignedTrips.push({ ...t, status: 'assigned' as const });
       });
     });
   }
@@ -443,16 +492,20 @@ function TabTrips({ res }: { res: any }) {
   const [page, setPage] = useState(0);
   const pageSize = 50;
   const allTrips = [
-    ...assignedTrips.map((t) => ({ ...t, status: 'assigned' as const })),
-    ...unassigned.map((t: any) => ({
-      tripId: typeof t === 'object' ? t.id : t,
-      blockId: null,
-      start: typeof t === 'object' ? t.start_time : null,
-      end: typeof t === 'object' ? t.end_time : null,
-      origin: typeof t === 'object' ? t.origin_id : null,
-      dest: typeof t === 'object' ? t.destination_id : null,
-      status: 'orphan' as const,
-    })),
+    ...assignedTrips,
+    ...unassigned.map((t) => {
+      const isObj = typeof t === 'object' && t !== null;
+      if (isObj) return { ...t, status: 'orphan' as const };
+      return {
+        id: t as number,
+        start_time: 0,
+        end_time: 0,
+        origin_id: 0,
+        destination_id: 0,
+        duration: 0,
+        status: 'orphan' as const,
+      };
+    }),
   ];
   const sliced = allTrips.slice(page * pageSize, (page + 1) * pageSize);
   const totalPages = Math.ceil(allTrips.length / pageSize);
@@ -482,17 +535,17 @@ function TabTrips({ res }: { res: any }) {
             </TableRow>
           </TableHead>
           <TableBody>
-            {sliced.map((t, i) => (
+            {sliced.map((t: any, i) => (
               <TableRow key={i} sx={{ bgcolor: t.status === 'orphan' ? 'error.lighter' : 'inherit' }}>
-                <TableCell><Typography variant="body2" fontWeight={600}>#{t.tripId}</Typography></TableCell>
+                <TableCell><Typography variant="body2" fontWeight={600}>#{t.trip_id || t.id}</Typography></TableCell>
                 <TableCell align="center">
                   <Chip size="small" color={t.status === 'assigned' ? 'success' : 'error'} label={t.status === 'assigned' ? 'OK' : 'Órfã'} sx={{ height: 20, fontSize: 11 }} />
                 </TableCell>
-                <TableCell>{t.blockId != null ? `Bloco #${t.blockId}` : '--'}</TableCell>
-                <TableCell>{t.start != null ? minToHHMM(t.start) : '--'}</TableCell>
-                <TableCell>{t.end != null ? minToHHMM(t.end) : '--'}</TableCell>
-                <TableCell>{t.origin ?? '--'}</TableCell>
-                <TableCell>{t.dest ?? '--'}</TableCell>
+                <TableCell>{t.block_id != null ? `Bloco #${t.block_id}` : '--'}</TableCell>
+                <TableCell>{t.start_time != null ? minToHHMM(t.start_time) : '--'}</TableCell>
+                <TableCell>{t.end_time != null ? minToHHMM(t.end_time) : '--'}</TableCell>
+                <TableCell>{t.origin_name || t.origin_id || '--'}</TableCell>
+                <TableCell>{t.destination_name || t.destination_id || '--'}</TableCell>
               </TableRow>
             ))}
           </TableBody>
@@ -510,7 +563,7 @@ function TabTrips({ res }: { res: any }) {
 }
 
 // ─── Tab 4: Auditoria (Raw JSON) ───
-function TabAudit({ res, run }: { res: any; run: OptimizationRun }) {
+function TabAudit({ res, run }: { res: OptimizationResultSummary; run: OptimizationRun }) {
   const raw = JSON.stringify(res, null, 2);
   return (
     <Box>
@@ -528,11 +581,11 @@ function TabAudit({ res, run }: { res: any; run: OptimizationRun }) {
 // ─── Main RunVisuals ───
 function RunVisuals({ run }: { run: OptimizationRun }) {
   const [tab, setTab] = useState(0);
-  const [viewMode, setViewMode] = useState<'table' | 'graphic'>('graphic');
-  const res: any = run.resultSummary || {};
-  const warnings: string[] = res.warnings || [];
-  const unassigned: any[] = res.unassigned_trips || [];
-  const alertCount = (res.cct_violations ?? 0) + warnings.length + unassigned.length;
+  const res = run.resultSummary || {};
+  const warningsRaw = res.warnings || [];
+  const warnings = Array.isArray(warningsRaw) ? (warningsRaw as (string | OptimizationStructuredIssue)[]).map(w => typeof w === 'string' ? w : w.message) : [];
+  const unassigned = res.unassigned_trips || [];
+  const alertCount = (res.cct_violations ?? res.cctViolations ?? 0) + warnings.length + unassigned.length;
 
   if (run.status === 'failed') {
     return (
@@ -569,25 +622,10 @@ function RunVisuals({ run }: { run: OptimizationRun }) {
           <Tab icon={<IconRoute size={16} />} iconPosition="start" label="Viagens" sx={{ textTransform: 'none', fontWeight: 600 }} />
           <Tab icon={<IconFileCode size={16} />} iconPosition="start" label="Auditoria" sx={{ textTransform: 'none', fontWeight: 600 }} />
         </Tabs>
-        
-        {(tab === 0 || tab === 1) && (
-          <Box sx={{ p: 0.5, bgcolor: 'action.hover', borderRadius: 2, display: 'flex' }}>
-            <Tooltip title="Visão de Tabela">
-              <IconButton size="small" onClick={() => setViewMode('table')} color={viewMode === 'table' ? 'primary' : 'default'} sx={{ bgcolor: viewMode === 'table' ? 'background.paper' : 'transparent', borderRadius: 1.5, boxShadow: viewMode === 'table' ? 1 : 0 }}>
-                <IconListDetails size={18} />
-              </IconButton>
-            </Tooltip>
-            <Tooltip title="Visão Gráfica">
-              <IconButton size="small" onClick={() => setViewMode('graphic')} color={viewMode === 'graphic' ? 'primary' : 'default'} sx={{ bgcolor: viewMode === 'graphic' ? 'background.paper' : 'transparent', borderRadius: 1.5, boxShadow: viewMode === 'graphic' ? 1 : 0, ml: 0.5 }}>
-                <IconChartBar size={18} />
-              </IconButton>
-            </Tooltip>
-          </Box>
-        )}
       </Stack>
 
-      {tab === 0 && <TabOverview res={res} viewMode={viewMode} />}
-      {tab === 1 && <TabVehicles res={res} viewMode={viewMode} />}
+      {tab === 0 && <TabOverview res={res} />}
+      {tab === 1 && <TabVehicles res={res} />}
       {tab === 2 && <TabAlerts res={res} />}
       {tab === 3 && <TabTrips res={res} />}
       {tab === 4 && <TabAudit res={res} run={run} />}
@@ -597,12 +635,14 @@ function RunVisuals({ run }: { run: OptimizationRun }) {
 
 // ─── Main Page ───
 function OptimizationInner() {
-  const theme = useTheme();
   const notify = useNotify();
   const [runs, setRuns] = useState<OptimizationRun[]>([]);
   const [lines, setLines] = useState<Line[]>([]);
   const [activeSettings, setActiveSettings] = useState<OptimizationSettings | null>(null);
   const [selectedLineIds, setSelectedLineIds] = useState<number[]>([]);
+  const [operationMode, setOperationMode] = useState<'urban' | 'charter'>('urban');
+  const [algorithm, setAlgorithm] = useState('hybrid_pipeline');
+  const [timeBudget, setTimeBudget] = useState(30);
   const [launching, setLaunching] = useState(false);
   const [selectedRun, setSelectedRun] = useState<OptimizationRun | null>(null);
 
@@ -618,17 +658,32 @@ function OptimizationInner() {
     } catch { notify.error('Erro ao carregar dados.'); }
   }, [notify]);
 
-  useEffect(() => { loadAll(); }, [loadAll]);
+  useEffect(() => {
+    loadAll();
+    // Iniciar polling apenas se houver uma execução pendente ou rodando
+    const interval = setInterval(() => {
+      const hasActive = runs.some(r => r.status === 'running' || r.status === 'pending');
+      if (hasActive) {
+        loadAll();
+      }
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [loadAll, runs]);
 
   const handleLaunch = async () => {
     if (!selectedLineIds.length) return notify.warning('Selecione ao menos uma linha.');
     setLaunching(true);
     try {
-      const payload: any = { companyId: getSessionUser()?.companyId ?? 1, algorithm: 'hybrid_pipeline' };
+      const payload: any = {
+        companyId: getSessionUser()?.companyId ?? 1,
+        algorithm: algorithm as OptimizationAlgorithm,
+        operationMode,
+        timeBudgetSeconds: timeBudget,
+      };
       if (selectedLineIds.length === 1) payload.lineId = selectedLineIds[0];
       else payload.lineIds = selectedLineIds;
       await optimizationApi.run(payload);
-      notify.success('Pipeline inicializado!');
+      notify.success(`Iniciado: ${algorithm} · ${operationMode === 'charter' ? 'Fretamento' : 'Urbano'} · ${timeBudget}s`);
       setSelectedLineIds([]);
       loadAll();
     } catch { notify.error('Erro ao iniciar otimização.'); }
@@ -662,10 +717,35 @@ function OptimizationInner() {
               SelectProps={{ multiple: true }}
               value={selectedLineIds}
               onChange={(e) => setSelectedLineIds(typeof e.target.value === 'string' ? [] : e.target.value as number[])}
-              sx={{ mb: 2 }}
+              sx={{ mb: 1.5 }}
             >
               {lines.map((l) => <MenuItem key={l.id} value={l.id}>{l.code} — {l.name}</MenuItem>)}
             </TextField>
+            <TextField
+              select fullWidth size="small" label="Algoritmo" value={algorithm}
+              onChange={(e) => setAlgorithm(e.target.value)} sx={{ mb: 1.5 }}
+            >
+              <MenuItem value="hybrid_pipeline">Hybrid Pipeline (Padrão)</MenuItem>
+              <MenuItem value="greedy">Greedy (Rápido)</MenuItem>
+              <MenuItem value="simulated_annealing">Simulated Annealing</MenuItem>
+              <MenuItem value="tabu_search">Tabu Search</MenuItem>
+              <MenuItem value="set_partitioning">Set Partitioning (ILP)</MenuItem>
+              <MenuItem value="joint_solver">Joint Solver</MenuItem>
+            </TextField>
+            <TextField
+              select fullWidth size="small" label="Modo de Operação" value={operationMode}
+              onChange={(e) => setOperationMode(e.target.value as 'urban' | 'charter')} sx={{ mb: 1.5 }}
+            >
+              <MenuItem value="urban">🚍 Urbano (CCT padrão)</MenuItem>
+              <MenuItem value="charter">🚌 Fretamento (turno flexível)</MenuItem>
+            </TextField>
+            <TextField
+              fullWidth size="small" label="Budget (segundos)" type="number"
+              value={timeBudget}
+              onChange={(e) => setTimeBudget(Math.max(5, parseInt(e.target.value) || 30))}
+              sx={{ mb: 2 }}
+              inputProps={{ min: 5, max: 600 }}
+            />
             <Button fullWidth variant="contained" onClick={handleLaunch} disabled={launching || activeRun != null} startIcon={launching ? <IconRefresh /> : <IconPlayerPlay />}>
               {launching ? "Calculando..." : activeRun ? "Ocupada" : "Otimizar"}
             </Button>

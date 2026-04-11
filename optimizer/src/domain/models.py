@@ -327,6 +327,8 @@ class OptimizationResult:
             "duties": [
                 {
                     "duty_id": d.id,
+                    "start_time": d.start_time,
+                    "end_time": d.end_time,
                     "blocks": list(dict.fromkeys(int(b.meta.get("source_block_id", b.id)) for b in d.tasks)),
                     "trip_ids": list(dict.fromkeys(int(tid) for tid in d.meta.get("covered_trip_ids", []))),
                     "trips": [

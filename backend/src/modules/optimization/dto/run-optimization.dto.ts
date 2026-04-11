@@ -5,6 +5,7 @@ import {
   IsObject,
   IsBoolean,
   IsArray,
+  IsNumber,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { OptimizationAlgorithm } from '../entities/optimization-run.entity';
@@ -107,4 +108,9 @@ export class RunOptimizationDto {
   @IsOptional()
   @IsBoolean()
   dryRun?: boolean;
+
+  @ApiPropertyOptional({ description: 'Budget global de tempo em segundos (atalho para vspParams.timeBudgetSeconds + cspParams.timeLimitSeconds)', default: 30 })
+  @IsOptional()
+  @IsNumber()
+  timeBudgetSeconds?: number;
 }

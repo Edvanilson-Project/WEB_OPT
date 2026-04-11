@@ -85,7 +85,10 @@ export class CreateCrewShiftDto {
   @IsBoolean()
   hasCctViolation?: boolean;
 
-  @ApiPropertyOptional({ type: [Object], description: 'Lista de violações CCT' })
+  @ApiPropertyOptional({
+    type: [Object],
+    description: 'Lista de violações CCT',
+  })
   @IsOptional()
   @IsArray()
   violations?: object[];

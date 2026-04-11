@@ -27,6 +27,9 @@ describe('OptimizationService audit and compare', () => {
     tripsService as any,
     settingsService as any,
     configService as any,
+    {} as any, // linesService
+    {} as any, // terminalsService
+    {} as any, // vehicleTypesService
   );
 
   beforeEach(() => {
@@ -328,10 +331,6 @@ describe('OptimizationService audit and compare', () => {
     expect((run.resultSummary as any).trip_group_audit.groups_total).toBe(6);
     expect((run.resultSummary as any).reproducibility.random_seed).toBe(17);
   });
-
-
-
-
 
   it('forwards fairness tolerance from dto cspParams to optimizer cct_params', async () => {
     tripsService.findAll.mockResolvedValue([

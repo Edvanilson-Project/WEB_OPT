@@ -251,7 +251,7 @@ function SettingsInner() {
                     { label: 'Carregadores', value: `${item.maxSimultaneousChargers ?? '--'}` },
                   ].map((metric) => (
                     <Grid item xs={6} sm={4} key={metric.label}>
-                      <Paper variant="outlined" sx={{ p: 1.25, borderRadius: 2.5, bgcolor: 'grey.50' }}>
+                      <Paper variant="outlined" sx={{ p: 1.25, borderRadius: 2.5, bgcolor: 'rgba(255,255,255,0.03)' }}>
                         <Typography variant="caption" color="text.secondary">{metric.label}</Typography>
                         <Typography variant="body2" fontWeight={700}>{metric.value}</Typography>
                       </Paper>

@@ -1,0 +1,6 @@
+frontend/src/app/(DashboardLayout)/otimiz/optimization/page.tsx(227,18): error TS18048: 'duty.warnings.length' is possibly 'undefined'.
+frontend/src/app/(DashboardLayout)/otimiz/optimization/page.tsx(227,47): error TS18048: 'duty.rest_violations' is possibly 'undefined'.
+frontend/src/app/(DashboardLayout)/otimiz/optimization/page.tsx(236,21): error TS18048: 'duty.rest_violations' is possibly 'undefined'.
+frontend/src/app/(DashboardLayout)/otimiz/optimization/page.tsx(280,39): error TS2322: Type 'TripDetail[] | number[]' is not assignable to type 'TripDetail[]'.
+  Type 'number[]' is not assignable to type 'TripDetail[]'.
+    Type 'number' is not assignable to type 'TripDetail'.

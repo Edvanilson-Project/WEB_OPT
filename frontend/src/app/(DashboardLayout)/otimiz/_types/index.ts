@@ -121,6 +121,7 @@ export interface OptimizationRun {
   companyId: number;
   algorithm: OptimizationAlgorithm;
   status: OptimizationStatus;
+  operationMode?: 'urban' | 'charter';
   /** total_vehicles no banco */
   totalVehicles?: number;
   /** total_crew no banco */
@@ -131,7 +132,7 @@ export interface OptimizationRun {
   durationMs?: number;
   errorMessage?: string;
   params?: Record<string, unknown>;
-  resultSummary?: Record<string, unknown>;
+  resultSummary?: OptimizationResultSummary | null;
   startedAt?: string;
   finishedAt?: string;
   createdAt: string;
@@ -255,16 +256,9 @@ export interface OptimizationSolverExplanation {
   trip_group_audit?: OptimizationTripGroupAudit;
 }
 
-export interface OptimizationRunAuditResult {
-  vehicles?: number;
-  crew?: number;
-  totalTrips?: number;
-  totalCost?: number;
-  cctViolations?: number;
+export interface OptimizationRunAuditResult extends OptimizationResultSummary {
   warningsCount?: number;
   tripDetailsCount?: number;
-  costBreakdown?: OptimizationCostBreakdown | null;
-  solverExplanation?: OptimizationSolverExplanation | null;
   solverVersion?: string | null;
   failureDiagnostics?: OptimizationFailureDiagnostics | null;
   optimizerDiagnostics?: Record<string, unknown> | null;
@@ -272,6 +266,95 @@ export interface OptimizationRunAuditResult {
   phaseSummary?: OptimizationPhaseSummary | null;
   tripGroupAudit?: OptimizationTripGroupAudit | null;
   hardConstraintReport?: Record<string, unknown> | null;
+}
+
+export interface OptimizationResultSummary {
+  vehicles?: number;
+  num_vehicles?: number;
+  crew?: number;
+  num_crew?: number;
+  total_cost?: number;
+  totalCost?: number;
+  cct_violations?: number;
+  cctViolations?: number;
+  total_trips?: number;
+  totalTrips?: number;
+  unassigned_trips?: number[] | TripDetail[];
+  blocks?: OptimizationBlock[];
+  duties?: OptimizationDuty[];
+  warnings?: string[] | OptimizationStructuredIssue[];
+  solver_source?: string;
+  vsp_algorithm?: string;
+  csp_algorithm?: string;
+  elapsed_ms?: number;
+  costBreakdown?: OptimizationCostBreakdown | null;
+  solverExplanation?: OptimizationSolverExplanation | null;
+}
+
+export interface OptimizationBlock {
+  block_id: number;
+  trips: number[] | TripDetail[];
+  trip_details?: TripDetail[];
+  num_trips?: number;
+  start_time: number;
+  end_time: number;
+  spread_minutes?: number;
+  idle_minutes?: number;
+  total_cost?: number;
+  cost?: number;
+  idle_cost?: number;
+  distance_cost?: number;
+  activation_cost?: number;
+  connection_cost?: number;
+  deadhead_cost?: number;
+  meta?: Record<string, any>;
+}
+
+export interface OptimizationDuty {
+  duty_id: number;
+  blocks: number[];
+  trip_ids: number[];
+  trips?: TripDetail[];
+  segments?: OptimizationDutySegment[];
+  work_time: number;
+  spread_time: number;
+  start_time: number;
+  end_time: number;
+  total_cost?: number;
+  work_cost?: number;
+  overtime_cost?: number;
+  overtime_minutes?: number;
+  nocturnal_extra_cost?: number;
+  guaranteed_cost?: number;
+  waiting_cost?: number;
+  shift_violations?: number;
+  rest_violations?: number;
+  cct_penalties_cost?: number;
+  warnings?: string[];
+}
+
+export interface OptimizationDutySegment {
+  block_id: number;
+  drive_minutes: number;
+  trip_ids: number[];
+  trips?: TripDetail[];
+}
+
+export interface TripDetail {
+  id: number;
+  trip_id?: number;
+  start_time: number;
+  end_time: number;
+  origin_id: number | string;
+  destination_id: number | string;
+  origin_name?: string;
+  destination_name?: string;
+  duration: number;
+  line_id?: number | null;
+  is_pull_out?: boolean;
+  is_pull_back?: boolean;
+  is_paired?: boolean;
+  direction?: 'outbound' | 'inbound';
 }
 
 export interface OptimizationRunAudit {
@@ -608,6 +691,7 @@ export interface OptimizationSettings {
   maxPricingIterations?: number;
   maxPricingAdditions?: number;
   connectionToleranceMinutes?: number;
+  operationMode?: 'urban' | 'charter';
   isActive: boolean;
   createdAt: string;
   updatedAt: string;

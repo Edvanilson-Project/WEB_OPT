@@ -30,7 +30,7 @@ export class OptimizationController {
 
   @Post('run')
   @ApiOperation({ summary: 'Iniciar nova execução de otimização VSP+CSP' })
-  run(@Body() dto: RunOptimizationDto, @Request() req: any) {
+  run(@Body() dto: RunOptimizationDto, @Request() req: { user: { id: number; companyId: number } }) {
     dto.companyId = resolveScopedCompanyId(req.user?.companyId, dto.companyId);
     return this.optimizationService.startOptimization(dto, req.user?.id);
   }
@@ -38,7 +38,7 @@ export class OptimizationController {
   @Get()
   @ApiOperation({ summary: 'Listar execuções de otimização' })
   @ApiQuery({ name: 'companyId', required: false })
-  findAll(@Request() req: any, @Query('companyId') companyId?: string) {
+  findAll(@Request() req: { user: { companyId: number } }, @Query('companyId') companyId?: string) {
     return this.optimizationService.findAll(
       resolveScopedCompanyId(req.user?.companyId, companyId),
     );
@@ -48,7 +48,7 @@ export class OptimizationController {
   @ApiOperation({ summary: 'Estatísticas do dashboard de otimização' })
   getDashboard(
     @Param('companyId', ParseIntPipe) companyId: number,
-    @Request() req: any,
+    @Request() req: { user: { companyId: number } },
   ) {
     return this.optimizationService.getDashboardStats(
       resolveScopedCompanyId(req.user?.companyId, companyId),
@@ -57,7 +57,7 @@ export class OptimizationController {
 
   @Get(':id/audit')
   @ApiOperation({ summary: 'Auditoria completa de uma execução' })
-  audit(@Param('id', ParseIntPipe) id: number, @Request() req: any) {
+  audit(@Param('id', ParseIntPipe) id: number, @Request() req: { user: { companyId: number } }) {
     return this.optimizationService.getRunAudit(id, req.user?.companyId);
   }
 
@@ -66,7 +66,7 @@ export class OptimizationController {
   compare(
     @Param('id', ParseIntPipe) id: number,
     @Param('otherId', ParseIntPipe) otherId: number,
-    @Request() req: any,
+    @Request() req: { user: { companyId: number } },
   ) {
     return this.optimizationService.compareRuns(
       id,
@@ -77,13 +77,13 @@ export class OptimizationController {
 
   @Get(':id')
   @ApiOperation({ summary: 'Detalhes de uma execução' })
-  findOne(@Param('id', ParseIntPipe) id: number, @Request() req: any) {
+  findOne(@Param('id', ParseIntPipe) id: number, @Request() req: { user: { companyId: number } }) {
     return this.optimizationService.findOne(id, req.user?.companyId);
   }
 
   @Patch(':id/cancel')
   @ApiOperation({ summary: 'Cancelar execução em andamento' })
-  cancel(@Param('id', ParseIntPipe) id: number, @Request() req: any) {
+  cancel(@Param('id', ParseIntPipe) id: number, @Request() req: { user: { companyId: number } }) {
     return this.optimizationService.cancel(id, req.user?.companyId);
   }
 }

@@ -198,6 +198,9 @@ class DutyOutput(BaseModel):
     duty_id: int
     blocks: List[int]
     trip_ids: List[int] = Field(default_factory=list)
+    trips: List[Any] = Field(default_factory=list)
+    start_time: Optional[int] = None
+    end_time: Optional[int] = None
     work_time: int
     spread_time: int
     rest_violations: int

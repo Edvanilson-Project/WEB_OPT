@@ -95,7 +95,9 @@ export class VehicleRoutesController {
   }
 
   @Get(':optimizationRunId/total-cost')
-  @ApiOperation({ summary: 'Calcular custo total de todas as rotas de uma execução' })
+  @ApiOperation({
+    summary: 'Calcular custo total de todas as rotas de uma execução',
+  })
   calculateTotalCost(
     @Param('optimizationRunId', ParseIntPipe) optimizationRunId: number,
   ) {
@@ -122,7 +124,11 @@ export class VehicleRoutesController {
     @Query('status') status: string,
     @Request() req: any,
   ) {
-    return this.vehicleRoutesService.updateStatus(id, status, req.user?.companyId);
+    return this.vehicleRoutesService.updateStatus(
+      id,
+      status,
+      req.user?.companyId,
+    );
   }
 
   @Delete(':id')

@@ -37,7 +37,7 @@ import type { OptimizationSettings } from '../_types';
 
 export type SettingsFormValues = Omit<OptimizationSettings, 'id' | 'companyId' | 'createdAt' | 'updatedAt'>;
 
-type PercentLikeField = 'cctWaitingTimePayPct' | 'holidayExtraPct';
+type PercentLikeField = 'cctWaitingTimePayPct' | 'holidayExtraPct' | 'cctNocturnalExtraPct';
 type FieldEffect = 'ativo' | 'parcial' | 'sem_efeito';
 type HelpFieldKey = keyof SettingsFormValues;
 
@@ -54,6 +54,7 @@ const NON_NUMERIC_FORM_FIELDS = new Set<keyof SettingsFormValues>([
   'name',
   'description',
   'algorithmType',
+  'operationMode',
   'isActive',
   'applyCct',
   'allowReliefPoints',
@@ -207,6 +208,12 @@ const FIELD_HELP: Record<string, HelpMeta> = {
     short: 'Perdoa pequenos gaps entre viagens. Ex: se uma viagem termina as 10:00 e a proxima comeca as 10:02, com tolerancia de 3 min o solver aceita. Sem isso, 2 min de atraso pode desperdicar um veiculo inteiro.',
     technical: 'connection_tolerance_minutes: valor adicionado ao gap antes de comparar com deadhead minimo. Propaga-se para VSP (MCNF, Greedy) e CSP. Ideal para compensar imprecisoes de carta horaria.',
     example: 'Valor 5 = aceita conexoes com ate 5 min de folga negativa.',
+    effect: 'ativo',
+  },
+  operationMode: {
+    title: 'Modo de Operação',
+    short: 'Define as restrições globais do sistema: Urbano (mais rígido com CCT) ou Fretamento (mais focado em produtividade e janelas longas).',
+    technical: 'operation_mode enviado ao solver. Altera pesos de penalidade e janelas de viabilidade para pullout/pullback e refeição.',
     effect: 'ativo',
   },
   cctMinGuaranteedWorkMinutes: {
@@ -498,6 +505,7 @@ export const DEFAULT_SETTINGS_FORM: SettingsFormValues = {
   name: '',
   description: '',
   algorithmType: 'full_pipeline',
+  operationMode: 'urban',
   // Budget
   timeBudgetSeconds: 300,
   connectionToleranceMinutes: 2,
@@ -781,7 +789,7 @@ export function OptimizationSettingsHighlights({
     { label: settings.useSetCovering ? 'Set covering' : 'Sem set covering', color: settings.useSetCovering ? 'info' as const : 'default' as const },
     { label: settings.pricingEnabled ? 'Pricing ligado' : 'Pricing desligado', color: settings.pricingEnabled ? 'secondary' as const : 'default' as const },
     { label: settings.preservePreferredPairs ? 'Ida/volta preservada' : 'Pairing flexivel', color: settings.preservePreferredPairs ? 'success' as const : 'default' as const },
-    { label: (settings as any).enforceTripGroupsHard ? 'Pares obrigatórios' : 'Pares flexíveis', color: (settings as any).enforceTripGroupsHard ? 'success' as const : 'warning' as const },
+    { label: settings.enforceTripGroupsHard ? 'Pares obrigatórios' : 'Pares flexíveis', color: settings.enforceTripGroupsHard ? 'success' as const : 'warning' as const },
     { label: `Jornada ${settings.cctMaxShiftMinutes ?? 480} min`, color: 'default' as const },
     { label: `Budget ${settings.timeBudgetSeconds ?? 300}s`, color: 'default' as const },
   ];
@@ -861,11 +869,24 @@ export function OptimizationSettingsEditor({
               <Select
                 label="Algoritmo principal"
                 value={value.algorithmType}
-                onChange={(e) => onChange('algorithmType', e.target.value)}
+                onChange={(e) => onChange('algorithmType', e.target.value as any)}
               >
                 {ALGORITHM_OPTIONS.map((item) => (
                   <MenuItem key={item.value} value={item.value}>{item.label}</MenuItem>
                 ))}
+              </Select>
+            </FormControl>
+          </Grid>
+          <Grid item xs={12} md={4}>
+            <FormControl size="small" fullWidth>
+              <InputLabel><FieldLabel text="Modo de operação" meta={FIELD_HELP.operationMode} /></InputLabel>
+              <Select
+                label="Modo de operação"
+                value={value.operationMode ?? 'urban'}
+                onChange={(e) => onChange('operationMode', e.target.value as 'urban' | 'charter')}
+              >
+                <MenuItem value="urban">Urbano (Padrao)</MenuItem>
+                <MenuItem value="charter">Fretamento (Charter)</MenuItem>
               </Select>
             </FormControl>
           </Grid>
@@ -888,13 +909,13 @@ export function OptimizationSettingsEditor({
             <SwitchField fieldKey="preservePreferredPairs" checked={!!value.preservePreferredPairs} onChange={(checked) => onChange('preservePreferredPairs', checked)} label="Preservar ida/volta" />
           </Grid>
           <Grid item xs={12} md={4}>
-            <SwitchField fieldKey="enforceTripGroupsHard" checked={!!(value as any).enforceTripGroupsHard} onChange={(checked) => onChange('enforceTripGroupsHard', checked)} label="Forçar pares ida/volta" />
+            <SwitchField fieldKey="enforceTripGroupsHard" checked={!!value.enforceTripGroupsHard} onChange={(checked) => onChange('enforceTripGroupsHard', checked)} label="Forçar pares ida/volta" />
           </Grid>
           <Grid item xs={12} md={4}>
-            <SwitchField fieldKey="operatorChangeTerminalsOnly" checked={!!(value as any).operatorChangeTerminalsOnly} onChange={(checked) => onChange('operatorChangeTerminalsOnly', checked)} label="Troca veículo só em terminais" />
+            <SwitchField fieldKey="operatorChangeTerminalsOnly" checked={!!value.operatorChangeTerminalsOnly} onChange={(checked) => onChange('operatorChangeTerminalsOnly', checked)} label="Troca veículo só em terminais" />
           </Grid>
           <Grid item xs={12} md={4}>
-            <SwitchField fieldKey="operatorSingleVehicleOnly" checked={!!(value as any).operatorSingleVehicleOnly} onChange={(checked) => onChange('operatorSingleVehicleOnly', checked)} label="Operador veículo único" />
+            <SwitchField fieldKey="operatorSingleVehicleOnly" checked={!!value.operatorSingleVehicleOnly} onChange={(checked) => onChange('operatorSingleVehicleOnly', checked)} label="Operador veículo único" />
           </Grid>
           {showActivation ? (
             <Grid item xs={12} md={4}>
@@ -925,7 +946,7 @@ export function OptimizationSettingsEditor({
           <Grid item xs={12} sm={6} md={3}><NumberField label="Horas garantidas" fieldKey="cctMinGuaranteedWorkMinutes" value={value.cctMinGuaranteedWorkMinutes ?? 360} onChange={(next) => onChange('cctMinGuaranteedWorkMinutes', next)} min={0} max={900} unit="min" dense={dense} /></Grid>
           <Grid item xs={12} sm={6} md={3}><NumberField label="Espera remunerada" fieldKey="cctWaitingTimePayPct" value={value.cctWaitingTimePayPct ?? 30} onChange={(next) => onChange('cctWaitingTimePayPct', next)} min={0} max={100} unit="%" dense={dense} /></Grid>
           <Grid item xs={12} md={4}><SwitchField fieldKey="cctIdleTimeIsPaid" checked={value.cctIdleTimeIsPaid ?? true} onChange={(checked) => onChange('cctIdleTimeIsPaid', checked)} label="Tempo ocioso e pago" /></Grid>
-          <Grid item xs={12} sm={6} md={3}><NumberField label="Tolerancia de conexao" fieldKey={"connectionToleranceMinutes" as any} value={(value as any).connectionToleranceMinutes ?? 0} onChange={(next) => onChange('connectionToleranceMinutes' as any, next)} min={0} max={30} unit="min" dense={dense} helperText="Perdoa gaps pequenos entre viagens (ex: 2-5 min)" /></Grid>
+          <Grid item xs={12} sm={6} md={3}><NumberField label="Tolerancia de conexao" fieldKey="connectionToleranceMinutes" value={value.connectionToleranceMinutes ?? 0} onChange={(next) => onChange('connectionToleranceMinutes', next)} min={0} max={30} unit="min" dense={dense} helperText="Perdoa gaps pequenos entre viagens (ex: 2-5 min)" /></Grid>
         </Grid>
       </SectionPanel>
 
@@ -968,7 +989,7 @@ export function OptimizationSettingsEditor({
           <Grid item xs={12} sm={6} md={3}><NumberField label="Energia fora pico" fieldKey="offpeakEnergyCostPerKwh" value={value.offpeakEnergyCostPerKwh ?? 0} onChange={(next) => onChange('offpeakEnergyCostPerKwh', next)} min={0} max={50} step={0.1} unit="R$/kWh" dense={dense} /></Grid>
           <Grid item xs={12} md={4}><SwitchField fieldKey="sameDepotRequired" checked={!!value.sameDepotRequired} onChange={(checked) => onChange('sameDepotRequired', checked)} label="Mesmo deposito para bloco" /></Grid>
           <Grid item xs={12} md={4}><SwitchField fieldKey="allowVehicleSplitShifts" checked={value.allowVehicleSplitShifts ?? true} onChange={(checked) => onChange('allowVehicleSplitShifts', checked)} label="Permitir turno partido" /></Grid>
-          <Grid item xs={12} md={4}><SwitchField fieldKey="allowMultiLineBlock" checked={(value as any).allowMultiLineBlock ?? true} onChange={(checked) => onChange('allowMultiLineBlock' as any, checked)} label="Permitir blocos multlinha" /></Grid>
+          <Grid item xs={12} md={4}><SwitchField fieldKey="allowMultiLineBlock" checked={value.allowMultiLineBlock ?? true} onChange={(checked) => onChange('allowMultiLineBlock', checked)} label="Permitir blocos multlinha" /></Grid>
         </Grid>
         <Alert severity="info" icon={<IconBatteryCharging size={16} />} sx={{ mt: 1.5, borderRadius: 2 }}>
           Custos de energia e carregadores influenciam a heuristica VSP para veiculos eletricos.
