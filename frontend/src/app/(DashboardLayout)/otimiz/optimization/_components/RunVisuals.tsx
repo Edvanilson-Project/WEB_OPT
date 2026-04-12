@@ -1,7 +1,7 @@
 'use client';
 import React, { useState, useMemo } from 'react';
 import {
-  Box, Typography, Stack, Tabs, Tab, Badge,
+  Box, Typography, Stack, Tabs, Tab, Badge, Paper,
   LinearProgress, Alert, AlertTitle,
 } from '@mui/material';
 import {
@@ -40,7 +40,7 @@ export function RunVisuals({
   activeSettings: OptimizationSettings | null,
 }) {
   const [tab, setTab] = useState(0);
-  const res = run.resultSummary || {};
+  const res = useMemo(() => run.resultSummary || {}, [run.resultSummary]);
   const warningsRaw = res.warnings || [];
   const warnings = Array.isArray(warningsRaw) ? (warningsRaw as (string | OptimizationStructuredIssue)[]).map(w => typeof w === 'string' ? w : w.message) : [];
   const unassigned = res.unassigned_trips || [];
@@ -49,7 +49,7 @@ export function RunVisuals({
     () => buildTripIntervalPolicy(run, activeSettings),
     [run, activeSettings],
   );
-  const duties = res.duties || [];
+  const duties = useMemo(() => res.duties || [], [res]);
   const dutyAssignmentsByPublicTripId = useMemo(
     () => buildDutyAssignmentsByPublicTripId(duties),
     [duties],
@@ -83,19 +83,28 @@ export function RunVisuals({
   return (
     <Box>
       <KpiStrip res={res} run={run} />
-      <Stack direction="row" justifyContent="space-between" alignItems="center" mb={3} sx={{ borderBottom: 1, borderColor: 'divider' }}>
-        <Tabs value={tab} onChange={(_, v) => setTab(v)} variant="scrollable" scrollButtons="auto" sx={{ mb: -0.5 }}>
-          <Tab icon={<IconUsers size={16} />} iconPosition="start" label="Escalas" sx={{ textTransform: 'none', fontWeight: 600 }} />
-          <Tab icon={<IconBus size={16} />} iconPosition="start" label="Veículos" sx={{ textTransform: 'none', fontWeight: 600 }} />
+      <Paper
+        variant="outlined"
+        sx={{
+          mb: 3,
+          p: 1,
+          borderRadius: 3,
+          borderColor: 'divider',
+          bgcolor: 'background.paper',
+        }}
+      >
+        <Tabs value={tab} onChange={(_, v) => setTab(v)} variant="scrollable" scrollButtons="auto">
+          <Tab icon={<IconUsers size={16} />} iconPosition="start" label="Escalas" sx={{ textTransform: 'none', fontWeight: 700, minHeight: 40 }} />
+          <Tab icon={<IconBus size={16} />} iconPosition="start" label="Veículos" sx={{ textTransform: 'none', fontWeight: 700, minHeight: 40 }} />
           <Tab
             icon={<Badge badgeContent={alertCount} color="error" max={99}><IconAlertTriangle size={16} /></Badge>}
-            iconPosition="start" label="Alertas" sx={{ textTransform: 'none', fontWeight: 600 }}
+            iconPosition="start" label="Alertas" sx={{ textTransform: 'none', fontWeight: 700, minHeight: 40 }}
           />
-          <Tab icon={<IconRoute size={16} />} iconPosition="start" label="Viagens" sx={{ textTransform: 'none', fontWeight: 600 }} />
-          <Tab icon={<IconChartBar size={16} />} iconPosition="start" label="Gantt" sx={{ textTransform: 'none', fontWeight: 600 }} />
-          <Tab icon={<IconFileCode size={16} />} iconPosition="start" label="Auditoria" sx={{ textTransform: 'none', fontWeight: 600 }} />
+          <Tab icon={<IconRoute size={16} />} iconPosition="start" label="Viagens" sx={{ textTransform: 'none', fontWeight: 700, minHeight: 40 }} />
+          <Tab icon={<IconChartBar size={16} />} iconPosition="start" label="Gantt" sx={{ textTransform: 'none', fontWeight: 700, minHeight: 40 }} />
+          <Tab icon={<IconFileCode size={16} />} iconPosition="start" label="Auditoria" sx={{ textTransform: 'none', fontWeight: 700, minHeight: 40 }} />
         </Tabs>
-      </Stack>
+      </Paper>
 
       {tab === 0 && (
         <TabOverview

@@ -98,7 +98,9 @@ function OptimizationInner() {
       <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" alignItems={{ xs: 'flex-start', md: 'center' }} mb={3} gap={2}>
         <Box>
           <Typography variant="h4" fontWeight={800} sx={{ letterSpacing: -0.5 }}>Cockpit de Otimização</Typography>
-          <Typography variant="body2" color="text.secondary" mt={0.5}>Gerencie e analise as execuções do motor VSP+CSP</Typography>
+          <Typography variant="body2" color="text.secondary" mt={0.75}>
+            Visão operacional clean para execução, análise e auditoria do motor VSP+CSP.
+          </Typography>
         </Box>
         <Stack direction="row" spacing={1.5} alignItems="center">
           <Chip label={activeSettings?.name ? `Perfil: ${activeSettings.name}` : 'Sem perfil'} color="secondary" variant="outlined" size="small" />
@@ -197,17 +199,20 @@ function OptimizationInner() {
         </Grid>
 
         <Grid item xs={12} md={9}>
-          <OtimizPanel sx={{ minHeight: 400 }}>
+          <OtimizPanel sx={{ minHeight: 420 }}>
             {viewRun ? (
               <>
-                <Stack direction="row" justifyContent="space-between" alignItems="center" mb={2}>
+                <Stack direction="row" justifyContent="space-between" alignItems="center" mb={2.5}>
                   <Typography variant="h6" fontWeight={700}>
-                    {activeRun ? `⏳ Execução #${activeRun.id} em Andamento` : `Resultados — Execução #${selectedRun!.id}`}
+                    {activeRun ? `Execução #${activeRun.id} em andamento` : `Resultados — Execução #${selectedRun!.id}`}
                   </Typography>
                   {selectedRun && !activeRun && (
                     <IconButton size="small" onClick={() => setSelectedRun(null)}><IconX size={18} /></IconButton>
                   )}
                 </Stack>
+                <Typography variant="caption" color="text.secondary" display="block" mb={1.5}>
+                  Detalhes não críticos ficam em tooltips e no painel lateral da aba Gantt para reduzir ruído visual.
+                </Typography>
                 <RunVisuals run={viewRun} lines={lines} terminals={terminals} allRuns={runs} activeSettings={activeSettings ?? null} />
               </>
             ) : (

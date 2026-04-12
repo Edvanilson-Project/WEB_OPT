@@ -1,10 +1,12 @@
 'use client';
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
-  Box, Typography, Stack, Paper, Tooltip, Button,
+  Box, Typography, Stack, Paper, Tooltip, Button, Drawer, Divider,
+  IconButton, Chip,
   alpha, useTheme,
 } from '@mui/material';
 import { List } from 'react-window';
+import { IconInfoCircle } from '@tabler/icons-react';
 import type {
   Line, Terminal, OptimizationResultSummary, TripDetail,
 } from '../../_types';
@@ -29,6 +31,8 @@ export function TabGantt({
 }) {
   const theme = useTheme();
   const [zoom, setZoom] = useState(1);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [showLinesLegend, setShowLinesLegend] = useState(false);
   const { blocks = [], duties = [] } = res;
   const ganttColors = useMemo(() => getGanttColors(theme), [theme]);
 
@@ -219,7 +223,6 @@ export function TabGantt({
     return { processedBlocks: filtered, minTime: min, maxTime: max };
   }, [
     blocks,
-    intervalPolicy,
     linesMap,
     tripMetadataMap,
   ]);
@@ -253,8 +256,7 @@ export function TabGantt({
   const VISIBLE_ROWS = Math.min(processedBlocks.length, 16);
   const listHeight = VISIBLE_ROWS * ROW_HEIGHT;
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const GanttRow = useCallback(({ index, style }: any) => {
+  const GanttRow = ({ index, style }: { index: number; style: React.CSSProperties }) => {
     const b = processedBlocks[index];
     return (
       <Box style={style}>
@@ -304,7 +306,37 @@ export function TabGantt({
                   </Box>
 
                   {/* Área do Gráfico */}
-                  <Box sx={{ flexGrow: 1, position: 'relative', height: BLOCK_HEIGHT, bgcolor: alpha(theme.palette.action.hover, 0.3), borderRadius: 0.75, border: '1px solid', borderColor: alpha(theme.palette.divider, 0.5) }}>
+                  <Box sx={{ flexGrow: 1, position: 'relative', height: BLOCK_HEIGHT, bgcolor: alpha(theme.palette.action.hover, 0.14), borderRadius: 1.25, border: '1px solid', borderColor: alpha(theme.palette.divider, 0.4) }}>
+                    {/* Faixas improdutivas (ociosas/deadhead) com hachura, desenhadas ao fundo */}
+                    {b.idleWindows.map((window: IdleWindow, idleIdx: number) => {
+                      const left = getPercent(window.start);
+                      const right = getPercent(window.end);
+                      const width = Math.max(0, right - left);
+                      if (width <= 0) return null;
+
+                      return (
+                        <Tooltip
+                          key={`idle-${b.block_id}-${idleIdx}`}
+                          title={`Tempo improdutivo ${minToHHMM(window.start)}-${minToHHMM(window.end)} (${minToDuration(window.duration)})`}
+                        >
+                          <Box
+                            sx={{
+                              position: 'absolute',
+                              left: `${left}%`,
+                              width: `${width}%`,
+                              top: 4,
+                              bottom: 4,
+                              borderRadius: 0.75,
+                              border: '1px dashed',
+                              borderColor: alpha(theme.palette.warning.main, 0.55),
+                              backgroundImage: `repeating-linear-gradient(135deg, ${alpha(theme.palette.warning.light, 0.28)} 0px, ${alpha(theme.palette.warning.light, 0.28)} 5px, transparent 5px, transparent 10px)`,
+                              pointerEvents: 'auto',
+                            }}
+                          />
+                        </Tooltip>
+                      );
+                    })}
+
                     {b.groups.map((group, gIdx) => {
                       const containerStart = getPercent(group.trips[0].start_time ?? 0);
                       const containerEnd = getPercent(group.trips[group.trips.length - 1].end_time ?? 0);
@@ -312,6 +344,7 @@ export function TabGantt({
 
                       const cycleLineId = group.type === 'cycle' ? group.trips[0].line_id : undefined;
                       const cycleColor = cycleLineId ? lineColorMap.get(cycleLineId) : theme.palette.primary.main;
+                      const cycleLabel = cycleLineId ? `Ciclo ${linesMap[cycleLineId] || cycleLineId}` : 'Ciclo';
 
                       return (
                         <Box key={gIdx} sx={{ 
@@ -320,12 +353,30 @@ export function TabGantt({
                           width: `${containerWidth}%`, 
                           height: '100%',
                           ...(group.type === 'cycle' && {
-                            bgcolor: alpha(cycleColor ?? theme.palette.primary.main, 0.06),
-                            borderRadius: 1,
-                            border: '1.5px dashed',
-                            borderColor: alpha(cycleColor ?? theme.palette.primary.main, 0.25),
+                            bgcolor: alpha(cycleColor ?? theme.palette.primary.main, 0.08),
+                            borderRadius: 999,
+                            border: '1px solid',
+                            borderColor: alpha(cycleColor ?? theme.palette.primary.main, 0.35),
                           })
                         }}>
+                          {group.type === 'cycle' && (
+                            <Tooltip title={`${cycleLabel} (${minToHHMM(group.trips[0].start_time)}-${minToHHMM(group.trips[group.trips.length - 1].end_time)})`}>
+                              <Box
+                                sx={{
+                                  position: 'absolute',
+                                  left: 0,
+                                  right: 0,
+                                  top: 4,
+                                  bottom: 4,
+                                  borderRadius: 999,
+                                  border: '1px solid',
+                                  borderColor: alpha(cycleColor ?? theme.palette.primary.main, 0.35),
+                                  background: `linear-gradient(90deg, ${alpha(cycleColor ?? theme.palette.primary.main, 0.75)} 0%, ${alpha(cycleColor ?? theme.palette.primary.main, 0.55)} 100%)`,
+                                }}
+                              />
+                            </Tooltip>
+                          )}
+
                           {group.trips.map((t, i) => {
                             const groupStart = group.trips[0].start_time ?? 0;
                             const groupEnd = group.trips[group.trips.length - 1].end_time ?? 0;
@@ -374,8 +425,8 @@ export function TabGantt({
                                   position: 'absolute',
                                   left: `${startP}%`,
                                   width: `${widthP}%`,
-                                  top: isDeadhead ? 13 : 6,
-                                  bottom: isDeadhead ? 13 : 6,
+                                  top: isDeadhead ? 12 : (group.type === 'cycle' ? 7 : 6),
+                                  bottom: isDeadhead ? 12 : (group.type === 'cycle' ? 7 : 6),
                                   bgcolor: barColor,
                                   borderRadius: isDeadhead ? 999 : 0.5,
                                   display: 'flex',
@@ -386,7 +437,10 @@ export function TabGantt({
                                   border: isDeadhead ? '1px solid' : 'none',
                                   borderColor: isDeadhead ? ganttColors.deadheadBorder : 'divider',
                                   transition: 'all 0.2s',
-                                  height: isDeadhead ? 4 : undefined,
+                                  height: isDeadhead ? 6 : undefined,
+                                  backgroundImage: isDeadhead
+                                    ? `repeating-linear-gradient(135deg, ${alpha(theme.palette.warning.dark, 0.35)} 0px, ${alpha(theme.palette.warning.dark, 0.35)} 4px, transparent 4px, transparent 8px)`
+                                    : undefined,
                                   '&:hover': { 
                                     opacity: 0.9, 
                                     transform: isDeadhead ? 'none' : 'scaleY(1.06)',
@@ -394,7 +448,7 @@ export function TabGantt({
                                     boxShadow: '0 4px 8px rgba(0,0,0,0.2)'
                                   },
                                 }}>
-                                  {!isDeadhead && (getPercent(t.end_time ?? 0) - getPercent(t.start_time ?? 0)) > (zoom * 5) && (
+                                  {!isDeadhead && group.type !== 'cycle' && (getPercent(t.end_time ?? 0) - getPercent(t.start_time ?? 0)) > (zoom * 5) && (
                                     <Typography variant="caption" sx={{ color: barTextColor, fontSize: 10, px: 0.5, whiteSpace: 'nowrap', fontWeight: 900 }}>
                                       {linesMap[t.line_id!] || t.line_id}
                                     </Typography>
@@ -410,7 +464,7 @@ export function TabGantt({
                 </Stack>
               </Box>
             );
-          }, [processedBlocks, getPercent, ganttColors, zoom, linesMap, terminalsMap, lineColorMap, BLOCK_HEIGHT, SIDE_LABEL_WIDTH, ROW_HEIGHT]);
+          };
 
   return (
     <Box>
@@ -425,20 +479,31 @@ export function TabGantt({
             <Button size="small" variant={zoom === 3 ? 'contained' : 'text'} onClick={() => setZoom(3)} sx={{ minWidth: 60, height: 24, fontSize: 10, borderRadius: 1.5 }}>Largo</Button>
           </Stack>
 
-          <Stack direction="row" spacing={1.5} alignItems="center" flexWrap="wrap" useFlexGap>
-            {Array.from(lineColorMap.entries()).map(([lineId, color]) => (
-              <Stack key={lineId} direction="row" spacing={0.75} alignItems="center">
-                <Box sx={{ width: 12, height: 12, bgcolor: color, borderRadius: '50%' }} />
-                <Typography variant="caption" fontWeight={600}>{linesMap[lineId] || `L${lineId}`}</Typography>
-              </Stack>
-            ))}
-            <Stack direction="row" spacing={0.75} alignItems="center">
-              <Box sx={{ width: 12, height: 12, bgcolor: ganttColors.deadhead, borderRadius: '50%', border: '1px solid', borderColor: ganttColors.deadheadBorder }} />
-              <Typography variant="caption" fontWeight={600}>Apoio/Ocioso</Typography>
-            </Stack>
+          <Stack direction="row" spacing={1.25} alignItems="center" flexWrap="wrap" useFlexGap>
+            <Chip size="small" label="Produtivo" sx={{ height: 22, bgcolor: alpha(theme.palette.success.main, 0.16), color: theme.palette.success.dark, fontWeight: 700 }} />
+            <Chip size="small" label="Improdutivo" sx={{ height: 22, border: '1px dashed', borderColor: alpha(theme.palette.warning.main, 0.7), bgcolor: alpha(theme.palette.warning.light, 0.12), color: theme.palette.warning.dark, fontWeight: 700 }} />
+            <Button size="small" color="inherit" variant="text" onClick={() => setShowLinesLegend((p) => !p)}>
+              {showLinesLegend ? 'Ocultar linhas' : 'Mostrar linhas'}
+            </Button>
+            <Tooltip title="Abrir painel de legenda e critérios visuais">
+              <IconButton size="small" onClick={() => setDetailsOpen(true)}>
+                <IconInfoCircle size={16} />
+              </IconButton>
+            </Tooltip>
           </Stack>
         </Stack>
       </Stack>
+
+      {showLinesLegend && (
+        <Stack direction="row" spacing={1.25} alignItems="center" flexWrap="wrap" useFlexGap mb={1.5}>
+          {Array.from(lineColorMap.entries()).map(([lineId, color]) => (
+            <Stack key={lineId} direction="row" spacing={0.75} alignItems="center">
+              <Box sx={{ width: 10, height: 10, bgcolor: color, borderRadius: '50%' }} />
+              <Typography variant="caption" fontWeight={600}>{linesMap[lineId] || `L${lineId}`}</Typography>
+            </Stack>
+          ))}
+        </Stack>
+      )}
 
       <Paper variant="outlined" sx={{ p: 0, borderRadius: 3, overflow: 'hidden', bgcolor: 'background.paper' }}>
         <Box sx={{ 
@@ -467,13 +532,29 @@ export function TabGantt({
                 rowCount={processedBlocks.length}
                 rowHeight={ROW_HEIGHT}
                 overscanCount={4}
-                rowComponent={GanttRow}
+                rowComponent={GanttRow as any}
                 rowProps={{}}
               />
             </Box>
           </Box>
         </Box>
       </Paper>
+
+      <Drawer anchor="right" open={detailsOpen} onClose={() => setDetailsOpen(false)}>
+        <Box sx={{ width: 320, p: 2.5 }}>
+          <Typography variant="subtitle1" fontWeight={800} mb={1}>Guia visual do Gantt</Typography>
+          <Typography variant="body2" color="text.secondary" mb={2}>
+            Informacoes de detalhe foram movidas para este painel para manter o canvas limpo durante o planejamento.
+          </Typography>
+          <Divider sx={{ mb: 1.5 }} />
+          <Stack spacing={1.25}>
+            <Typography variant="body2"><b>Ciclo:</b> ida + volta sequenciais aparecem como uma faixa continua.</Typography>
+            <Typography variant="body2"><b>Produtivo:</b> barra cheia (direcao com passageiro).</Typography>
+            <Typography variant="body2"><b>Improdutivo:</b> hachura/transparencia (espera, apoio, deadhead, janelas ociosas).</Typography>
+            <Typography variant="body2"><b>Escalabilidade:</b> lista virtualizada para centenas de blocos sem travar o navegador.</Typography>
+          </Stack>
+        </Box>
+      </Drawer>
     </Box>
   );
 }
