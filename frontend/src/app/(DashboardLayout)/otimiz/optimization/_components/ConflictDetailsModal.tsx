@@ -4,10 +4,12 @@ import {
   Dialog, DialogTitle, DialogContent, DialogActions, Button, Stack, Box,
   Typography, Chip, Table, TableBody, TableCell, TableContainer, TableHead,
   TableRow, Paper, Alert, Divider, Grid, Card, CardContent,
+  Menu, MenuItem,
 } from '@mui/material';
-import { IconAlertTriangle, IconX, IconBlockquote } from '@tabler/icons-react';
+import { IconAlertTriangle, IconX, IconBlockquote, IconDownload } from '@tabler/icons-react';
 import type { OptimizationResultSummary } from '../../_types';
 import { detectOperationalConflicts, type OperationalConflict } from '../_helpers/operational-conflicts';
+import { exportConflicts, downloadExport } from '../_helpers/export-conflicts';
 
 export interface ConflictDetailsModalProps {
   res: OptimizationResultSummary;
@@ -21,6 +23,7 @@ export interface ConflictDetailsModalProps {
  */
 export function ConflictDetailsModal({ res, open, onClose }: ConflictDetailsModalProps) {
   const conflicts = useMemo(() => detectOperationalConflicts(res), [res]);
+  const [exportAnchor, setExportAnchor] = useState<null | HTMLElement>(null);
   const [filterType, setFilterType] = useState<string | null>(null);
 
   const filteredConflicts = filterType 
@@ -72,9 +75,50 @@ export function ConflictDetailsModal({ res, open, onClose }: ConflictDetailsModa
           <IconAlertTriangle size={22} />
           Detalhes de Conflitos Operacionais ({conflicts.length})
         </Box>
-        <Button onClick={onClose} size="small" variant="text">
+        <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+          <Button
+            size="small"
+            variant="outlined"
+            startIcon={<IconDownload size={16} />}
+            onClick={(e) => setExportAnchor(e.currentTarget)}
+            sx={{ fontWeight: 700 }}
+          >
+            Exportar
+          </Button>
+          <Menu
+            anchorEl={exportAnchor}
+            open={Boolean(exportAnchor)}
+            onClose={() => setExportAnchor(null)}
+          >
+            <MenuItem
+              onClick={() => {
+                downloadExport(exportConflicts(res, 'csv'));
+                setExportAnchor(null);
+              }}
+            >
+              💾 CSV
+            </MenuItem>
+            <MenuItem
+              onClick={() => {
+                downloadExport(exportConflicts(res, 'json'));
+                setExportAnchor(null);
+              }}
+            >
+              📋 JSON
+            </MenuItem>
+            <MenuItem
+              onClick={() => {
+                downloadExport(exportConflicts(res, 'html'));
+                setExportAnchor(null);
+              }}
+            >
+              🌐 HTML (Relatório)
+            </MenuItem>
+          </Menu>
+          <Button onClick={onClose} size="small" variant="text">
           <IconX size={18} />
         </Button>
+        </Box>
       </DialogTitle>
 
       <Divider />
