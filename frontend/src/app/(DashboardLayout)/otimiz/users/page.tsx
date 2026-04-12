@@ -1,10 +1,9 @@
 'use client';
 import React, { useState, useEffect, useCallback } from 'react';
-import { alpha } from '@mui/material/styles';
 import {
   Box, Avatar, Typography, Button, Paper, Stack, Skeleton, Tooltip, IconButton,
   Dialog, DialogTitle, DialogContent, DialogActions, TextField,
-  MenuItem, InputAdornment, useTheme, Card, CardContent, Grid, Divider
+  MenuItem, InputAdornment, Table, TableHead, TableBody, TableRow, TableCell, TableContainer
 } from '@mui/material';
 import { IconPlus, IconEdit, IconTrash, IconSearch, IconRefresh, IconUsers, IconEye, IconEyeOff } from '@tabler/icons-react';
 import PageContainer from '@/app/components/container/PageContainer';
@@ -36,7 +35,6 @@ function fmtDate(d?: string) {
 }
 
 function UsersInner() {
-  const theme = useTheme();
   const notify = useNotify();
   const [items, setItems] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
@@ -98,76 +96,66 @@ function UsersInner() {
 
   return (
     <PageContainer title="Usuários — OTIMIZ" description="Controle de Acesso Enterprise">
-      <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" alignItems={{ xs: 'flex-start', md: 'center' }} gap={2} mb={4} pt={2}>
-        <Box>
-          <Typography variant="overline" sx={{ letterSpacing: 1.6, color: 'primary.main', fontWeight: 800 }}>
-            ACCESS CONTROL
-          </Typography>
-          <Typography variant="h3" fontWeight={800} mt={0.5}>Usuários e Credenciais</Typography>
-          <Typography variant="body1" color="text.secondary" mt={1}>Visão simplificada do organograma de acesso da sua plataforma operatória OTIMIZ.</Typography>
-        </Box>
-        <Stack direction="row" gap={2}>
-          <Tooltip title="Recarregar">
-            <IconButton onClick={load} sx={{ bgcolor: 'background.paper', border: '1px solid', borderColor: 'divider' }}>
-              <IconRefresh size={20} color={theme.palette.primary.main} />
-            </IconButton>
-          </Tooltip>
-          <Button variant="contained" size="large" startIcon={<IconPlus />} onClick={openCreate} sx={{ borderRadius: 2 }}>
-            Convidar Usuário
-          </Button>
+      <Stack direction="row" justifyContent="space-between" alignItems="center" mb={3}>
+        <Typography variant="h5" fontWeight={700}>Usuários</Typography>
+        <Stack direction="row" spacing={1}>
+          <Tooltip title="Recarregar"><IconButton onClick={load} size="small"><IconRefresh size={18} /></IconButton></Tooltip>
+          <Button variant="contained" startIcon={<IconPlus size={16} />} onClick={openCreate}>Novo Usuário</Button>
         </Stack>
       </Stack>
 
-      <Paper variant="outlined" sx={{ borderRadius: 3, p: 2, mb: 4, background: `linear-gradient(180deg, ${alpha(theme.palette.background.paper, 0.98)} 0%, ${alpha(theme.palette.primary.light, 0.05)} 100%)` }}>
-        <Stack direction={{ xs: 'column', md: 'row' }} gap={2}>
-          <TextField size="small" placeholder="Localizar credenciais (nome ou e-mail)..." value={search} onChange={(e) => setSearch(e.target.value)} fullWidth sx={{ maxWidth: { md: 400 } }} InputProps={{ startAdornment: <InputAdornment position="start"><IconSearch size={16} /></InputAdornment> }} />
-          <TextField size="small" select label="Filtro de Perfil" value={roleFilter} onChange={(e) => setRoleFilter(e.target.value as UserRole | '')} sx={{ minWidth: 200 }}>
-            <MenuItem value="">Todos os perfis</MenuItem>
-            {ROLES.map((r) => <MenuItem key={r.value} value={r.value}>{r.label}</MenuItem>)}
-          </TextField>
-          <Box display="flex" alignItems="center" ml="auto">
-            <Typography variant="subtitle2" fontWeight={700} color="primary.main">{filtered.length} credenciais ativas</Typography>
-          </Box>
-        </Stack>
-      </Paper>
+      <Stack direction="row" spacing={2} alignItems="center" mb={2}>
+        <TextField size="small" placeholder="Buscar usuário..." value={search} onChange={(e) => setSearch(e.target.value)} sx={{ width: 300 }}
+          InputProps={{ startAdornment: <InputAdornment position="start"><IconSearch size={16} /></InputAdornment> }} />
+        <TextField size="small" select label="Perfil" value={roleFilter} onChange={(e) => setRoleFilter(e.target.value as UserRole | '')} sx={{ minWidth: 160 }}>
+          <MenuItem value="">Todos</MenuItem>
+          {ROLES.map((r) => <MenuItem key={r.value} value={r.value}>{r.label}</MenuItem>)}
+        </TextField>
+        <Typography variant="body2" color="text.secondary">{filtered.length} registros</Typography>
+      </Stack>
 
       {loading ? (
-        <Grid container spacing={2}>
-          {[...Array(6)].map((_, i) => <Grid item xs={12} sm={6} md={4} key={i}><Skeleton variant="rounded" height={140} /></Grid>)}
-        </Grid>
+        <Box>{[...Array(5)].map((_, i) => <Skeleton key={i} variant="rectangular" height={48} sx={{ mb: 0.5, borderRadius: 1 }} />)}</Box>
       ) : filtered.length === 0 ? (
-        <Box textAlign="center" py={12} bgcolor="grey.50" borderRadius={3} border="1px dashed" borderColor="divider">
-          <IconUsers size={64} color="#BDBDBD" />
-          <Typography variant="h6" color="text.secondary" mt={2}>Nenhum usuário encontrado na busca.</Typography>
-        </Box>
+        <Box textAlign="center" py={6}><Typography color="text.secondary">Nenhum usuário encontrado.</Typography></Box>
       ) : (
-        <Grid container spacing={2}>
-          {filtered.map((u) => (
-            <Grid item xs={12} sm={6} md={4} key={u.id}>
-              <Card variant="outlined" sx={{ borderRadius: 3, transition: '0.2s', '&:hover': { borderColor: 'primary.main', boxShadow: '0 8px 24px rgba(15,23,42,0.06)' } }}>
-                <CardContent sx={{ p: '24px !important' }}>
-                  <Stack direction="row" justifyContent="space-between" alignItems="flex-start" mb={2}>
-                    <Avatar sx={{ width: 56, height: 56, bgcolor: stringToColor(u.name), fontSize: 22, fontWeight: 700 }}>{u.name[0].toUpperCase()}</Avatar>
-                    <Stack direction="row" spacing={0.5}>
-                      <IconButton size="small" onClick={() => openEdit(u)} sx={{ bgcolor: 'grey.50' }}><IconEdit size={16} /></IconButton>
-                      <IconButton size="small" onClick={() => setDeleteTarget(u)} sx={{ bgcolor: 'error.lighter', color: 'error.main' }}><IconTrash size={16} /></IconButton>
+        <TableContainer component={Paper} variant="outlined" sx={{ borderRadius: 2 }}>
+          <Table size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell sx={{ fontWeight: 700 }}>Usuário</TableCell>
+                <TableCell sx={{ fontWeight: 700 }}>E-mail</TableCell>
+                <TableCell sx={{ fontWeight: 700 }}>Perfil</TableCell>
+                <TableCell align="center" sx={{ fontWeight: 700 }}>Status</TableCell>
+                <TableCell align="right" sx={{ fontWeight: 700 }}>Ações</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {filtered.map((u) => (
+                <TableRow key={u.id} hover>
+                  <TableCell>
+                    <Stack direction="row" spacing={1.5} alignItems="center">
+                      <Avatar sx={{ width: 32, height: 32, bgcolor: stringToColor(u.name), fontSize: 14, fontWeight: 700 }}>{u.name[0].toUpperCase()}</Avatar>
+                      <Typography variant="body2" fontWeight={600}>{u.name}</Typography>
                     </Stack>
-                  </Stack>
-                  <Typography variant="h6" fontWeight={800} noWrap>{u.name}</Typography>
-                  <Typography variant="body2" color="text.secondary" noWrap mb={2}>{u.email}</Typography>
-                  <Divider sx={{ mb: 2 }} />
-                  <Stack direction="row" justifyContent="space-between" alignItems="center">
-                    <StatusChip type="role" value={u.role} />
-                    <StatusChip type="status" value={u.status} />
-                  </Stack>
-                </CardContent>
-              </Card>
-            </Grid>
-          ))}
-        </Grid>
+                  </TableCell>
+                  <TableCell><Typography variant="body2" color="text.secondary">{u.email}</Typography></TableCell>
+                  <TableCell><StatusChip type="role" value={u.role} /></TableCell>
+                  <TableCell align="center"><StatusChip type="status" value={u.status} /></TableCell>
+                  <TableCell align="right">
+                    <Stack direction="row" spacing={0.5} justifyContent="flex-end">
+                      <Tooltip title="Editar"><IconButton size="small" onClick={() => openEdit(u)}><IconEdit size={15} /></IconButton></Tooltip>
+                      <Tooltip title="Excluir"><IconButton size="small" onClick={() => setDeleteTarget(u)} color="error"><IconTrash size={15} /></IconButton></Tooltip>
+                    </Stack>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </TableContainer>
       )}
 
-      <Dialog open={dialogOpen} onClose={() => !saving && setDialogOpen(false)} maxWidth="sm" fullWidth PaperProps={{ sx: { borderRadius: 3 } }}>
+      <Dialog open={dialogOpen} onClose={() => !saving && setDialogOpen(false)} maxWidth="sm" fullWidth>
         <DialogTitle sx={{ fontWeight: 800 }}>{editTarget ? 'Editar Credenciais' : 'Nova Credencial'}</DialogTitle>
         <DialogContent dividers>
           <Stack spacing={3} sx={{ pt: 1 }}>
@@ -203,9 +191,9 @@ function UsersInner() {
           </Stack>
         </DialogContent>
         <DialogActions sx={{ px: 3, py: 2 }}>
-          <Button onClick={() => setDialogOpen(false)} disabled={saving} color="inherit">Cancelar Operação</Button>
+          <Button onClick={() => setDialogOpen(false)} disabled={saving} color="inherit">Cancelar</Button>
           <Button variant="contained" onClick={handleSave} disabled={saving || !form.name || !form.email} sx={{ borderRadius: 2 }}>
-            {saving ? 'Registrando...' : 'Confirmar Registro'}
+            {saving ? 'Salvando...' : 'Salvar'}
           </Button>
         </DialogActions>
       </Dialog>

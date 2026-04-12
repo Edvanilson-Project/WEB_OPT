@@ -16,10 +16,10 @@ import ConfirmDialog from '../_components/ConfirmDialog';
 import { NotifyProvider, useNotify } from '../_components/Notify';
 import {
   timetablesApi, tripTimeConfigsApi, passengerConfigsApi,
-  linesApi, vehicleTypesApi, tripsApi, getSessionUser,
+  linesApi, vehicleTypesApi, tripsApi, terminalsApi, getSessionUser,
 } from '@/lib/api';
 import type {
-  Timetable, TripTimeConfig, PassengerConfig, Line, VehicleType, Trip,
+  Timetable, TripTimeConfig, PassengerConfig, Line, VehicleType, Trip, Terminal,
 } from '../_types';
 import { extractArray, numVal } from '../_types';
 
@@ -40,10 +40,26 @@ interface TimetableForm {
   validityEnd: string;
 }
 
+interface TripEditForm {
+  startTimeMinutes: string;
+  endTimeMinutes: string;
+  idleAfterMinutes: string;
+  midTripReliefPointId: string;
+  midTripReliefOffsetMinutes: string;
+}
+
 const EMPTY_FORM: TimetableForm = {
   name: '', description: '', lineId: '',
   tripTimeConfigId: '', passengerConfigId: '', vehicleTypeId: '',
   validityStart: '', validityEnd: '',
+};
+
+const EMPTY_TRIP_FORM: TripEditForm = {
+  startTimeMinutes: '',
+  endTimeMinutes: '',
+  idleAfterMinutes: '',
+  midTripReliefPointId: '',
+  midTripReliefOffsetMinutes: '',
 };
 
 function TimetablesInner() {
@@ -51,6 +67,7 @@ function TimetablesInner() {
   const notify = useNotify();
   const [timetables, setTimetables] = useState<Timetable[]>([]);
   const [lines, setLines] = useState<Line[]>([]);
+  const [terminals, setTerminals] = useState<Terminal[]>([]);
   const [tripTimeConfigs, setTripTimeConfigs] = useState<TripTimeConfig[]>([]);
   const [passengerConfigs, setPassengerConfigs] = useState<PassengerConfig[]>([]);
   const [vehicleTypes, setVehicleTypes] = useState<VehicleType[]>([]);
@@ -61,7 +78,7 @@ function TimetablesInner() {
   const [tripsLoading, setTripsLoading] = useState(false);
 
   const [editTrip, setEditTrip] = useState<Trip | null>(null);
-  const [tripForm, setTripForm] = useState({ startTimeMinutes: '', endTimeMinutes: '', idleAfterMinutes: '' });
+  const [tripForm, setTripForm] = useState<TripEditForm>(EMPTY_TRIP_FORM);
   const [savingTrip, setSavingTrip] = useState(false);
 
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -79,15 +96,17 @@ function TimetablesInner() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [tt, ln, ttc, pc, vt] = await Promise.allSettled([
+      const [tt, ln, terminalsData, ttc, pc, vt] = await Promise.allSettled([
         timetablesApi.getAll(),
         linesApi.getAll(),
+        terminalsApi.getAll(),
         tripTimeConfigsApi.getAll(),
         passengerConfigsApi.getAll(),
         vehicleTypesApi.getAll(),
       ]);
       if (tt.status === 'fulfilled') setTimetables(extractArray(tt.value));
       if (ln.status === 'fulfilled') setLines(extractArray(ln.value));
+      if (terminalsData.status === 'fulfilled') setTerminals(extractArray(terminalsData.value));
       if (ttc.status === 'fulfilled') setTripTimeConfigs(extractArray(ttc.value));
       if (pc.status === 'fulfilled') setPassengerConfigs(extractArray(pc.value));
       if (vt.status === 'fulfilled') setVehicleTypes(extractArray(vt.value));
@@ -205,6 +224,8 @@ function TimetablesInner() {
       startTimeMinutes: String(trip.startTimeMinutes),
       endTimeMinutes: String(trip.endTimeMinutes),
       idleAfterMinutes: String(trip.idleAfterMinutes ?? 0),
+      midTripReliefPointId: trip.midTripReliefPointId != null ? String(trip.midTripReliefPointId) : '',
+      midTripReliefOffsetMinutes: trip.midTripReliefOffsetMinutes != null ? String(trip.midTripReliefOffsetMinutes) : '',
     });
   };
 
@@ -212,8 +233,26 @@ function TimetablesInner() {
     if (!editTrip) return;
     const start = Number(tripForm.startTimeMinutes);
     const end = Number(tripForm.endTimeMinutes);
+    const duration = end - start;
+    const reliefPointId = tripForm.midTripReliefPointId ? Number(tripForm.midTripReliefPointId) : null;
+    const reliefOffsetMinutes = tripForm.midTripReliefOffsetMinutes ? Number(tripForm.midTripReliefOffsetMinutes) : null;
     if (end <= start) {
       notify.warning('Horário final deve ser maior que o inicial.');
+      return;
+    }
+    if ((reliefPointId == null) !== (reliefOffsetMinutes == null)) {
+      notify.warning('Informe juntos o ponto e o offset da rendição intra-viagem.');
+      return;
+    }
+    if (reliefOffsetMinutes != null && (reliefOffsetMinutes <= 0 || reliefOffsetMinutes >= duration)) {
+      notify.warning('O offset da rendição deve cair dentro da viagem.');
+      return;
+    }
+    if (
+      reliefPointId != null
+      && [editTrip.originTerminalId, editTrip.destinationTerminalId].includes(reliefPointId)
+    ) {
+      notify.warning('O ponto de rendição deve ser intermediário, não a origem ou o destino.');
       return;
     }
     setSavingTrip(true);
@@ -221,8 +260,10 @@ function TimetablesInner() {
       await tripsApi.update(editTrip.id, {
         startTimeMinutes: start,
         endTimeMinutes: end,
-        durationMinutes: end - start,
+        durationMinutes: duration,
         idleAfterMinutes: Number(tripForm.idleAfterMinutes),
+        midTripReliefPointId: reliefPointId,
+        midTripReliefOffsetMinutes: reliefOffsetMinutes,
       });
       notify.success('Viagem atualizada!');
       setEditTrip(null);
@@ -251,6 +292,10 @@ function TimetablesInner() {
 
   const outboundTrips = trips.filter((t) => t.direction === 'outbound').sort((a, b) => a.startTimeMinutes - b.startTimeMinutes);
   const returnTrips = trips.filter((t) => t.direction === 'return').sort((a, b) => a.startTimeMinutes - b.startTimeMinutes);
+  const reliefTerminalOptions = terminals.filter((terminal) => (
+    terminal.id !== editTrip?.originTerminalId
+    && terminal.id !== editTrip?.destinationTerminalId
+  ));
 
   return (
     <PageContainer title="Carta Horária — OTIMIZ" description="Geração e gerenciamento da carta horária">
@@ -486,7 +531,7 @@ function TimetablesInner() {
         </DialogActions>
       </Dialog>
 
-      <Dialog open={!!editTrip} onClose={() => !savingTrip && setEditTrip(null)} maxWidth="xs" fullWidth>
+      <Dialog open={!!editTrip} onClose={() => !savingTrip && setEditTrip(null)} maxWidth="sm" fullWidth>
         <DialogTitle sx={{ fontWeight: 700 }}>Editar Viagem</DialogTitle>
         <DialogContent dividers>
           <Stack spacing={2.5} sx={{ pt: 0.5 }}>
@@ -501,6 +546,33 @@ function TimetablesInner() {
             <TextField label="Tempo Ocioso (min)" type="number" fullWidth
               value={numVal(tripForm.idleAfterMinutes)}
               onChange={(e) => setTripForm((p) => ({ ...p, idleAfterMinutes: e.target.value }))} />
+            <FormControl fullWidth size="small">
+              <InputLabel>Ponto de Rendição Intra-viagem</InputLabel>
+              <Select
+                label="Ponto de Rendição Intra-viagem"
+                value={tripForm.midTripReliefPointId}
+                onChange={(e) => setTripForm((p) => ({ ...p, midTripReliefPointId: e.target.value as string }))}
+              >
+                <MenuItem value="">Sem rendição intra-viagem</MenuItem>
+                {reliefTerminalOptions.map((terminal) => (
+                  <MenuItem key={terminal.id} value={String(terminal.id)}>
+                    {terminal.id} — {terminal.name}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            <TextField
+              label="Offset da Rendição (min)"
+              type="number"
+              fullWidth
+              value={numVal(tripForm.midTripReliefOffsetMinutes)}
+              onChange={(e) => setTripForm((p) => ({ ...p, midTripReliefOffsetMinutes: e.target.value }))}
+              helperText={
+                tripForm.midTripReliefOffsetMinutes && tripForm.startTimeMinutes
+                  ? `Troca estimada em ${fmtMin(Number(tripForm.startTimeMinutes) + Number(tripForm.midTripReliefOffsetMinutes))}`
+                  : 'Minutos após o início da viagem em que a rendição pode ocorrer.'
+              }
+            />
           </Stack>
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2.5 }}>

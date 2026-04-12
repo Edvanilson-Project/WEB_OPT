@@ -5,10 +5,13 @@ Cobre GreedyVSP, MCNFVSP e _try_merge_vsp_blocks (joint_opt).
 Grupo 2 do PLANO_COPILOT_WEB_OPT.md — Regras Operacionais de Grafo.
 """
 import pytest
-from optimizer.src.domain.models import Trip, Block, VSPSolution
-from optimizer.src.algorithms.vsp.greedy import GreedyVSP
-from optimizer.src.algorithms.vsp.mcnf import MCNFVSP
-from optimizer.src.algorithms.joint_opt import _try_merge_vsp_blocks
+import sys, os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
+
+from src.domain.models import Trip, Block, VSPSolution
+from src.algorithms.vsp.greedy import GreedyVSP
+from src.algorithms.vsp.mcnf import MCNFVSP
+from src.algorithms.joint_opt import _try_merge_vsp_blocks
 
 
 # ─── Helpers ─────────────────────────────────────────────

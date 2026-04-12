@@ -186,7 +186,7 @@ function SettingsInner() {
           { label: 'Com depósito obrigatório', value: settings.filter((item) => item.sameDepotRequired).length, color: theme.palette.warning.main },
         ].map((item) => (
           <Grid item xs={6} md={3} key={item.label}>
-            <Card variant="outlined" sx={{ borderRadius: 3 }}>
+            <Card variant="outlined" sx={{ borderRadius: 2 }}>
               <CardContent>
                 <Typography variant="h5" fontWeight={800} sx={{ color: item.color }}>{item.value}</Typography>
                 <Typography variant="caption" color="text.secondary">{item.label}</Typography>
@@ -199,11 +199,11 @@ function SettingsInner() {
       {loading ? (
         <Box>
           {[...Array(3)].map((_, index) => (
-            <Skeleton key={index} variant="rectangular" height={220} sx={{ borderRadius: 3, mb: 2 }} />
+            <Skeleton key={index} variant="rectangular" height={220} sx={{ borderRadius: 2, mb: 2 }} />
           ))}
         </Box>
       ) : settings.length === 0 ? (
-        <Paper elevation={0} sx={{ border: '1px dashed', borderColor: 'divider', borderRadius: 3, p: 6, textAlign: 'center' }}>
+        <Paper elevation={0} sx={{ border: '1px dashed', borderColor: 'divider', borderRadius: 2, p: 6, textAlign: 'center' }}>
           <IconSettings size={48} color={theme.palette.grey[400]} />
           <Typography variant="h6" color="text.secondary" mt={2}>Nenhuma configuração cadastrada</Typography>
           <Typography variant="body2" color="text.secondary" mb={3}>

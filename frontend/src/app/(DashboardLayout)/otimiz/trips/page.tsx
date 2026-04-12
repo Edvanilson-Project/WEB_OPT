@@ -15,8 +15,8 @@ import PageContainer from '@/app/components/container/PageContainer';
 import DashboardCard from '@/app/components/shared/DashboardCard';
 import ConfirmDialog from '../_components/ConfirmDialog';
 import { NotifyProvider, useNotify } from '../_components/Notify';
-import { tripsApi, linesApi, getSessionUser } from '@/lib/api';
-import type { Trip, Line } from '../_types';
+import { tripsApi, linesApi, terminalsApi, getSessionUser } from '@/lib/api';
+import type { Trip, Line, Terminal } from '../_types';
 import { extractArray } from '../_types';
 
 const toHHMM = (minutes?: number | null): string => {
@@ -41,11 +41,14 @@ interface TripForm {
   tripGroupId: string;
   originTerminalId: string;
   destinationTerminalId: string;
+  midTripReliefPointId: string;
+  midTripReliefOffsetMinutes: string;
 }
 
 const EMPTY_FORM: TripForm = {
   lineId: '', direction: 'outbound', startTime: '', endTime: '',
   tripGroupId: '', originTerminalId: '', destinationTerminalId: '',
+  midTripReliefPointId: '', midTripReliefOffsetMinutes: '',
 };
 
 // Agrupa viagens por tripGroupId para exibição lado a lado
@@ -82,6 +85,7 @@ function TripsInner() {
   const notify = useNotify();
   const [trips, setTrips] = useState<Trip[]>([]);
   const [lines, setLines] = useState<Line[]>([]);
+  const [terminals, setTerminals] = useState<Terminal[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [filterLine, setFilterLine] = useState<string>('');
@@ -99,12 +103,14 @@ function TripsInner() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [tripsData, linesData] = await Promise.allSettled([
+      const [tripsData, linesData, terminalsData] = await Promise.allSettled([
         tripsApi.getAll(),
         linesApi.getAll(),
+        terminalsApi.getAll(),
       ]);
       if (tripsData.status === 'fulfilled') setTrips(extractArray(tripsData.value));
       if (linesData.status === 'fulfilled') setLines(extractArray(linesData.value));
+      if (terminalsData.status === 'fulfilled') setTerminals(extractArray(terminalsData.value));
     } catch {
       notify.error('Falha ao carregar dados.');
     } finally {
@@ -125,6 +131,11 @@ function TripsInner() {
 
   const pairs = groupTripPairs(filtered);
   const pagedPairs = pairs.slice(page * rowsPerPage, (page + 1) * rowsPerPage);
+  const selectedLine = lines.find((line) => line.id === Number(form.lineId));
+  const reliefTerminalOptions = terminals.filter((terminal) => (
+    terminal.id !== (form.originTerminalId ? Number(form.originTerminalId) : selectedLine?.originTerminalId)
+    && terminal.id !== (form.destinationTerminalId ? Number(form.destinationTerminalId) : selectedLine?.destinationTerminalId)
+  ));
 
   const lineLabel = (id: number) => lines.find((l) => l.id === id)?.name ?? `Linha ${id}`;
   const lineCode = (id: number) => lines.find((l) => l.id === id)?.code ?? String(id);
@@ -145,6 +156,8 @@ function TripsInner() {
       tripGroupId: t.tripGroupId != null ? String(t.tripGroupId) : '',
       originTerminalId: t.originTerminalId != null ? String(t.originTerminalId) : '',
       destinationTerminalId: t.destinationTerminalId != null ? String(t.destinationTerminalId) : '',
+      midTripReliefPointId: t.midTripReliefPointId != null ? String(t.midTripReliefPointId) : '',
+      midTripReliefOffsetMinutes: t.midTripReliefOffsetMinutes != null ? String(t.midTripReliefOffsetMinutes) : '',
     });
     setDialogOpen(true);
   };
@@ -156,8 +169,29 @@ function TripsInner() {
     }
     const start = fromHHMM(form.startTime);
     const end = fromHHMM(form.endTime);
+    const duration = end - start;
+    const reliefPointId = form.midTripReliefPointId ? Number(form.midTripReliefPointId) : null;
+    const reliefOffsetMinutes = form.midTripReliefOffsetMinutes ? Number(form.midTripReliefOffsetMinutes) : null;
+    const selectedLine = lines.find((line) => line.id === Number(form.lineId));
+    const originTerminalId = form.originTerminalId ? Number(form.originTerminalId) : selectedLine?.originTerminalId;
+    const destinationTerminalId = form.destinationTerminalId ? Number(form.destinationTerminalId) : selectedLine?.destinationTerminalId;
     if (end <= start) {
       notify.warning('Horário de chegada deve ser após o de saída.');
+      return;
+    }
+    if ((reliefPointId == null) !== (reliefOffsetMinutes == null)) {
+      notify.warning('Informe juntos o ponto e o offset da rendição intra-viagem.');
+      return;
+    }
+    if (reliefOffsetMinutes != null && (reliefOffsetMinutes <= 0 || reliefOffsetMinutes >= duration)) {
+      notify.warning('O offset da rendição deve cair dentro da viagem.');
+      return;
+    }
+    if (
+      reliefPointId != null
+      && [originTerminalId, destinationTerminalId].includes(reliefPointId)
+    ) {
+      notify.warning('O ponto de rendição deve ser intermediário, não a origem ou o destino.');
       return;
     }
     setSaving(true);
@@ -169,10 +203,12 @@ function TripsInner() {
         direction: form.direction,
         startTimeMinutes: start,
         endTimeMinutes: end,
-        durationMinutes: end - start,
+        durationMinutes: duration,
         tripGroupId: form.tripGroupId ? Number(form.tripGroupId) : undefined,
         originTerminalId: form.originTerminalId ? Number(form.originTerminalId) : undefined,
         destinationTerminalId: form.destinationTerminalId ? Number(form.destinationTerminalId) : undefined,
+        midTripReliefPointId: reliefPointId,
+        midTripReliefOffsetMinutes: reliefOffsetMinutes,
         isActive: true,
       };
       if (editTarget) {
@@ -547,6 +583,35 @@ function TripsInner() {
               value={form.tripGroupId}
               onChange={(e) => setForm((p) => ({ ...p, tripGroupId: e.target.value }))}
               helperText="Viagens com o mesmo grupo são exibidas lado a lado"
+            />
+
+            <FormControl fullWidth size="small">
+              <InputLabel>Ponto de Rendição Intra-viagem</InputLabel>
+              <Select
+                label="Ponto de Rendição Intra-viagem"
+                value={form.midTripReliefPointId}
+                onChange={(e) => setForm((p) => ({ ...p, midTripReliefPointId: e.target.value as string }))}
+              >
+                <MenuItem value="">Sem rendição intra-viagem</MenuItem>
+                {reliefTerminalOptions.map((terminal) => (
+                  <MenuItem key={terminal.id} value={String(terminal.id)}>
+                    {terminal.id} — {terminal.name}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+
+            <TextField
+              label="Offset da Rendição (min)"
+              type="number"
+              size="small"
+              value={form.midTripReliefOffsetMinutes}
+              onChange={(e) => setForm((p) => ({ ...p, midTripReliefOffsetMinutes: e.target.value }))}
+              helperText={
+                form.midTripReliefOffsetMinutes && form.startTime
+                  ? `Troca estimada em ${toHHMM(fromHHMM(form.startTime) + Number(form.midTripReliefOffsetMinutes))}`
+                  : 'Minutos após o início da viagem em que a rendição pode ocorrer.'
+              }
             />
           </Stack>
         </DialogContent>

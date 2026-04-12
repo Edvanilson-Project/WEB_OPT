@@ -12,7 +12,6 @@ import {
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
-  ApiOperation,
   ApiTags,
   ApiQuery,
 } from '@nestjs/swagger';

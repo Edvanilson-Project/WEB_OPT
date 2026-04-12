@@ -3,6 +3,26 @@
 set -uo pipefail
 
 status=0
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+resolve_backend_port() {
+  if [[ -n "${BACKEND_PORT:-}" ]]; then
+    printf '%s\n' "${BACKEND_PORT}"
+    return 0
+  fi
+
+  local env_file="$ROOT_DIR/backend/.env"
+  if [[ -f "$env_file" ]]; then
+    local env_port
+    env_port="$(awk -F= '/^PORT=/{print $2; exit}' "$env_file" | tr -d '[:space:]\r')"
+    if [[ -n "$env_port" ]]; then
+      printf '%s\n' "$env_port"
+      return 0
+    fi
+  fi
+
+  printf '3001\n'
+}
 
 get_pid_for_port() {
   local port="$1"
@@ -51,8 +71,10 @@ print_service_status() {
   printf '     cmd=%s\n' "$cmd"
 }
 
+BACKEND_PORT="$(resolve_backend_port)"
+
 print_service_status "frontend" "http://127.0.0.1:3000/otimiz/optimization" "3000"
-print_service_status "backend" "http://127.0.0.1:3001/api/docs" "3001"
+print_service_status "backend" "http://127.0.0.1:${BACKEND_PORT}/api/docs" "${BACKEND_PORT}"
 print_service_status "optimizer" "http://127.0.0.1:8000/health" "8000"
 
 exit "$status"

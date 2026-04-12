@@ -70,6 +70,7 @@ const NON_NUMERIC_FORM_FIELDS = new Set<keyof SettingsFormValues>([
   'enforceTripGroupsHard',
   'operatorChangeTerminalsOnly',
   'operatorSingleVehicleOnly',
+  'strictHardValidation',
 ]);
 
 const EFFECT_LABEL: Record<FieldEffect, string> = {
@@ -139,6 +140,12 @@ const FIELD_HELP: Record<string, HelpMeta> = {
     title: 'Operador em veículo único',
     short: 'O motorista trabalha o dia inteiro no mesmo veículo. Não é permitido trocar de ônibus durante a jornada.',
     technical: 'Ativa operator_single_vehicle_only no CSP. Impede que um duty contenha blocos de diferentes veículos (source_block_ids).',
+    effect: 'ativo',
+  },
+  strictHardValidation: {
+    title: 'Validação hard estrita',
+    short: 'Se houver violação hard na entrada ou na saída, a execução aborta em vez de apenas devolver auditoria.',
+    technical: 'Propaga strict_hard_validation para VSP e CSP. Quando false, a execução continua e o relatório de hard constraints permanece disponível em meta.hard_constraint_report.',
     effect: 'ativo',
   },
 
@@ -213,7 +220,7 @@ const FIELD_HELP: Record<string, HelpMeta> = {
   operationMode: {
     title: 'Modo de Operação',
     short: 'Define as restrições globais do sistema: Urbano (mais rígido com CCT) ou Fretamento (mais focado em produtividade e janelas longas).',
-    technical: 'operation_mode enviado ao solver. Altera pesos de penalidade e janelas de viabilidade para pullout/pullback e refeição.',
+    technical: 'operation_mode enviado ao solver. Altera pesos de penalidade e janelas de viabilidade para pullout/pullback e refeicao.',
     effect: 'ativo',
   },
   cctMinGuaranteedWorkMinutes: {
@@ -574,6 +581,7 @@ export const DEFAULT_SETTINGS_FORM: SettingsFormValues = {
   enforceTripGroupsHard: true,
   operatorChangeTerminalsOnly: true,
   operatorSingleVehicleOnly: false,
+  strictHardValidation: true,
   // Objetivos
   fairnessWeight: 0.15,
   holidayExtraPct: 100,
@@ -783,6 +791,7 @@ export function OptimizationSettingsHighlights({
   settings: Partial<OptimizationSettings> | SettingsFormValues;
   compact?: boolean;
 }) {
+  const strictHardValidation = settings.strictHardValidation ?? true;
   const chips = [
     { label: ALGORITHM_OPTIONS.find((item) => item.value === settings.algorithmType)?.label ?? 'Algoritmo', color: 'primary' as const },
     { label: (settings.applyCct ?? true) ? 'CCT ativo' : 'CCT flexivel', color: (settings.applyCct ?? true) ? 'success' as const : 'warning' as const },
@@ -790,6 +799,7 @@ export function OptimizationSettingsHighlights({
     { label: settings.pricingEnabled ? 'Pricing ligado' : 'Pricing desligado', color: settings.pricingEnabled ? 'secondary' as const : 'default' as const },
     { label: settings.preservePreferredPairs ? 'Ida/volta preservada' : 'Pairing flexivel', color: settings.preservePreferredPairs ? 'success' as const : 'default' as const },
     { label: settings.enforceTripGroupsHard ? 'Pares obrigatórios' : 'Pares flexíveis', color: settings.enforceTripGroupsHard ? 'success' as const : 'warning' as const },
+    { label: strictHardValidation ? 'Hard estrito' : 'Hard auditável', color: strictHardValidation ? 'success' as const : 'warning' as const },
     { label: `Jornada ${settings.cctMaxShiftMinutes ?? 480} min`, color: 'default' as const },
     { label: `Budget ${settings.timeBudgetSeconds ?? 300}s`, color: 'default' as const },
   ];
@@ -916,6 +926,9 @@ export function OptimizationSettingsEditor({
           </Grid>
           <Grid item xs={12} md={4}>
             <SwitchField fieldKey="operatorSingleVehicleOnly" checked={!!value.operatorSingleVehicleOnly} onChange={(checked) => onChange('operatorSingleVehicleOnly', checked)} label="Operador veículo único" />
+          </Grid>
+          <Grid item xs={12} md={4}>
+            <SwitchField fieldKey="strictHardValidation" checked={value.strictHardValidation ?? true} onChange={(checked) => onChange('strictHardValidation', checked)} label="Validação hard estrita" />
           </Grid>
           {showActivation ? (
             <Grid item xs={12} md={4}>

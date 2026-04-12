@@ -7,7 +7,10 @@ Grupo 1 do PLANO_COPILOT_WEB_OPT.md — Auditor de Schema.
 import pytest
 from pydantic import ValidationError
 
-from optimizer.src.api.schemas import (
+import sys, os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
+
+from src.api.schemas import (
     TripInput,
     OptimizeRequest,
     BlockOutput,
@@ -83,6 +86,19 @@ class TestTripInputSchema:
         assert trip.is_pull_back is False
         assert trip.distance_km == 0.0
         assert trip.is_relief_point is False
+
+    def test_mid_trip_relief_requires_point_and_offset_together(self):
+        with pytest.raises(ValidationError):
+            TripInput(**make_trip_dict(mid_trip_relief_point_id=99))
+
+    def test_mid_trip_relief_rejects_endpoint_as_relief_point(self):
+        with pytest.raises(ValidationError):
+            TripInput(
+                **make_trip_dict(
+                    mid_trip_relief_point_id=1,
+                    mid_trip_relief_offset_minutes=20,
+                )
+            )
 
 
 # ─── OptimizeRequest ──────────────────────────────────────

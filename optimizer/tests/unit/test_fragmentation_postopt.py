@@ -211,3 +211,21 @@ def test_joint_post_opt_accepts_tail_relocation_that_reduces_fragmentation():
     assert new_csp.meta["post_optimization"]["selected_phase"] == "tail_relocation"
     assert new_csp.meta["post_optimization"]["selected_candidate"]["tail_trip_ids"] == [7, 8]
     assert any([int(trip.id) for trip in block.trips] == [1, 2, 3, 4, 7, 8] for block in new_vsp.blocks)
+
+
+def test_joint_post_opt_records_meta_when_skipped_for_single_block():
+    block = _block(1, [_trip(1, 360, 60, origin=1, dest=2)])
+    vsp = VSPSolution(blocks=[copy.deepcopy(block)], algorithm="test")
+    csp = GreedyCSP().solve([copy.deepcopy(block)], block.trips)
+
+    new_csp, new_vsp = joint_duty_vehicle_swap(
+        csp,
+        vsp,
+        block.trips,
+        cct_params={},
+        kwargs={},
+    )
+
+    assert new_csp.meta["post_optimization"]["accepted"] is False
+    assert new_csp.meta["post_optimization"]["outcome"] == "skipped_single_block"
+    assert new_vsp.meta["post_optimization"]["outcome"] == "skipped_single_block"

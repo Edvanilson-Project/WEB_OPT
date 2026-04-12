@@ -102,6 +102,12 @@ async def optimize(body: OptimizeRequest) -> OptimizeResponse:
         ],
         duties=[DutyOutput(**d) for d in raw["duties"]],
         warnings=raw.get("warnings", []),
+        cost_breakdown=raw.get("cost_breakdown") or {},
+        solver_explanation=raw.get("solver_explanation") or {},
+        phase_summary=raw.get("phase_summary") or {},
+        trip_group_audit=raw.get("trip_group_audit") or {},
+        reproducibility=raw.get("reproducibility") or {},
+        performance=(raw.get("meta") or {}).get("performance") or {},
         meta={
             **(raw.get("meta") or {}),
             "run_id": body.run_id,

@@ -1,10 +1,7 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import {
-  VehicleRouteEntity,
-  VehicleRouteStatus,
-} from './entities/vehicle-route.entity';
+import { VehicleRouteEntity } from './entities/vehicle-route.entity';
 import { CreateVehicleRouteDto } from './dto/create-vehicle-route.dto';
 import { EntityNotFoundException } from '../../common/exceptions/not-found.exception';
 

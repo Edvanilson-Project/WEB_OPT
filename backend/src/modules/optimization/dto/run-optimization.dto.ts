@@ -1,6 +1,7 @@
 import {
   IsInt,
   IsOptional,
+  IsString,
   IsEnum,
   IsObject,
   IsBoolean,
@@ -9,10 +10,15 @@ import {
   Min,
   Max,
 } from 'class-validator';
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiPropertyOptional } from '@nestjs/swagger';
 import { OptimizationAlgorithm } from '../entities/optimization-run.entity';
 
 export class RunOptimizationDto {
+  @ApiPropertyOptional({ description: 'Nome amigável para a execução da otimização' })
+  @IsOptional()
+  @IsString()
+  name?: string;
+
   @ApiPropertyOptional({
     description: 'ID de uma única linha (use lineIds para múltiplas)',
   })

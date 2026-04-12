@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from ..domain.models import AlgorithmType
 
@@ -24,6 +24,8 @@ class TripInput(BaseModel):
     depot_id: Optional[int] = None
     relief_point_id: Optional[int] = None
     is_relief_point: bool = False
+    mid_trip_relief_point_id: Optional[int] = None
+    mid_trip_relief_offset_minutes: Optional[int] = None
     energy_kwh: float = 0.0
     elevation_gain_m: float = 0.0
     service_day: Optional[int] = None
@@ -39,6 +41,25 @@ class TripInput(BaseModel):
     idle_after_minutes: int = 0
     is_pull_out: bool = False
     is_pull_back: bool = False
+
+    @model_validator(mode="after")
+    def validate_mid_trip_relief(self) -> "TripInput":
+        has_point = self.mid_trip_relief_point_id is not None
+        has_offset = self.mid_trip_relief_offset_minutes is not None
+        if has_point != has_offset:
+            raise ValueError("mid_trip_relief_point_id e mid_trip_relief_offset_minutes devem ser informados juntos")
+        if not has_point:
+            return self
+
+        split_offset = int(self.mid_trip_relief_offset_minutes or 0)
+        trip_duration = int(self.duration or max(0, self.end_time - self.start_time))
+        if split_offset <= 0:
+            raise ValueError("mid_trip_relief_offset_minutes deve ser maior que zero")
+        if trip_duration > 0 and split_offset >= trip_duration:
+            raise ValueError("mid_trip_relief_offset_minutes deve cair dentro da viagem")
+        if int(self.mid_trip_relief_point_id or 0) in {int(self.origin_id), int(self.destination_id)}:
+            raise ValueError("mid_trip_relief_point_id deve representar um ponto intermediario, nao a origem/destino")
+        return self
 
 
 class OperatorProfileInput(BaseModel):
@@ -199,6 +220,7 @@ class DutyOutput(BaseModel):
     blocks: List[int]
     trip_ids: List[int] = Field(default_factory=list)
     trips: List[Any] = Field(default_factory=list)
+    segments: List[Dict[str, Any]] = Field(default_factory=list)
     start_time: Optional[int] = None
     end_time: Optional[int] = None
     work_time: int
@@ -235,6 +257,12 @@ class OptimizeResponse(BaseModel):
     blocks: List[BlockOutput]
     duties: List[DutyOutput]
     warnings: List[str] = Field(default_factory=list)
+    cost_breakdown: Dict[str, Any] = Field(default_factory=dict)
+    solver_explanation: Dict[str, Any] = Field(default_factory=dict)
+    phase_summary: Dict[str, Any] = Field(default_factory=dict)
+    trip_group_audit: Dict[str, Any] = Field(default_factory=dict)
+    reproducibility: Dict[str, Any] = Field(default_factory=dict)
+    performance: Dict[str, Any] = Field(default_factory=dict)
     meta: Dict[str, Any] = Field(default_factory=dict)
 
 

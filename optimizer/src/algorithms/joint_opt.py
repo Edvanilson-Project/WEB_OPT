@@ -323,7 +323,63 @@ def joint_duty_vehicle_swap(
     try:
         from .csp.greedy import GreedyCSP
 
+        def _post_opt_meta(
+            *,
+            accepted: bool,
+            baseline: Dict[str, Any],
+            selected_phase: Optional[str],
+            selected_candidate: Optional[Dict[str, Any]],
+            selected_metrics: Optional[Dict[str, Any]],
+            candidates_evaluated: int,
+            merged_blocks: int,
+            swaps: int,
+            fragmentation_enabled: bool,
+            candidate_limit: int,
+            max_tail_trips: int,
+            tail_stats: Dict[str, Any],
+            outcome: str,
+        ) -> Dict[str, Any]:
+            return {
+                "accepted": accepted,
+                "outcome": outcome,
+                "baseline": baseline,
+                "selected_phase": selected_phase,
+                "selected_candidate": selected_candidate,
+                "selected_metrics": selected_metrics,
+                "joint_swap": {
+                    "merged_blocks": merged_blocks,
+                    "swaps": swaps,
+                },
+                "tail_relocation": {
+                    "enabled": fragmentation_enabled,
+                    "candidate_limit": candidate_limit,
+                    "max_tail_trips": max_tail_trips,
+                    "considered": int(tail_stats.get("considered", 0)),
+                    "generated": int(tail_stats.get("generated", 0)),
+                    "reasons": dict(tail_stats.get("reasons", {})),
+                },
+                "candidates_evaluated": candidates_evaluated,
+            }
+
         if len(vsp_sol.blocks) < 2:
+            baseline_metrics = _build_post_opt_metrics(csp_sol, vsp_sol, 0)
+            post_opt_meta = _post_opt_meta(
+                accepted=False,
+                baseline=baseline_metrics,
+                selected_phase=None,
+                selected_candidate=None,
+                selected_metrics=None,
+                candidates_evaluated=0,
+                merged_blocks=0,
+                swaps=0,
+                fragmentation_enabled=bool(vsp_sol.meta.get("enable_fragmentation_postopt", True)) if vsp_sol.meta else True,
+                candidate_limit=int((vsp_sol.meta or {}).get("fragmentation_candidate_limit", 16) or 16),
+                max_tail_trips=int((vsp_sol.meta or {}).get("fragmentation_max_tail_trips", 4) or 4),
+                tail_stats={"considered": 0, "generated": 0, "reasons": {}},
+                outcome="skipped_single_block",
+            )
+            csp_sol.meta = {**(csp_sol.meta or {}), "post_optimization": post_opt_meta}
+            vsp_sol.meta = {**(vsp_sol.meta or {}), "post_optimization": post_opt_meta}
             return csp_sol, vsp_sol
 
         vsp_params = dict(kwargs.get("vsp_params", {})) if kwargs.get("vsp_params") else (dict(vsp_sol.meta) if vsp_sol.meta else {})
@@ -485,25 +541,21 @@ def joint_duty_vehicle_swap(
                 }
 
         if best_candidate is not None:
-            post_opt_meta = {
-                "baseline": baseline_metrics,
-                "selected_phase": best_candidate["phase"],
-                "selected_candidate": best_candidate["details"],
-                "selected_metrics": best_candidate["metrics"],
-                "joint_swap": {
-                    "merged_blocks": original_vehicles - len(merged_vsp.blocks),
-                    "swaps": total_swaps,
-                },
-                "tail_relocation": {
-                    "enabled": fragmentation_enabled,
-                    "candidate_limit": tail_candidate_limit,
-                    "max_tail_trips": max_tail_trips,
-                    "considered": int(tail_stats.get("considered", 0)),
-                    "generated": int(tail_stats.get("generated", 0)),
-                    "reasons": dict(tail_stats.get("reasons", {})),
-                },
-                "candidates_evaluated": len(evaluated_signatures) - 1,
-            }
+            post_opt_meta = _post_opt_meta(
+                accepted=True,
+                baseline=baseline_metrics,
+                selected_phase=best_candidate["phase"],
+                selected_candidate=best_candidate["details"],
+                selected_metrics=best_candidate["metrics"],
+                candidates_evaluated=len(evaluated_signatures) - 1,
+                merged_blocks=original_vehicles - len(merged_vsp.blocks),
+                swaps=total_swaps,
+                fragmentation_enabled=fragmentation_enabled,
+                candidate_limit=tail_candidate_limit,
+                max_tail_trips=max_tail_trips,
+                tail_stats=tail_stats,
+                outcome="accepted_improvement",
+            )
             best_csp.meta = {**(best_csp.meta or {}), "post_optimization": post_opt_meta}
             best_vsp.meta = {**(best_vsp.meta or {}), "post_optimization": post_opt_meta}
             logger.info(
@@ -519,6 +571,24 @@ def joint_duty_vehicle_swap(
                 best_metrics["fragmentation_score"],
             )
             return best_csp, best_vsp
+
+        post_opt_meta = _post_opt_meta(
+            accepted=False,
+            baseline=baseline_metrics,
+            selected_phase=None,
+            selected_candidate=None,
+            selected_metrics=None,
+            candidates_evaluated=len(evaluated_signatures) - 1,
+            merged_blocks=original_vehicles - len(merged_vsp.blocks),
+            swaps=total_swaps,
+            fragmentation_enabled=fragmentation_enabled,
+            candidate_limit=tail_candidate_limit,
+            max_tail_trips=max_tail_trips,
+            tail_stats=tail_stats,
+            outcome="no_better_candidate" if candidate_vsps else "no_candidate_generated",
+        )
+        csp_sol.meta = {**(csp_sol.meta or {}), "post_optimization": post_opt_meta}
+        vsp_sol.meta = {**(vsp_sol.meta or {}), "post_optimization": post_opt_meta}
 
         if candidate_vsps:
             logger.info(

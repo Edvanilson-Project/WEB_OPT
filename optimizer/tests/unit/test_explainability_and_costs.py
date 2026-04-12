@@ -195,6 +195,12 @@ def test_optimizer_result_exposes_solver_explanation_and_trip_group_audit():
     assert payload["trip_group_audit"]["same_roster_groups"] == 1
     assert payload["phase_summary"]["vsp"]["vehicles"] >= 1
     assert payload["phase_summary"]["csp"]["crew"] >= 1
+    assert result.meta["reproducibility"]["input_hash"]
+    assert result.meta["reproducibility"]["params_hash"]
+    assert result.meta["performance"]["phase_timings_ms"]["input_validation_ms"] >= 0
+    assert result.meta["performance"]["phase_timings_ms"]["solver_ms"] >= 0
+    assert result.meta["performance"]["phase_timings_ms"]["output_validation_ms"] >= 0
+    assert result.meta["performance"]["phase_timings_ms"]["audit_enrichment_ms"] >= 0
 
 
 def test_greedy_csp_prefers_existing_trip_group_duty_when_feasible():
@@ -233,7 +239,7 @@ def test_build_failure_payload_exposes_infeasibility_explanation():
         trips,
         AlgorithmType.HYBRID_PIPELINE,
         {"max_shift_minutes": 480},
-        {"random_seed": 7},
+        {"random_seed": 7, "time_budget_s": 9},
         stage="output_validation",
     )
 
@@ -241,6 +247,9 @@ def test_build_failure_payload_exposes_infeasibility_explanation():
     assert payload["infeasibility_explanation"]["reason"] == "spread_limit"
     assert payload["issue_count"] == 2
     assert payload["input_snapshot"]["trip_count"] == 2
+    assert payload["input_snapshot"]["input_hash"]
+    assert payload["input_snapshot"]["params_hash"]
+    assert payload["input_snapshot"]["time_budget_s"] == pytest.approx(9.0)
 
 
 def test_optimize_route_returns_structured_diagnostics_on_failure():
@@ -296,7 +305,12 @@ def test_same_random_seed_produces_same_hybrid_solution_signature():
     signature_a = [[trip.id for trip in block.trips] for block in result_a.vsp.blocks]
     signature_b = [[trip.id for trip in block.trips] for block in result_b.vsp.blocks]
     assert signature_a == signature_b
-    assert result_a.meta["reproducibility"]["deterministic_replay_possible"] is True
+    assert result_a.meta["reproducibility"]["deterministic_replay_possible"] is False
+    assert "budget por tempo" in result_a.meta["reproducibility"]["note"]
+    assert result_a.meta["reproducibility"]["input_hash"] == result_b.meta["reproducibility"]["input_hash"]
+    assert result_a.meta["reproducibility"]["params_hash"] == result_b.meta["reproducibility"]["params_hash"]
+    assert result_a.meta["reproducibility"]["time_budget_s"] == pytest.approx(4.0)
     assert result_a.meta["solver_version"]
     assert "phase_timings_ms" in result_a.meta.get("performance", {})
     assert result_a.meta["performance"]["phase_timings_ms"].get("vsp_mcnf_ms") is not None
+    assert result_a.meta["performance"]["phase_timings_ms"].get("solver_ms") is not None

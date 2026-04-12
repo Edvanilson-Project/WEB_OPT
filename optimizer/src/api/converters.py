@@ -20,6 +20,8 @@ def to_trip(t) -> Trip:
         depot_id=t.depot_id,
         relief_point_id=t.relief_point_id,
         is_relief_point=t.is_relief_point,
+        mid_trip_relief_point_id=getattr(t, "mid_trip_relief_point_id", None),
+        mid_trip_relief_offset_minutes=getattr(t, "mid_trip_relief_offset_minutes", None),
         energy_kwh=t.energy_kwh,
         elevation_gain_m=t.elevation_gain_m,
         service_day=t.service_day,

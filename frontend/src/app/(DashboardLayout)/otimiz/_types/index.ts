@@ -114,6 +114,7 @@ export type OptimizationAlgorithm =
   | 'joint_solver';
 
 export interface OptimizationRun {
+  name?: string;
   id: number;
   lineId?: number | null;
   lineIds?: number[] | null;
@@ -229,9 +230,26 @@ export interface OptimizationTripGroupAudit {
 export interface OptimizationReproducibility {
   algorithm?: string;
   random_seed?: number | null;
+  randomSeed?: number | null;
   stochastic_algorithm?: boolean;
+  stochasticAlgorithm?: boolean | null;
   deterministic_replay_possible?: boolean;
+  deterministicReplayPossible?: boolean | null;
+  input_hash?: string | null;
+  inputHash?: string | null;
+  params_hash?: string | null;
+  paramsHash?: string | null;
+  time_budget_s?: number | null;
+  timeBudgetS?: number | null;
   note?: string;
+}
+
+export interface OptimizationPerformance {
+  phase_timings_ms?: Record<string, number>;
+  total_elapsed_ms?: number;
+  trip_count?: number;
+  vehicle_type_count?: number;
+  [key: string]: unknown;
 }
 
 export interface OptimizationFailureDiagnostics {
@@ -262,7 +280,8 @@ export interface OptimizationRunAuditResult extends OptimizationResultSummary {
   solverVersion?: string | null;
   failureDiagnostics?: OptimizationFailureDiagnostics | null;
   optimizerDiagnostics?: Record<string, unknown> | null;
-  performance?: Record<string, unknown> | null;
+  performance?: OptimizationPerformance | null;
+  reproducibility?: OptimizationReproducibility | null;
   phaseSummary?: OptimizationPhaseSummary | null;
   tripGroupAudit?: OptimizationTripGroupAudit | null;
   hardConstraintReport?: Record<string, unknown> | null;
@@ -289,6 +308,37 @@ export interface OptimizationResultSummary {
   elapsed_ms?: number;
   costBreakdown?: OptimizationCostBreakdown | null;
   solverExplanation?: OptimizationSolverExplanation | null;
+  phaseSummary?: OptimizationPhaseSummary | null;
+  tripGroupAudit?: OptimizationTripGroupAudit | null;
+  reproducibility?: OptimizationReproducibility | null;
+  performance?: OptimizationPerformance | null;
+  hardConstraintReport?: Record<string, unknown> | null;
+}
+
+export interface OptimizationRunComparisonPerformance {
+  totalElapsedMs?: OptimizationComparisonMetric;
+  tripCount?: OptimizationComparisonMetric;
+  vehicleTypeCount?: OptimizationComparisonMetric;
+  phaseTimings?: Record<string, OptimizationComparisonMetric>;
+}
+
+export interface OptimizationRunComparisonReproducibilitySnapshot {
+  algorithm?: string | null;
+  randomSeed?: number | null;
+  stochasticAlgorithm?: boolean | null;
+  deterministicReplayPossible?: boolean | null;
+  inputHash?: string | null;
+  paramsHash?: string | null;
+  timeBudgetS?: number | null;
+  note?: string | null;
+}
+
+export interface OptimizationRunComparisonReproducibility {
+  base?: OptimizationRunComparisonReproducibilitySnapshot | null;
+  other?: OptimizationRunComparisonReproducibilitySnapshot | null;
+  sameInputHash?: boolean | null;
+  sameParamsHash?: boolean | null;
+  sameTimeBudget?: boolean | null;
 }
 
 export interface OptimizationBlock {
@@ -331,6 +381,7 @@ export interface OptimizationDuty {
   rest_violations?: number;
   cct_penalties_cost?: number;
   warnings?: string[];
+  meta?: Record<string, any>;
 }
 
 export interface OptimizationDutySegment {
@@ -343,6 +394,13 @@ export interface OptimizationDutySegment {
 export interface TripDetail {
   id: number;
   trip_id?: number;
+  block_id?: number;
+  duty_id?: number;
+  roster_id?: number;
+  operator_id?: number | null;
+  operator_name?: string | null;
+  segment_index?: number;
+  segment_count?: number;
   start_time: number;
   end_time: number;
   origin_id: number | string;
@@ -400,6 +458,8 @@ export interface OptimizationRunComparison {
     base?: Record<string, unknown> | null;
     other?: Record<string, unknown> | null;
   };
+  performance?: OptimizationRunComparisonPerformance;
+  reproducibility?: OptimizationRunComparisonReproducibility;
   constraints?: {
     base?: Record<string, number>;
     other?: Record<string, number>;
@@ -458,6 +518,8 @@ export interface Trip {
   tripCode?: string;
   passengerCount?: number;
   vehicleTypeId?: number;
+  midTripReliefPointId?: number | null;
+  midTripReliefOffsetMinutes?: number | null;
   idleBeforeMinutes?: number;
   idleAfterMinutes?: number;
   isPullOut?: boolean;
@@ -686,6 +748,7 @@ export interface OptimizationSettings {
   enforceTripGroupsHard?: boolean;
   operatorChangeTerminalsOnly?: boolean;
   operatorSingleVehicleOnly?: boolean;
+  strictHardValidation?: boolean;
   maxCandidateSuccessorsPerTask?: number;
   maxGeneratedColumns?: number;
   maxPricingIterations?: number;

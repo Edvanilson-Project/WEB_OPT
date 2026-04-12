@@ -15,6 +15,7 @@
 /data/strategy/*.tmp
 
 # Root temp and logs
+/artifacts/
 /*.log
 /*.tmp
 /*.pid

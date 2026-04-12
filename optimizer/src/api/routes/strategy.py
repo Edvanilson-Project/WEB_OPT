@@ -56,6 +56,8 @@ def _trip_from_dict(item: dict) -> Trip:
         depot_id=item.get("depot_id"),
         relief_point_id=item.get("relief_point_id"),
         is_relief_point=bool(item.get("is_relief_point", False)),
+        mid_trip_relief_point_id=item.get("mid_trip_relief_point_id"),
+        mid_trip_relief_offset_minutes=item.get("mid_trip_relief_offset_minutes"),
         energy_kwh=float(item.get("energy_kwh", 0.0)),
         elevation_gain_m=float(item.get("elevation_gain_m", 0.0)),
         service_day=item.get("service_day"),

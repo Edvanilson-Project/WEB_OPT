@@ -172,9 +172,7 @@ export class ScheduleGroupsService {
             const duration = profile
               ? Number(profile.trip_duration_minutes)
               : avgDuration;
-            const distance = profile
-              ? Number(profile.distance_km || schedule.distance_km || 0)
-              : Number(schedule.distance_km || 0);
+            // distance_km disponível em profile.distance_km ou schedule.distance_km (não usado aqui)
             const demand = profile ? Number(profile.passenger_demand || 0) : 0;
 
             const originId =
