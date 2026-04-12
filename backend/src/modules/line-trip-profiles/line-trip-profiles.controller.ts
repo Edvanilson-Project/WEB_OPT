@@ -19,10 +19,11 @@ import {
 import { LineTripProfilesService } from './line-trip-profiles.service';
 import { CreateLineTripProfileDto } from './dto/create-line-trip-profile.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../../common/guards/roles.guard';
 
 @ApiTags('line-trip-profiles')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('line-trip-profiles')
 export class LineTripProfilesController {
   constructor(private readonly service: LineTripProfilesService) {}

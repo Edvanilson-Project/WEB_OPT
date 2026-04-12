@@ -17,6 +17,7 @@ import { NotifyProvider, useNotify } from '../_components/Notify';
 import { terminalsApi, getSessionUser } from '@/lib/api';
 import type { Terminal } from '../_types';
 import { extractArray } from '../_types';
+import { useDebounce } from '@/utils/useDebounce';
 
 interface TerminalForm {
   name: string; shortName: string; address: string;
@@ -29,6 +30,7 @@ function TerminalsInner() {
   const [items, setItems] = useState<Terminal[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const debouncedSearch = useDebounce(search, 300);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<Terminal | null>(null);
   const [form, setForm] = useState<TerminalForm>(EMPTY);
@@ -47,7 +49,7 @@ function TerminalsInner() {
   useEffect(() => { load(); }, [load]);
 
   const filtered = items.filter(
-    (t) => t.name.toLowerCase().includes(search.toLowerCase()) || (t.shortName ?? '').toLowerCase().includes(search.toLowerCase()),
+    (t) => t.name.toLowerCase().includes(debouncedSearch.toLowerCase()) || (t.shortName ?? '').toLowerCase().includes(debouncedSearch.toLowerCase()),
   );
 
   const openCreate = () => { setEditTarget(null); setForm(EMPTY); setDialogOpen(true); };

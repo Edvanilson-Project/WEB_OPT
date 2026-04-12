@@ -1,4 +1,4 @@
-import { Entity, Column } from 'typeorm';
+import { Entity, Column, Unique } from 'typeorm';
 import { BaseCompanyEntity } from '../../../common/entities/base.entity';
 
 export enum LineStatus {
@@ -15,8 +15,9 @@ export enum LineOperationMode {
 }
 
 @Entity('lines')
+@Unique(['code', 'companyId'])
 export class LineEntity extends BaseCompanyEntity {
-  @Column({ unique: true, length: 20 })
+  @Column({ length: 20 })
   code: string;
 
   @Column({ length: 200 })

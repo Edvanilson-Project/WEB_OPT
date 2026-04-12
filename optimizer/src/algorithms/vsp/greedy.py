@@ -446,7 +446,7 @@ class GreedyVSP(BaseAlgorithm, IVSPAlgorithm):
                             pairing_state = "same_line"
 
                 marginal_cost = needed * deadhead_cost + slack * idle_cost + energy_need * energy_rate + pairing_delta
-                ranking_key = gap * 100 + pairing_delta * 0.01
+                ranking_key = marginal_cost
                 if best is None or ranking_key < best[0]:
                     best = (ranking_key, blk, (gap, needed, charged, soc_after_trip, energy_need, marginal_cost, pairing_delta, pairing_state))
                     
@@ -696,6 +696,9 @@ class GreedyVSP(BaseAlgorithm, IVSPAlgorithm):
                 )
                 target.meta["deadhead_minutes"] = int(target.meta.get("deadhead_minutes", 0)) + int(data["needed"])
                 target.meta["idle_minutes"] = int(target.meta.get("idle_minutes", 0)) + max(0, int(data["gap"] - data["needed"]))
+                target.meta["energy_kwh"] = float(target.meta.get("energy_kwh", 0.0)) + float(self._energy_need(trip, vehicle))
+                if vehicle and vehicle.is_electric and vehicle.battery_capacity_kwh > 0:
+                    target.meta["soc_kwh"] = float(target.meta.get("soc_kwh", vehicle.battery_capacity_kwh)) - float(self._energy_need(trip, vehicle))
                 target.meta["start_depot_id"] = target.trips[0].depot_id if target.trips[0].depot_id is not None else target.meta.get("start_depot_id")
                 target.meta["end_depot_id"] = target.trips[-1].depot_id if target.trips[-1].depot_id is not None else target.meta.get("end_depot_id")
 

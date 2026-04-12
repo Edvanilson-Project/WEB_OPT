@@ -9,6 +9,7 @@ import {
   UseGuards,
   ParseIntPipe,
   Query,
+  Request,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
@@ -19,10 +20,13 @@ import {
 import { SchedulesService } from './schedules.service';
 import { CreateScheduleDto } from './dto/create-schedule.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../../common/guards/roles.guard';
+import { resolveScopedCompanyId } from '../../common/utils/company-scope.util';
+import { AuthRequest } from '../../common/interfaces/auth.interface';
 
 @ApiTags('schedules')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('schedules')
 export class SchedulesController {
   constructor(private readonly service: SchedulesService) {}
@@ -38,11 +42,12 @@ export class SchedulesController {
   @ApiQuery({ name: 'companyId', required: false })
   @ApiQuery({ name: 'lineId', required: false })
   findAll(
+    @Request() req: AuthRequest,
     @Query('companyId') companyId?: string,
     @Query('lineId') lineId?: string,
   ) {
     return this.service.findAll(
-      companyId ? +companyId : undefined,
+      resolveScopedCompanyId(req.user?.companyId, companyId, req.user?.role),
       lineId ? +lineId : undefined,
     );
   }

@@ -20,7 +20,7 @@ describe('TripsController company scoping', () => {
   it('preenche companyId do create com o escopo do usuario quando omitido', () => {
     const dto: any = { lineId: 16 };
 
-    controller.create(dto, { user: { companyId: 3 } });
+    controller.create(dto, { user: { id: 1, email: 't@t.com', role: 'analyst', companyId: 3 } });
 
     expect(dto.companyId).toBe(3);
     expect(service.create).toHaveBeenCalledWith(dto);
@@ -29,7 +29,7 @@ describe('TripsController company scoping', () => {
   it('bloqueia create quando o DTO informa outra empresa', () => {
     expect(() =>
       controller.create({ lineId: 16, companyId: 999 } as any, {
-        user: { companyId: 3 },
+        user: { id: 1, email: 't@t.com', role: 'analyst', companyId: 3 },
       }),
     ).toThrow(ForbiddenException);
     expect(service.create).not.toHaveBeenCalled();
@@ -38,7 +38,7 @@ describe('TripsController company scoping', () => {
   it('normaliza createBulk para o escopo do usuario quando os DTOs nao informam companyId', () => {
     const dtos: any[] = [{ lineId: 16 }, { lineId: 16, companyId: undefined }];
 
-    controller.createBulk(dtos, { user: { companyId: 3 } });
+    controller.createBulk(dtos, { user: { id: 1, email: 't@t.com', role: 'analyst', companyId: 3 } });
 
     expect(dtos.every((dto) => dto.companyId === 3)).toBe(true);
     expect(service.createBulk).toHaveBeenCalledWith(dtos);
@@ -51,13 +51,13 @@ describe('TripsController company scoping', () => {
     ];
 
     expect(() =>
-      controller.createBulk(dtos, { user: { companyId: 3 } }),
+      controller.createBulk(dtos, { user: { id: 1, email: 't@t.com', role: 'analyst', companyId: 3 } }),
     ).toThrow(ForbiddenException);
     expect(service.createBulk).not.toHaveBeenCalled();
   });
 
   it('propaga escopo validado em list, detail, update e remove', () => {
-    const req = { user: { companyId: 3 } };
+    const req = { user: { id: 1, email: 't@t.com', role: 'analyst', companyId: 3 } };
     const dto: any = { durationMinutes: 55 };
 
     controller.findAll(req, '3', '16');

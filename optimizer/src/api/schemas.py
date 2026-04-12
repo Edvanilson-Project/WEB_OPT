@@ -26,6 +26,8 @@ class TripInput(BaseModel):
     is_relief_point: bool = False
     mid_trip_relief_point_id: Optional[int] = None
     mid_trip_relief_offset_minutes: Optional[int] = None
+    mid_trip_relief_distance_ratio: Optional[float] = None
+    mid_trip_relief_elevation_ratio: Optional[float] = None
     energy_kwh: float = 0.0
     elevation_gain_m: float = 0.0
     service_day: Optional[int] = None
@@ -59,6 +61,10 @@ class TripInput(BaseModel):
             raise ValueError("mid_trip_relief_offset_minutes deve cair dentro da viagem")
         if int(self.mid_trip_relief_point_id or 0) in {int(self.origin_id), int(self.destination_id)}:
             raise ValueError("mid_trip_relief_point_id deve representar um ponto intermediario, nao a origem/destino")
+        if self.mid_trip_relief_distance_ratio is not None and not (0.0 < float(self.mid_trip_relief_distance_ratio) < 1.0):
+            raise ValueError("mid_trip_relief_distance_ratio deve estar entre 0 e 1")
+        if self.mid_trip_relief_elevation_ratio is not None and not (0.0 < float(self.mid_trip_relief_elevation_ratio) < 1.0):
+            raise ValueError("mid_trip_relief_elevation_ratio deve estar entre 0 e 1")
         return self
 
 

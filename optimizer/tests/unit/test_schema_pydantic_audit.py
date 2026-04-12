@@ -100,6 +100,16 @@ class TestTripInputSchema:
                 )
             )
 
+    def test_mid_trip_relief_distance_ratio_must_be_inside_open_interval(self):
+        with pytest.raises(ValidationError):
+            TripInput(
+                **make_trip_dict(
+                    mid_trip_relief_point_id=9,
+                    mid_trip_relief_offset_minutes=20,
+                    mid_trip_relief_distance_ratio=1.0,
+                )
+            )
+
 
 # ─── OptimizeRequest ──────────────────────────────────────
 

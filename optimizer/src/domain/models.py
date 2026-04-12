@@ -43,6 +43,8 @@ class Trip:
     is_relief_point: bool = False
     mid_trip_relief_point_id: Optional[int] = None
     mid_trip_relief_offset_minutes: Optional[int] = None
+    mid_trip_relief_distance_ratio: Optional[float] = None
+    mid_trip_relief_elevation_ratio: Optional[float] = None
     original_trip_id: Optional[int] = None
     segment_index: int = 0
     segment_count: int = 1
@@ -130,8 +132,7 @@ class VehicleType:
 
     def trip_cost(self, trip: Trip) -> float:
         return (
-            self.fixed_cost
-            + self.cost_per_km * trip.distance_km
+            self.cost_per_km * trip.distance_km
             + self.cost_per_hour * (trip.duration / 60)
         )
 

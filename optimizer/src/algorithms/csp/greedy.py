@@ -162,6 +162,17 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
             return 0
         return max(0, int(work_minutes) - self.max_work)
 
+    def _long_unpaid_break_penalty(self, unpaid_break_minutes: float) -> float:
+        excess = max(0.0, float(unpaid_break_minutes) - float(self.long_unpaid_break_limit))
+        if excess <= 0.0:
+            return 0.0
+        tier1 = min(excess, 30.0)
+        tier2 = min(max(0.0, excess - 30.0), 60.0)
+        tier3 = max(0.0, excess - 90.0)
+        return self.long_unpaid_break_penalty_weight * (
+            tier1 * 1.0 + tier2 * 3.0 + tier3 * 10.0
+        )
+
     def _transfer_needed(self, a: Block, b: Block) -> int:
         last = a.trips[-1]
         first = b.trips[0]
@@ -209,21 +220,42 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
 
         split_offset = int(relief_offset)
         split_time = int(trip.start_time) + split_offset
-        split_ratio = split_offset / trip_duration
+        time_ratio = split_offset / trip_duration
+
+        # Fallback legacy approximation uses time ratio only. When the caller
+        # provides physical split ratios, we prefer them for EV-sensitive cost
+        # allocation.
+        raw_distance_ratio = getattr(trip, "mid_trip_relief_distance_ratio", None)
+        raw_elevation_ratio = getattr(trip, "mid_trip_relief_elevation_ratio", None)
+        distance_ratio = float(raw_distance_ratio) if raw_distance_ratio is not None else time_ratio
+        elevation_ratio = float(raw_elevation_ratio) if raw_elevation_ratio is not None else distance_ratio
+
+        distance_ratio = min(1.0, max(0.0, distance_ratio))
+        elevation_ratio = min(1.0, max(0.0, elevation_ratio))
+
+        total_distance = float(trip.distance_km)
+        total_elevation = float(trip.elevation_gain_m)
+        total_energy = float(trip.energy_kwh)
+
+        first_distance = total_distance * distance_ratio
+        first_elevation = total_elevation * elevation_ratio
+        energy_ratio = distance_ratio if total_elevation <= 0.0 else ((0.7 * distance_ratio) + (0.3 * elevation_ratio))
 
         first_segment = copy.deepcopy(trip)
         first_segment.end_time = split_time
         first_segment.duration = split_offset
         first_segment.destination_id = int(relief_point_id)
-        first_segment.distance_km = float(trip.distance_km) * split_ratio
-        first_segment.energy_kwh = float(trip.energy_kwh) * split_ratio
-        first_segment.elevation_gain_m = float(trip.elevation_gain_m) * split_ratio
+        first_segment.distance_km = first_distance
+        first_segment.energy_kwh = total_energy * energy_ratio
+        first_segment.elevation_gain_m = first_elevation
         first_segment.destination_latitude = None
         first_segment.destination_longitude = None
         first_segment.relief_point_id = None
         first_segment.is_relief_point = False
         first_segment.mid_trip_relief_point_id = None
         first_segment.mid_trip_relief_offset_minutes = None
+        first_segment.mid_trip_relief_distance_ratio = None
+        first_segment.mid_trip_relief_elevation_ratio = None
         first_segment.original_trip_id = int(trip.id)
         first_segment.segment_index = 0
         first_segment.segment_count = 2
@@ -246,6 +278,8 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
         second_segment.is_relief_point = False
         second_segment.mid_trip_relief_point_id = None
         second_segment.mid_trip_relief_offset_minutes = None
+        second_segment.mid_trip_relief_distance_ratio = None
+        second_segment.mid_trip_relief_elevation_ratio = None
         second_segment.original_trip_id = int(trip.id)
         second_segment.segment_index = 1
         second_segment.segment_count = 2
@@ -607,7 +641,7 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
         new_work = duty.work_time + block_drive
         overtime_minutes = self._regular_overtime_minutes(new_work)
         if overtime_minutes > self.overtime_limit:
-            return False, "overtime_hard", {"new_spread": new_spread, "overtime_minutes": overtime_minutes}
+            return False, "overtime_hard", {"new_spread": new_spread, "new_work": new_work, "overtime_minutes": overtime_minutes}
 
         start_depot = duty.meta.get("start_depot_id")
         candidate_end_depot = block.trips[-1].depot_id
@@ -969,7 +1003,7 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
                 _nocturnal_overlap(t.start_time, t.end_time, self.nocturnal_start_hour, self.nocturnal_end_hour)
                 for block in duty.tasks for t in block.trips
             )
-            duty.overtime_minutes = self._regular_overtime_minutes(duty.spread_time)
+            duty.overtime_minutes = self._regular_overtime_minutes(duty.work_time)
             waiting_minutes = int(duty.meta.get("waiting_minutes", max(0, duty.spread_time - duty.work_time)))
             unpaid_total = max(0, duty.spread_time - duty.work_time)
             paid_waiting = int(round(waiting_minutes * self.waiting_time_pay_pct)) if self.idle_time_is_paid else 0
@@ -1191,8 +1225,7 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
                 projected_work = int(data.get("new_work", duty.work_time + self._block_drive(task)))
                 fairness_penalty = self._fairness_penalty(projected_work)
                 gap = float(data.get("gap", 0))
-                long_gap_minutes = max(0.0, gap - float(self.long_unpaid_break_limit))
-                long_gap_penalty = long_gap_minutes * self.long_unpaid_break_penalty_weight
+                long_gap_penalty = self._long_unpaid_break_penalty(gap)
                 meal_penalty = 0.0
                 if self.meal_break_minutes > 0:
                     new_spread = float(data.get("new_spread", 0))
@@ -1287,7 +1320,7 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
                 if combined_spread > self.max_shift:
                     i += 1
                     continue
-                if self._regular_overtime_minutes(combined_spread) > self.overtime_limit:
+                if self._regular_overtime_minutes(combined_work) > self.overtime_limit:
                     i += 1
                     continue
 
@@ -1380,7 +1413,7 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
                 if combined_spread > self.max_shift:
                     reject_reasons["spread"] = reject_reasons.get("spread", 0) + 1
                     continue
-                if self._regular_overtime_minutes(combined_spread) > self.overtime_limit:
+                if self._regular_overtime_minutes(combined_work) > self.overtime_limit:
                     reject_reasons["overtime"] = reject_reasons.get("overtime", 0) + 1
                     continue
 
@@ -1428,15 +1461,23 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
                     # Prepend: rebuild from sd + nd tasks
                     tasks_to_add = sorted(best_target.tasks, key=lambda t: t.start_time)
                     # Reset sd to receive nd tasks
+                    all_applied = True
                     for task in tasks_to_add:
                         ok, _, data = self._can_extend(sd, task)
                         if ok:
                             self._apply_block(sd, task, data)
-                    # Replace best_target contents with merged sd
-                    best_target.tasks = sd.tasks
-                    best_target.work_time = sd.work_time
-                    best_target.spread_time = sd.spread_time
-                    best_target.meta = sd.meta
+                        else:
+                            all_applied = False
+                            break
+                    if all_applied:
+                        # Replace best_target contents with merged sd
+                        best_target.tasks = sd.tasks
+                        best_target.work_time = sd.work_time
+                        best_target.spread_time = sd.spread_time
+                        best_target.meta = sd.meta
+                    else:
+                        # Merge failed at apply time — skip this merge
+                        continue
                 merged_ids.add(sd.id)
                 _log.info(
                     "[CSP-CROSS-MERGE] Merged short duty %d (%dmin) into duty %d via %s (now %dmin work)",

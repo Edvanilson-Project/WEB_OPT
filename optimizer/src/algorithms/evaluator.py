@@ -1,6 +1,11 @@
 """
 Avaliador de custo de soluções VSP e CSP.
 Função objetivo: custo_frota + custo_tripulação + penalidade_violações
+
+NOTA DE PRECISÃO: Todos os acumuladores internos operam em float cru (full
+precision).  ``round(x, 2)`` é aplicado **apenas** nas chaves que serão
+exibidas na UI / retornadas pela API (variável ``_R``).  Isso evita drift de
+arredondamento acumulado em operações com 1 000+ deveres/blocos.
 """
 from __future__ import annotations
 
@@ -26,6 +31,11 @@ _LONG_UNPAID_BREAK_PENALTY_WEIGHT = 0.05
 _DEFAULT_OVERTIME_EXTRA_PCT = 0.5
 
 
+def _R(v: float) -> float:
+    """Arredonda para exibição (2 casas).  Usado apenas na saída, nunca em acumuladores."""
+    return round(v, 2)
+
+
 class CostEvaluator(ICostEvaluator):
     """Calcula o custo total de uma solução, separando frota e tripulação."""
 
@@ -44,6 +54,27 @@ class CostEvaluator(ICostEvaluator):
         self.long_unpaid_break_penalty_weight = max(0.0, float(long_unpaid_break_penalty_weight))
         self.idle_cost_per_minute = idle_cost_per_minute
         self.overtime_extra_pct = max(0.0, float(overtime_extra_pct))
+
+    def _long_unpaid_break_penalty(self, unpaid_break_minutes: int) -> float:
+        """Piecewise-linear penalty.
+
+        Faixas após o limite base:
+        - primeiros 30 min de excesso: 1x peso
+        - próximos 60 min: 3x peso
+        - acima disso: 10x peso
+        """
+        excess = max(0, int(unpaid_break_minutes) - self.long_unpaid_break_limit_minutes)
+        if excess <= 0:
+            return 0.0
+
+        tier1 = min(excess, 30)
+        tier2 = min(max(0, excess - 30), 60)
+        tier3 = max(0, excess - 90)
+        return self.long_unpaid_break_penalty_weight * (
+            tier1 * 1.0
+            + tier2 * 3.0
+            + tier3 * 10.0
+        )
 
     # ── Frota ─────────────────────────────────────────────────────────────────
 
@@ -102,30 +133,30 @@ class CostEvaluator(ICostEvaluator):
                     "block_id": block.id,
                     "vehicle_type_id": block.vehicle_type_id,
                     "num_trips": len(block.trips),
-                    "activation": round(block_activation, 2),
-                    "connection": round(block_connection, 2),
-                    "distance": round(block_distance, 2),
-                    "time": round(block_time, 2),
-                    "idle_cost": round(block_idle_cost, 2),
-                    "total": round(block_activation + block_connection + block_distance + block_time + block_idle_cost, 2),
+                    "activation": _R(block_activation),
+                    "connection": _R(block_connection),
+                    "distance": _R(block_distance),
+                    "time": _R(block_time),
+                    "idle_cost": _R(block_idle_cost),
+                    "total": _R(block_activation + block_connection + block_distance + block_time + block_idle_cost),
                     "start_buffer_minutes": start_buffer,
                     "end_buffer_minutes": end_buffer,
-                    "advisory_idle_proxy_cost": round(block_idle_cost, 2),
+                    "advisory_idle_proxy_cost": _R(block_idle_cost),
                 }
             )
 
         total = activation + connection + distance + time + idle_cost
         return {
-            "total": round(total, 2),
-            "activation": round(activation, 2),
-            "connection": round(connection, 2),
-            "distance": round(distance, 2),
-            "time": round(time, 2),
-            "idle_cost": round(idle_cost, 2),
+            "total": _R(total),
+            "activation": _R(activation),
+            "connection": _R(connection),
+            "distance": _R(distance),
+            "time": _R(time),
+            "idle_cost": _R(idle_cost),
             "num_blocks": len(solution.blocks),
             "num_unassigned_trips": len(solution.unassigned_trips),
-            "advisory_idle_proxy_cost": round(idle_cost, 2),
-            "advisory_infeasibility_penalty": round(self.infeasibility_penalty(solution), 2),
+            "advisory_idle_proxy_cost": _R(idle_cost),
+            "advisory_infeasibility_penalty": _R(self.infeasibility_penalty(solution)),
             "blocks": blocks,
         }
 
@@ -169,9 +200,7 @@ class CostEvaluator(ICostEvaluator):
                 0,
                 int(duty.meta.get("unpaid_break_total_minutes", max(0, duty.spread_time - duty.work_time)) or 0),
             )
-            duty_long_break_penalty = (
-                max(0, unpaid_break_minutes - self.long_unpaid_break_limit_minutes) ** 2
-            ) * self.long_unpaid_break_penalty_weight
+            duty_long_break_penalty = self._long_unpaid_break_penalty(unpaid_break_minutes)
             duty_nocturnal_extra = 0.0
             if duty.nocturnal_minutes > 0:
                 duty_nocturnal_extra = (
@@ -199,15 +228,15 @@ class CostEvaluator(ICostEvaluator):
             duties.append(
                 {
                     "duty_id": duty.id,
-                    "work_cost": round(duty_work_cost, 2),
-                    "guaranteed_cost": round(duty_guaranteed_cost, 2),
-                    "waiting_cost": round(duty_waiting_cost, 2),
-                    "overtime_cost": round(duty_overtime_cost, 2),
-                    "long_unpaid_break_penalty": round(duty_long_break_penalty, 2),
-                    "nocturnal_extra": round(duty_nocturnal_extra, 2),
-                    "holiday_extra": round(duty_holiday_extra, 2),
-                    "cct_penalties": round(duty_cct_penalties, 2),
-                    "total": round(
+                    "work_cost": _R(duty_work_cost),
+                    "guaranteed_cost": _R(duty_guaranteed_cost),
+                    "waiting_cost": _R(duty_waiting_cost),
+                    "overtime_cost": _R(duty_overtime_cost),
+                    "long_unpaid_break_penalty": _R(duty_long_break_penalty),
+                    "nocturnal_extra": _R(duty_nocturnal_extra),
+                    "holiday_extra": _R(duty_holiday_extra),
+                    "cct_penalties": _R(duty_cct_penalties),
+                    "total": _R(
                         duty_work_cost
                         + duty_guaranteed_cost
                         + duty_waiting_cost
@@ -216,7 +245,6 @@ class CostEvaluator(ICostEvaluator):
                         + duty_nocturnal_extra
                         + duty_holiday_extra
                         + duty_cct_penalties,
-                        2,
                     ),
                 }
             )
@@ -232,15 +260,15 @@ class CostEvaluator(ICostEvaluator):
             + cct_penalties
         )
         return {
-            "total": round(total, 2),
-            "work_cost": round(work_cost, 2),
-            "guaranteed_cost": round(guaranteed_cost, 2),
-            "waiting_cost": round(waiting_cost, 2),
-            "overtime_cost": round(overtime_cost, 2),
-            "long_unpaid_break_penalty": round(long_unpaid_break_penalty, 2),
-            "nocturnal_extra": round(nocturnal_extra, 2),
-            "holiday_extra": round(holiday_extra, 2),
-            "cct_penalties": round(cct_penalties, 2),
+            "total": _R(total),
+            "work_cost": _R(work_cost),
+            "guaranteed_cost": _R(guaranteed_cost),
+            "waiting_cost": _R(waiting_cost),
+            "overtime_cost": _R(overtime_cost),
+            "long_unpaid_break_penalty": _R(long_unpaid_break_penalty),
+            "nocturnal_extra": _R(nocturnal_extra),
+            "holiday_extra": _R(holiday_extra),
+            "cct_penalties": _R(cct_penalties),
             "num_duties": len(solution.duties),
             "num_uncovered_blocks": len(solution.uncovered_blocks),
             "duties": duties,
@@ -271,7 +299,7 @@ class CostEvaluator(ICostEvaluator):
         csp = self.csp_cost_breakdown(result.csp)
         total = float(vsp["total"]) + float(csp["total"])
         return {
-            "total": round(total, 2),
+            "total": _R(total),
             "vsp": vsp,
             "csp": csp,
             "shares": {

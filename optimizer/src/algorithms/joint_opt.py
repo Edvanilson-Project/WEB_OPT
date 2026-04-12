@@ -10,16 +10,17 @@ evaluator = CostEvaluator()
 def _try_merge_vsp_blocks(vsp_sol: VSPSolution, vsp_params: Dict[str, Any]) -> VSPSolution:
     """
     Tenta fundir blocos VSP adjacentes para reduzir veículos.
-    Percorre pares de blocos e, se o último trip de b1 pode conectar ao primeiro de b2
-    (gap >= deadhead, duração total <= max_vehicle_shift), funde b2 em b1.
-    Faz múltiplos passes até não haver mais merges.
+    Percorre APENAS pares adjacentes (por start_time) — O(B²) no pior caso
+    vs O(B³) antigo que escaneava todos os j > i.
     """
     min_layover = int(vsp_params.get("min_layover_minutes", 8))
     max_vehicle_shift = int(vsp_params.get("max_vehicle_shift_minutes", 960))
     allow_multi_line = bool(vsp_params.get("allow_multi_line_block", True))
     connection_tolerance = int(vsp_params.get("connection_tolerance_minutes", 0))
 
-    blocks = copy.deepcopy(vsp_sol.blocks)
+    # Shallow copy: new Block objects with new trips lists, independent meta dicts
+    blocks = [Block(id=b.id, trips=list(b.trips), vehicle_type_id=b.vehicle_type_id,
+                    warnings=b.warnings, meta=dict(b.meta)) for b in vsp_sol.blocks]
     changed = True
     total_merges = 0
 
@@ -28,53 +29,48 @@ def _try_merge_vsp_blocks(vsp_sol: VSPSolution, vsp_params: Dict[str, Any]) -> V
         blocks.sort(key=lambda b: b.start_time)
 
         i = 0
-        while i < len(blocks):
-            best_j = None
-            best_gap = float("inf")
-
-            for j in range(i + 1, len(blocks)):
-                b1 = blocks[i]
-                b2 = blocks[j]
-                if not b1.trips or not b2.trips:
-                    continue
-
-                last_t = b1.trips[-1]
-                first_t = b2.trips[0]
-                gap = first_t.start_time - last_t.end_time
-                if gap < 0:
-                    continue
-
-                # Verificar deadhead — respeita connection_tolerance_minutes para flexibilidade operacional
-                deadhead = int(last_t.deadhead_times.get(first_t.origin_id, 0))
-                needed = max(min_layover, deadhead)
-                if gap + connection_tolerance < needed:
-                    continue
-
-                # Verificar duração total do bloco consolidado
-                total_duration = b2.trips[-1].end_time - b1.trips[0].start_time
-                if total_duration > max_vehicle_shift:
-                    continue
-
-                # Verificar multi-linha
-                if not allow_multi_line:
-                    lines_b1 = {t.line_id for t in b1.trips}
-                    lines_b2 = {t.line_id for t in b2.trips}
-                    if lines_b1 != lines_b2:
-                        continue
-
-                if gap < best_gap:
-                    best_gap = gap
-                    best_j = j
-
-            if best_j is not None:
-                blocks[i].trips.extend(blocks[best_j].trips)
-                blocks[i].trips.sort(key=lambda t: t.start_time)
-                blocks.pop(best_j)
-                changed = True
-                total_merges += 1
-                # Não incrementa i — tenta fundir mais blocos neste
-            else:
+        while i < len(blocks) - 1:
+            b1 = blocks[i]
+            b2 = blocks[i + 1]
+            if not b1.trips or not b2.trips:
                 i += 1
+                continue
+
+            last_t = b1.trips[-1]
+            first_t = b2.trips[0]
+            gap = first_t.start_time - last_t.end_time
+            if gap < 0:
+                i += 1
+                continue
+
+            # Verificar deadhead — respeita connection_tolerance_minutes
+            deadhead = int(last_t.deadhead_times.get(first_t.origin_id, 0))
+            needed = max(min_layover, deadhead)
+            if gap + connection_tolerance < needed:
+                i += 1
+                continue
+
+            # Verificar duração total do bloco consolidado
+            total_duration = b2.trips[-1].end_time - b1.trips[0].start_time
+            if total_duration > max_vehicle_shift:
+                i += 1
+                continue
+
+            # Verificar multi-linha
+            if not allow_multi_line:
+                lines_b1 = {t.line_id for t in b1.trips}
+                lines_b2 = {t.line_id for t in b2.trips}
+                if lines_b1 != lines_b2:
+                    i += 1
+                    continue
+
+            # Merge b2 into b1
+            b1.trips.extend(b2.trips)
+            b1.trips.sort(key=lambda t: t.start_time)
+            blocks.pop(i + 1)
+            changed = True
+            total_merges += 1
+            # Não incrementa i — tenta fundir mais blocos neste
 
     # Filtrar blocos vazios independente de merge
     blocks = [b for b in blocks if b.trips]
@@ -96,6 +92,67 @@ def _renumber_blocks(blocks: List[Block]) -> List[Block]:
     for idx, block in enumerate(ordered, start=1):
         block.id = idx
     return ordered
+
+
+def _csp_feedback_candidates(
+    csp_sol: CSPSolution,
+    vsp_sol: VSPSolution,
+    vsp_params: Dict[str, Any],
+) -> List[VSPSolution]:
+    """Generate VSP refinements guided by CSP evaluation results (O-C5 feedback).
+
+    Identifies blocks involved in CSP violations/overtime and creates VSP
+    candidates that split those blocks, giving CSP shorter blocks to work with.
+    """
+    # Identify blocks contributing to duties with violations or overtime
+    problem_block_ids: set = set()
+    for duty in (csp_sol.duties or []):
+        has_issue = (
+            duty.rest_violations > 0
+            or duty.shift_violations > 0
+            or duty.overtime_minutes > 0
+            or duty.continuous_driving_violation
+        )
+        if has_issue:
+            for seg in duty.segments:
+                problem_block_ids.add(seg.block_id)
+
+    if not problem_block_ids:
+        return []
+
+    candidates: List[VSPSolution] = []
+    max_id = max((b.id for b in vsp_sol.blocks), default=0)
+
+    for target_id in problem_block_ids:
+        new_blocks: List[Block] = []
+        split_done = False
+        next_id = max_id + 1
+        for b in vsp_sol.blocks:
+            if b.id == target_id and len(b.trips) >= 4:
+                # Split at midpoint — creates two smaller blocks for CSP
+                mid = len(b.trips) // 2
+                b1 = Block(id=b.id, trips=list(b.trips[:mid]),
+                           vehicle_type_id=b.vehicle_type_id,
+                           warnings=b.warnings, meta=dict(b.meta))
+                b2 = Block(id=next_id, trips=list(b.trips[mid:]),
+                           vehicle_type_id=b.vehicle_type_id,
+                           warnings=b.warnings, meta=dict(b.meta))
+                new_blocks.extend([b1, b2])
+                next_id += 1
+                split_done = True
+            else:
+                new_blocks.append(b)
+
+        if split_done:
+            refined_blocks = _renumber_blocks(new_blocks)
+            refined_vsp = VSPSolution(
+                blocks=refined_blocks,
+                algorithm=vsp_sol.algorithm,
+                meta=dict(vsp_sol.meta or {}),
+            )
+            candidates.append(refined_vsp)
+
+    return candidates
 
 
 def _vsp_signature(vsp_sol: VSPSolution) -> Tuple[Tuple[int, ...], ...]:
@@ -539,6 +596,26 @@ def joint_duty_vehicle_swap(
                     "details": dict(candidate.get("details") or {}),
                     "metrics": candidate_metrics,
                 }
+
+        # ── CSP Feedback Round (O-C5): use CSP results to refine VSP ─────
+        if best_metrics["violations"] > 0:
+            feedback_vsps = _csp_feedback_candidates(best_csp, best_vsp, vsp_params)
+            for fb_vsp in feedback_vsps:
+                fb_sig = _vsp_signature(fb_vsp)
+                if fb_sig in evaluated_signatures:
+                    continue
+                evaluated_signatures.add(fb_sig)
+                fb_csp = GreedyCSP(vsp_params=vsp_params, **solver_kwargs).solve(fb_vsp.blocks, trips)
+                fb_metrics = _build_post_opt_metrics(fb_csp, fb_vsp, min_work)
+                if _is_better_post_opt_candidate(best_metrics, fb_metrics):
+                    best_csp = fb_csp
+                    best_vsp = fb_vsp
+                    best_metrics = fb_metrics
+                    best_candidate = {
+                        "phase": "csp_feedback",
+                        "details": {"split_violation_blocks": True},
+                        "metrics": fb_metrics,
+                    }
 
         if best_candidate is not None:
             post_opt_meta = _post_opt_meta(

@@ -1,4 +1,5 @@
 'use client';
+import { getErrorMessage } from "@/utils/getErrorMessage";
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Box, Grid, Typography, Button, Paper, Stack, Skeleton, Tooltip,
@@ -22,6 +23,7 @@ import type {
   Timetable, TripTimeConfig, PassengerConfig, Line, VehicleType, Trip, Terminal,
 } from '../_types';
 import { extractArray, numVal } from '../_types';
+import { dialogTitleSx } from '../_tokens/design-tokens';
 
 const fmtMin = (m: number) => {
   const h = Math.floor(m / 60);
@@ -181,8 +183,8 @@ function TimetablesInner() {
       }
       setDialogOpen(false);
       load();
-    } catch (e: any) {
-      notify.error(e?.response?.data?.message ?? 'Erro ao salvar.');
+    } catch (e: unknown) {
+      notify.error(getErrorMessage(e, 'Erro ao salvar.'));
     } finally {
       setSaving(false);
     }
@@ -195,8 +197,8 @@ function TimetablesInner() {
       notify.success('Viagens geradas com sucesso!');
       loadTrips(tt);
       load();
-    } catch (e: any) {
-      notify.error(e?.response?.data?.message ?? 'Erro ao gerar viagens.');
+    } catch (e: unknown) {
+      notify.error(getErrorMessage(e, 'Erro ao gerar viagens.'));
     } finally {
       setGenerating(false);
     }
@@ -211,8 +213,8 @@ function TimetablesInner() {
       setDeleteTarget(null);
       if (selected?.id === deleteTarget.id) { setSelected(null); setTrips([]); }
       load();
-    } catch (e: any) {
-      notify.error(e?.response?.data?.message ?? 'Erro ao excluir.');
+    } catch (e: unknown) {
+      notify.error(getErrorMessage(e, 'Erro ao excluir.'));
     } finally {
       setDeleting(false);
     }
@@ -268,8 +270,8 @@ function TimetablesInner() {
       notify.success('Viagem atualizada!');
       setEditTrip(null);
       if (selected) loadTrips(selected);
-    } catch (e: any) {
-      notify.error(e?.response?.data?.message ?? 'Erro ao salvar viagem.');
+    } catch (e: unknown) {
+      notify.error(getErrorMessage(e, 'Erro ao salvar viagem.'));
     } finally {
       setSavingTrip(false);
     }
@@ -283,8 +285,8 @@ function TimetablesInner() {
       notify.success('Viagem excluída!');
       setDeleteTripTarget(null);
       if (selected) loadTrips(selected);
-    } catch (e: any) {
-      notify.error(e?.response?.data?.message ?? 'Erro ao excluir viagem.');
+    } catch (e: unknown) {
+      notify.error(getErrorMessage(e, 'Erro ao excluir viagem.'));
     } finally {
       setDeletingTrip(false);
     }
@@ -475,7 +477,7 @@ function TimetablesInner() {
       </Grid>
 
       <Dialog open={dialogOpen} onClose={() => !saving && setDialogOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle sx={{ fontWeight: 700 }}>{editTarget ? 'Editar Carta Horária' : 'Nova Carta Horária'}</DialogTitle>
+        <DialogTitle sx={dialogTitleSx}>{editTarget ? 'Editar Carta Horária' : 'Nova Carta Horária'}</DialogTitle>
         <DialogContent dividers>
           <Stack spacing={2.5} sx={{ pt: 0.5 }}>
             <TextField label="Nome" required fullWidth value={form.name}
@@ -532,7 +534,7 @@ function TimetablesInner() {
       </Dialog>
 
       <Dialog open={!!editTrip} onClose={() => !savingTrip && setEditTrip(null)} maxWidth="sm" fullWidth>
-        <DialogTitle sx={{ fontWeight: 700 }}>Editar Viagem</DialogTitle>
+        <DialogTitle sx={dialogTitleSx}>Editar Viagem</DialogTitle>
         <DialogContent dividers>
           <Stack spacing={2.5} sx={{ pt: 0.5 }}>
             <TextField label="Partida (minutos desde 00:00)" type="number" fullWidth

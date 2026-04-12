@@ -1,6 +1,7 @@
 'use client';
 import React, { useEffect, useState, useCallback } from 'react';
 import dynamic from 'next/dynamic';
+import { useDebounce } from '@/utils/useDebounce';
 import {
   Grid,
   Box,
@@ -90,11 +91,12 @@ function RunsTable({ runs, loading }: { runs: OptimizationRun[]; loading: boolea
   const [statusFilter, setStatusFilter] = React.useState('all');
   const [algoFilter, setAlgoFilter] = React.useState('all');
   const [searchFilter, setSearchFilter] = React.useState('');
+  const debouncedSearchFilter = useDebounce(searchFilter, 300);
   
   const filtered = runs.filter(r => {
     if (statusFilter !== 'all' && r.status !== statusFilter) return false;
     if (algoFilter !== 'all' && r.algorithm !== algoFilter) return false;
-    if (searchFilter && !String(r.id).includes(searchFilter) && !(r.name ?? '').toLowerCase().includes(searchFilter.toLowerCase())) return false;
+    if (debouncedSearchFilter && !String(r.id).includes(debouncedSearchFilter) && !(r.name ?? '').toLowerCase().includes(debouncedSearchFilter.toLowerCase())) return false;
     return true;
   });
 

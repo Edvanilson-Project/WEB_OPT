@@ -275,7 +275,7 @@ export class OptimizationService {
             max_work_minutes: cctOverride.maxWorkMinutes,
           }),
           ...(cctOverride.breakMinutes !== undefined && {
-            min_break_minutes: 12,
+            min_break_minutes: cctOverride.breakMinutes,
           }),
           ...((cctOverride as any).maxUnpaidBreakMinutes !== undefined
             ? {
@@ -641,7 +641,7 @@ export class OptimizationService {
         this.logger.warn(
           `Microserviço optimizer indisponível (${optimizerError.message}). Usando fallback inline.`,
         );
-        result = await this._runInlineOptimization(trips, dto);
+        result = await this._runInlineOptimization(trips, dto, activeSettings);
       }
 
       // Enrich blocks with full trip details so the frontend can display them
@@ -755,13 +755,14 @@ export class OptimizationService {
   private async _runInlineOptimization(
     trips: any[],
     dto: RunOptimizationDto,
+    activeSettings?: any,
   ): Promise<any> {
     const MIN_LAYOVER = 0;
     const MAX_VEHICLE_SHIFT = 960;
-    const MAX_CCT_SHIFT = dto.cspParams?.maxShiftMinutes ?? 480;
-    const MAX_CCT_WORK = dto.cspParams?.maxWorkMinutes ?? 440;
-    const MAX_DRIVING = dto.cspParams?.maxDrivingMinutes ?? 270;
-    const MIN_BREAK = dto.cspParams?.breakMinutes ?? 30;
+    const MAX_CCT_SHIFT = dto.cspParams?.maxShiftMinutes ?? activeSettings?.cctMaxShiftMinutes ?? 480;
+    const MAX_CCT_WORK = dto.cspParams?.maxWorkMinutes ?? activeSettings?.cctMaxWorkMinutes ?? 440;
+    const MAX_DRIVING = dto.cspParams?.maxDrivingMinutes ?? activeSettings?.cctMaxDrivingMinutes ?? 270;
+    const MIN_BREAK = dto.cspParams?.breakMinutes ?? activeSettings?.cctMinBreakMinutes ?? 30;
     const PULLOUT = 10;
     const PULLBACK = 10;
 

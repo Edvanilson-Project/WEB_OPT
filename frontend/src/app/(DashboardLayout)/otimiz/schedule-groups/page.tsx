@@ -1,4 +1,5 @@
 'use client';
+import { getErrorMessage } from "@/utils/getErrorMessage";
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Box, Grid, Typography, Button, Paper, Stack, Skeleton, Tooltip, Alert,
@@ -22,6 +23,7 @@ import {
 } from '@/lib/api';
 import type { ScheduleGroup, Schedule, Trip } from '../_types';
 import { extractArray, numVal } from '../_types';
+import { dialogTitleSx } from '../_tokens/design-tokens';
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 const minutesToHHMM = (m: number) => {
@@ -134,8 +136,8 @@ function ScheduleGroupsInner() {
       }
       setDialogOpen(false);
       load();
-    } catch (e: any) {
-      notify.error(e?.response?.data?.message ?? 'Erro ao salvar.');
+    } catch (e: unknown) {
+      notify.error(getErrorMessage(e, 'Erro ao salvar.'));
     } finally {
       setSaving(false);
     }
@@ -150,8 +152,8 @@ function ScheduleGroupsInner() {
       setDeleteTarget(null);
       if (selectedGroup?.id === deleteTarget.id) { setSelectedGroup(null); setTrips([]); }
       load();
-    } catch (e: any) {
-      notify.error(e?.response?.data?.message ?? 'Erro ao excluir.');
+    } catch (e: unknown) {
+      notify.error(getErrorMessage(e, 'Erro ao excluir.'));
     } finally {
       setDeleting(false);
     }
@@ -181,8 +183,8 @@ function ScheduleGroupsInner() {
       notify.success(`${count} viagens geradas com sucesso!`);
       selectGroup(selectedGroup);
       load();
-    } catch (e: any) {
-      notify.error(e?.response?.data?.message ?? 'Erro ao gerar viagens.');
+    } catch (e: unknown) {
+      notify.error(getErrorMessage(e, 'Erro ao gerar viagens.'));
     } finally {
       setGenerating(false);
     }
@@ -203,8 +205,8 @@ function ScheduleGroupsInner() {
       });
       notify.success('Otimização iniciada! Acompanhe em Motor de Otimização.');
       load();
-    } catch (e: any) {
-      notify.error(e?.response?.data?.message ?? 'Erro ao iniciar otimização.');
+    } catch (e: unknown) {
+      notify.error(getErrorMessage(e, 'Erro ao iniciar otimização.'));
     } finally {
       setOptimizing(false);
     }
@@ -238,8 +240,8 @@ function ScheduleGroupsInner() {
       notify.success('Viagem atualizada!');
       setEditingTrip(null);
       if (selectedGroup) selectGroup(selectedGroup);
-    } catch (e: any) {
-      notify.error(e?.response?.data?.message ?? 'Erro ao salvar viagem.');
+    } catch (e: unknown) {
+      notify.error(getErrorMessage(e, 'Erro ao salvar viagem.'));
     } finally {
       setSavingTrip(false);
     }
@@ -255,8 +257,8 @@ function ScheduleGroupsInner() {
       notify.success('Viagem excluída!');
       setDeleteTripTarget(null);
       if (selectedGroup) selectGroup(selectedGroup);
-    } catch (e: any) {
-      notify.error(e?.response?.data?.message ?? 'Erro ao excluir viagem.');
+    } catch (e: unknown) {
+      notify.error(getErrorMessage(e, 'Erro ao excluir viagem.'));
     } finally {
       setDeletingTrip(false);
     }
@@ -464,7 +466,7 @@ function ScheduleGroupsInner() {
 
       {/* Dialog Criar/Editar Grupo */}
       <Dialog open={dialogOpen} onClose={() => !saving && setDialogOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle sx={{ fontWeight: 700 }}>{editTarget ? 'Editar Grupo' : 'Nova Programação'}</DialogTitle>
+        <DialogTitle sx={dialogTitleSx}>{editTarget ? 'Editar Grupo' : 'Nova Programação'}</DialogTitle>
         <DialogContent dividers>
           <Stack spacing={2.5} sx={{ pt: 0.5 }}>
             <TextField label="Nome" required fullWidth value={form.name}
@@ -511,7 +513,7 @@ function ScheduleGroupsInner() {
 
       {/* Dialog Editar Viagem */}
       <Dialog open={!!editingTrip} onClose={() => !savingTrip && setEditingTrip(null)} maxWidth="xs" fullWidth>
-        <DialogTitle sx={{ fontWeight: 700 }}>Editar Viagem #{editingTrip?.id}</DialogTitle>
+        <DialogTitle sx={dialogTitleSx}>Editar Viagem #{editingTrip?.id}</DialogTitle>
         <DialogContent dividers>
           <Stack spacing={2} sx={{ pt: 0.5 }}>
             <Typography variant="body2" color="text.secondary">

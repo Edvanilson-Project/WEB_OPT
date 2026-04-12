@@ -161,7 +161,7 @@ def test_optimizer_result_payload_serializes_block_and_duty_cost_fields():
     assert payload["duties"][0]["total_cost"] == pytest.approx(131.25)
 
 
-def test_greedy_csp_computes_overtime_from_spread_not_only_work_time():
+def test_greedy_csp_computes_overtime_from_work_time_not_spread_time():
     duty = Duty(id=165, work_time=484, spread_time=560)
 
     solution = GreedyCSP(
@@ -170,8 +170,34 @@ def test_greedy_csp_computes_overtime_from_spread_not_only_work_time():
         overtime_limit_minutes=120,
     ).finalize_selected_duties([duty])
 
-    assert solution.duties[0].overtime_minutes == 80
+    assert solution.duties[0].overtime_minutes == 4
     assert solution.cct_violations == 0
+
+
+def test_csp_cost_breakdown_preserves_raw_precision_until_final_rounding():
+    duty_a = Duty(id=1, work_time=20, paid_minutes=20)
+    duty_b = Duty(id=2, work_time=20, paid_minutes=20)
+
+    breakdown = CostEvaluator().csp_cost_breakdown(CSPSolution(duties=[duty_a, duty_b]))
+
+    # 20 min at 25/h = 8.333..., twice = 16.666... -> 16.67.
+    # If each duty were rounded first, the result would drift to 16.66.
+    assert breakdown["work_cost"] == pytest.approx(16.67)
+    assert breakdown["total"] == pytest.approx(16.67)
+
+
+def test_csp_cost_breakdown_uses_piecewise_long_unpaid_break_penalty():
+    duty = Duty(id=10, work_time=60, spread_time=240, paid_minutes=60)
+    duty.meta["unpaid_break_total_minutes"] = 180
+
+    breakdown = CostEvaluator(
+        long_unpaid_break_limit_minutes=90,
+        long_unpaid_break_penalty_weight=0.05,
+    ).csp_cost_breakdown(CSPSolution(duties=[duty]))
+
+    # Excess = 90 min -> 30*1 + 60*3 = 210 weight-units -> 10.5 monetary units.
+    assert breakdown["long_unpaid_break_penalty"] == pytest.approx(10.5)
+    assert breakdown["duties"][0]["long_unpaid_break_penalty"] == pytest.approx(10.5)
 
 
 def test_optimizer_result_exposes_solver_explanation_and_trip_group_audit():

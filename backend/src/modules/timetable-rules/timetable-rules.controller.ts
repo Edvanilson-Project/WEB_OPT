@@ -19,10 +19,11 @@ import {
 import { TimetableRulesService } from './timetable-rules.service';
 import { CreateTimetableRuleDto } from './dto/create-timetable-rule.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../../common/guards/roles.guard';
 
 @ApiTags('timetable-rules')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('timetable-rules')
 export class TimetableRulesController {
   constructor(private readonly service: TimetableRulesService) {}

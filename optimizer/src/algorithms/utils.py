@@ -9,7 +9,6 @@ Funções:
 """
 from __future__ import annotations
 
-from copy import deepcopy
 from typing import Dict, List, Tuple
 
 from ..domain.models import Block
@@ -56,9 +55,9 @@ def block_is_feasible(block: Block, min_gap: int = 8) -> bool:
     return True
 
 
-def blocks_are_feasible(blocks: List[Block]) -> bool:
+def blocks_are_feasible(blocks: List[Block], min_gap: int = 8) -> bool:
     """Retorna True se TODOS os blocos são fisicamente viáveis."""
-    return all(block_is_feasible(b) for b in blocks)
+    return all(block_is_feasible(b, min_gap) for b in blocks)
 
 
 def quick_cost_sorted(
@@ -76,18 +75,18 @@ def quick_cost_sorted(
     """
     total = 0.0
     for b in blocks:
-        sorted_trips = sorted(b.trips, key=lambda t: t.start_time)
+        trips = b.trips  # assumes sort_block_trips() already called
         total += fixed_vehicle_cost
-        block_work = sum(t.duration for t in sorted_trips)
-        if sorted_trips and max_work_minutes > 0:
-            block_spread = sorted_trips[-1].end_time - sorted_trips[0].start_time
+        block_work = sum(t.duration for t in trips)
+        if trips and max_work_minutes > 0:
+            block_spread = trips[-1].end_time - trips[0].start_time
             min_crew = max(
                 -(-block_work // int(max_work_minutes)),  # ceil division by work
                 -(-block_spread // int(max_work_minutes + 80)),  # ceil division by spread
             )
             total += max(0, min_crew - 1) * crew_cost_weight
-        for i in range(len(sorted_trips) - 1):
-            gap = sorted_trips[i + 1].start_time - sorted_trips[i].end_time
+        for i in range(len(trips) - 1):
+            gap = trips[i + 1].start_time - trips[i].end_time
             if gap < 0:
                 total += abs(gap) * 50.0  # penalidade forte por overlap
             else:

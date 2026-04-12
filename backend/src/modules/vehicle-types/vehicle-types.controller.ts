@@ -9,6 +9,7 @@ import {
   UseGuards,
   ParseIntPipe,
   Query,
+  Request,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
@@ -20,25 +21,30 @@ import { VehicleTypesService } from './vehicle-types.service';
 import { CreateVehicleTypeDto } from './dto/create-vehicle-type.dto';
 import { UpdateVehicleTypeDto } from './dto/update-vehicle-type.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../../common/guards/roles.guard';
+import { resolveScopedCompanyId } from '../../common/utils/company-scope.util';
+import { AuthRequest } from '../../common/interfaces/auth.interface';
 
 @ApiTags('vehicle-types')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('vehicle-types')
 export class VehicleTypesController {
   constructor(private readonly vehicleTypesService: VehicleTypesService) {}
 
   @Post()
   @ApiOperation({ summary: 'Criar tipo de veículo' })
-  create(@Body() dto: CreateVehicleTypeDto) {
+  create(@Body() dto: CreateVehicleTypeDto, @Request() req: AuthRequest) {
     return this.vehicleTypesService.create(dto);
   }
 
   @Get()
   @ApiOperation({ summary: 'Listar tipos de veículo' })
   @ApiQuery({ name: 'companyId', required: false })
-  findAll(@Query('companyId') companyId?: string) {
-    return this.vehicleTypesService.findAll(companyId ? +companyId : undefined);
+  findAll(@Request() req: AuthRequest, @Query('companyId') companyId?: string) {
+    return this.vehicleTypesService.findAll(
+      resolveScopedCompanyId(req.user?.companyId, companyId, req.user?.role),
+    );
   }
 
   @Get(':id')

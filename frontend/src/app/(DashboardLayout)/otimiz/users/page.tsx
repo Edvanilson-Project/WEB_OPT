@@ -13,6 +13,7 @@ import { NotifyProvider, useNotify } from '../_components/Notify';
 import { usersApi } from '@/lib/api';
 import type { User, UserRole } from '../_types';
 import { extractArray } from '../_types';
+import { useDebounce } from '@/utils/useDebounce';
 
 interface UserForm { name: string; email: string; password: string; role: UserRole; status: string; }
 const EMPTY: UserForm = { name: '', email: '', password: '', role: 'analyst', status: 'active' };
@@ -39,6 +40,7 @@ function UsersInner() {
   const [items, setItems] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const debouncedSearch = useDebounce(search, 300);
   const [roleFilter, setRoleFilter] = useState<UserRole | ''>('');
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<User | null>(null);
@@ -58,7 +60,7 @@ function UsersInner() {
   useEffect(() => { load(); }, [load]);
 
   const filtered = items.filter((u) => {
-    const q = search.toLowerCase();
+    const q = debouncedSearch.toLowerCase();
     const matchQ = !q || u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q);
     const matchR = !roleFilter || u.role === roleFilter;
     return matchQ && matchR;

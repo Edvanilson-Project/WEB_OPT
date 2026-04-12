@@ -1,4 +1,5 @@
 'use client';
+import { getErrorMessage } from "@/utils/getErrorMessage";
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Box, Grid, Typography, Button, Paper, Stack, Skeleton, Tooltip,
@@ -18,6 +19,7 @@ import { NotifyProvider, useNotify } from '../_components/Notify';
 import { tripsApi, linesApi, terminalsApi, getSessionUser } from '@/lib/api';
 import type { Trip, Line, Terminal } from '../_types';
 import { extractArray } from '../_types';
+import { dialogTitleSx } from '../_tokens/design-tokens';
 
 const toHHMM = (minutes?: number | null): string => {
   const safeMinutes = Number(minutes);
@@ -220,8 +222,8 @@ function TripsInner() {
       }
       setDialogOpen(false);
       load();
-    } catch (e: any) {
-      notify.error(e?.response?.data?.message ?? 'Erro ao salvar viagem.');
+    } catch (e: unknown) {
+      notify.error(getErrorMessage(e, 'Erro ao salvar viagem.'));
     } finally {
       setSaving(false);
     }
@@ -235,8 +237,8 @@ function TripsInner() {
       notify.success('Viagem excluída!');
       setDeleteTarget(null);
       load();
-    } catch (e: any) {
-      notify.error(e?.response?.data?.message ?? 'Erro ao excluir viagem.');
+    } catch (e: unknown) {
+      notify.error(getErrorMessage(e, 'Erro ao excluir viagem.'));
     } finally {
       setDeleting(false);
     }
@@ -504,7 +506,7 @@ function TripsInner() {
 
       {/* Dialog Criar/Editar */}
       <Dialog open={dialogOpen} onClose={() => !saving && setDialogOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle sx={{ fontWeight: 700 }}>
+        <DialogTitle sx={dialogTitleSx}>
           {editTarget ? 'Editar Viagem' : 'Nova Viagem'}
         </DialogTitle>
         <DialogContent dividers>

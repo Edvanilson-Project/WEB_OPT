@@ -51,7 +51,7 @@ class HardConstraintValidator:
             issues.extend(self._validate_mid_trip_relief(trip, allow_relief_points))
 
         max_shift = int(cct_params.get("max_shift_minutes", 480) or 480)
-        max_driving = 600
+        max_driving = int(cct_params.get("max_driving_minutes", 270) or 270)
         inter_shift = int(cct_params.get("inter_shift_rest_minutes", 660) or 660)
         if max_shift > 1440:
             issues.append(f"LEGAL_MAX_SHIFT_EXCEEDED config={max_shift}")

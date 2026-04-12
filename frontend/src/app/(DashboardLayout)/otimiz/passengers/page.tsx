@@ -1,4 +1,5 @@
 'use client';
+import { getErrorMessage } from "@/utils/getErrorMessage";
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Box, Grid, Typography, Button, Paper, Stack, Skeleton, Tooltip,
@@ -16,6 +17,7 @@ import { NotifyProvider, useNotify } from '../_components/Notify';
 import { passengerConfigsApi, linesApi, getSessionUser } from '@/lib/api';
 import type { PassengerConfig, PassengerBand, Line } from '../_types';
 import { extractArray, numVal } from '../_types';
+import { dialogTitleSx } from '../_tokens/design-tokens';
 
 const fmtMin = (m: number) => {
   const h = Math.floor(m / 60);
@@ -131,8 +133,8 @@ function PassengersInner() {
       setForm({ lineId: '', description: '', bandIntervalMinutes: '30', startHourMinutes: '240', endHourMinutes: '1440' });
       setEditTarget(null);
       await load();
-    } catch (e: any) {
-      notify.error(e?.response?.data?.message ?? 'Erro ao salvar configuração.');
+    } catch (e: unknown) {
+      notify.error(getErrorMessage(e, 'Erro ao salvar configuração.'));
     } finally {
       setSaving(false);
     }
@@ -147,8 +149,8 @@ function PassengersInner() {
       setDeleteTarget(null);
       if (selected?.id === deleteTarget.id) { setSelected(null); setBands([]); }
       load();
-    } catch (e: any) {
-      notify.error(e?.response?.data?.message ?? 'Erro ao excluir.');
+    } catch (e: unknown) {
+      notify.error(getErrorMessage(e, 'Erro ao excluir.'));
     } finally {
       setDeleting(false);
     }
@@ -176,8 +178,8 @@ function PassengersInner() {
       );
       notify.success('Faixas salvas com sucesso!');
       setBandsDirty(false);
-    } catch (e: any) {
-      notify.error(e?.response?.data?.message ?? 'Erro ao salvar faixas.');
+    } catch (e: unknown) {
+      notify.error(getErrorMessage(e, 'Erro ao salvar faixas.'));
     } finally {
       setSavingBands(false);
     }
@@ -326,7 +328,7 @@ function PassengersInner() {
 
       {/* Create Dialog */}
       <Dialog open={dialogOpen} onClose={() => !saving && setDialogOpen(false)} maxWidth="xs" fullWidth>
-        <DialogTitle sx={{ fontWeight: 700 }}>{editTarget ? 'Editar Configuração de Passageiros' : 'Nova Configuração de Passageiros'}</DialogTitle>
+        <DialogTitle sx={dialogTitleSx}>{editTarget ? 'Editar Configuração de Passageiros' : 'Nova Configuração de Passageiros'}</DialogTitle>
         <DialogContent dividers>
           <Stack spacing={2.5} sx={{ pt: 0.5 }}>
             <FormControl fullWidth size="small">
