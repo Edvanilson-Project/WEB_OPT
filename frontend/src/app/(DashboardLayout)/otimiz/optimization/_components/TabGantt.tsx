@@ -17,6 +17,7 @@ import {
   type TripIntervalPolicy, type IdleWindow,
 } from '../_helpers/formatters';
 import { getLinePalette, getGanttColors } from '../../_tokens/design-tokens';
+import { OperationalConflictIndicator } from './OperationalConflictIndicator';
 
 export function TabGantt({
   res,
@@ -472,6 +473,9 @@ export function TabGantt({
       <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" alignItems={{ xs: 'flex-start', md: 'center' }} mb={3} gap={1.5}>
         <Box>
           <Typography variant="subtitle1" fontWeight={800} sx={{ letterSpacing: -0.5 }}>Gantt de Blocos e Viagens</Typography>
+          <Box sx={{ mt: 1 }}>
+            <OperationalConflictIndicator res={res} />
+          </Box>
         </Box>
         <Stack direction="row" spacing={3} alignItems="center" flexWrap="wrap" useFlexGap>
           <Stack direction="row" spacing={1} alignItems="center" sx={{ bgcolor: alpha(theme.palette.divider, 0.05), p: 0.5, borderRadius: 2 }}>
