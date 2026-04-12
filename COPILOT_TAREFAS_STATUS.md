@@ -18,11 +18,20 @@ Branch: feat/extreme-optimizer-refactor
 - Validacao de build do frontend concluida com sucesso (Next.js build OK).
 - Refinamento de densidade informacional concluido em Escalas e Veiculos.
 - Suite de testes de interacao do Gantt adicionada e validada (3 testes passando).
+- **Suite de stress tests criada e validada (8/8 passing)**:
+  - Renderizacao de 20, 50, 100+ e 200 linhas sem degradacao.
+  - Expansao/recolhimento seletivo de blocos sob stress.
+  - Performance metrics validadas.
+- **Indicadores de conflitos operacionais implementados**:
+  - Deteccao de: sobrepostura de viagens, gaps irrealisticos, violacao de pausas, falta de retorno.
+  - Componente visual com badges de erro/aviso no cabecalho do Gantt.
+  - 8 testes unitarios de deteccao de conflitos (8/8 passing).
+  - Integrado no TabGantt.tsx sem poluir o grid.
 
 ## Fazendo agora
-- Fechamento da iteracao atual e consolidacao do estado para proximo ciclo.
+- Finalizacao e consolidacao completa do ciclo de melhorias UX/stress testing.
 
 ## Proximo
-- Expandir testes para cenarios com multiplas linhas e alto volume visual.
-- Adicionar indicador de conflitos operacionais no cabecalho do Gantt (sem poluir grid).
-- Manter este arquivo atualizado em toda nova tarefa solicitada.
+- Melhorias visuais de alto nível: escalas de fonte, spacing refinado.
+- Expandir indicadores de conflitos para mostrar rastreabilidade de blocos afetados.
+- Performance profiling em cenarios extremos (500+ blocos).
