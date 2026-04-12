@@ -45,3 +45,25 @@ Branch: feat/extreme-optimizer-refactor
 - Performance profiling em cenarios extremos (500+ blocos)
 - Integracao com export de relatorio de conflitos (PDF/CSV)
 - Dashboard resumitivo de KPIs com visualizacoes historicas
+- **Export de conflitos operacionais implementado** (13/13 testes passing):
+  - CSV com headers e dados estruturados
+  - JSON com metadata completo (stats, timestamps, agregações)
+  - HTML com relatório formatado e gráfico visual
+  - TSV para compatibilidade com planilhas
+  - Menu de dropdown no modal para download
+  - Nomes de arquivo com timestamp (YYYY-MM-DD)
+- **Performance profiler para cenários extremos** (15/15 testes passing):
+  - Profiling de render time para 50, 100, 250, 500, 1000 blocos
+  - Medição de interactionLatency (expand/collapse)
+  - Validação contra thresholds customizáveis
+  - Geração de relatório legível em texto
+  - Suporta até 1000 blocos sem crash
+  - Análise de escalabilidade (O(n) vs O(n²))
+
+## Fazendo agora
+- Finalização da iteração com export + performance profiler.
+
+## Proximo
+- Dashboard resumitivo de KPIs com visualizações históricas
+- Integração com API para sync de dados em tempo real
+- Refatoração de cache para otimizar queries em grande volume
