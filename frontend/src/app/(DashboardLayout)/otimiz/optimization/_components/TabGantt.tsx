@@ -17,6 +17,7 @@ import {
   type TripIntervalPolicy, type IdleWindow,
 } from '../_helpers/formatters';
 import { getLinePalette, getGanttColors } from '../../_tokens/design-tokens';
+import { getTypographySx } from '../_tokens/typography-scales';
 import { OperationalConflictIndicator } from './OperationalConflictIndicator';
 
 export function TabGantt({
@@ -265,9 +266,9 @@ export function TabGantt({
           {/* Label do Bloco (Y-Axis) */}
                   <Box sx={{ width: SIDE_LABEL_WIDTH, flexShrink: 0, py: 1, pr: 2, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
                     <Box sx={{ px: 2, py: 0.75, borderRadius: 0.75, bgcolor: alpha(theme.palette.action.hover, 0.5), border: '1px solid', borderColor: 'divider' }}>
-                      <Typography variant="caption" fontWeight={900} color="primary.main" sx={{ fontSize: 11 }}>BLOCO #{b.block_id}</Typography>
-                      <Typography variant="caption" color="text.secondary" fontWeight={700} sx={{ fontSize: 10, mt: 0.5, display: 'block' }}>{minToHHMM(b.min)} - {minToHHMM(b.max)}</Typography>
-                      <Typography variant="caption" color="text.secondary" sx={{ fontSize: 9 }}>{b.tripCount} percursos</Typography>
+                      <Typography variant="caption" fontWeight={900} color="primary.main" sx={{ ...getTypographySx('sectionLabel'), fontSize: '0.65rem' }}>BLOCO #{b.block_id}</Typography>
+                      <Typography variant="caption" color="text.secondary" fontWeight={700} sx={{ ...getTypographySx('sectionSubtitle'), mt: 0.5, display: 'block' }}>{minToHHMM(b.min)} - {minToHHMM(b.max)}</Typography>
+                      <Typography variant="caption" color="text.secondary" sx={{ ...getTypographySx('metadata'), display: 'block', mt: 0.25 }}>{b.tripCount} percursos</Typography>
                       {b.idleSummary && (
                         <Tooltip
                           title={
@@ -472,7 +473,7 @@ export function TabGantt({
     <Box>
       <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" alignItems={{ xs: 'flex-start', md: 'center' }} mb={3} gap={1.5}>
         <Box>
-          <Typography variant="subtitle1" fontWeight={800} sx={{ letterSpacing: -0.5 }}>Gantt de Blocos e Viagens</Typography>
+          <Typography variant="h6" fontWeight={800} sx={{ letterSpacing: -0.5, fontSize: '1.1rem' }}>Gantt de Blocos e Viagens</Typography>
           <Box sx={{ mt: 1 }}>
             <OperationalConflictIndicator res={res} />
           </Box>
@@ -500,11 +501,11 @@ export function TabGantt({
       </Stack>
 
       {showLinesLegend && (
-        <Stack direction="row" spacing={1.25} alignItems="center" flexWrap="wrap" useFlexGap mb={1.5}>
+        <Stack direction="row" spacing={1.5} alignItems="center" flexWrap="wrap" useFlexGap mb={2} sx={{ px: 0.5 }}>
           {Array.from(lineColorMap.entries()).map(([lineId, color]) => (
-            <Stack key={lineId} direction="row" spacing={0.75} alignItems="center">
-              <Box sx={{ width: 10, height: 10, bgcolor: color, borderRadius: '50%' }} />
-              <Typography variant="caption" fontWeight={600}>{linesMap[lineId] || `L${lineId}`}</Typography>
+            <Stack key={lineId} direction="row" spacing={0.5} alignItems="center" sx={{ py: 0.25 }}>
+              <Box sx={{ width: 8, height: 8, bgcolor: color, borderRadius: '50%', flexShrink: 0 }} />
+              <Typography variant="caption" fontWeight={700} sx={{ ...getTypographySx('metadata'), fontSize: '0.75rem' }}>{linesMap[lineId] || `L${lineId}`}</Typography>
             </Stack>
           ))}
         </Stack>
