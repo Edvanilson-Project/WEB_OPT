@@ -38,7 +38,10 @@ export function TabOverview({
 
   return (
     <Box>
-      <Typography variant="subtitle1" fontWeight={700} mb={2}>{duties.length} Escalas de Trabalho Geradas</Typography>
+      <Stack direction="row" justifyContent="space-between" alignItems="center" mb={1.5}>
+        <Typography variant="subtitle1" fontWeight={700}>{duties.length} Escalas de Trabalho Geradas</Typography>
+        <Typography variant="caption" color="text.secondary">Clique em uma linha para detalhes</Typography>
+      </Stack>
       <TableContainer component={Paper} variant="outlined" sx={{ borderRadius: 2, maxHeight: 600 }}>
         <Table stickyHeader size="small">
           <TableHead>
@@ -107,9 +110,14 @@ function DutyTableRow({
       >
         <TableCell>
           <Stack direction="row" alignItems="center" spacing={1}>
-            <Box sx={{ width: 32, height: 32, borderRadius: 1.5, bgcolor: hasViolation ? 'error.main' : 'primary.main', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white' }}>
-              <IconUsers size={16} />
-            </Box>
+            <Chip
+              size="small"
+              icon={<IconUsers size={14} />}
+              label={hasViolation ? 'Risco' : 'OK'}
+              color={hasViolation ? 'error' : 'success'}
+              variant="outlined"
+              sx={{ height: 22 }}
+            />
             <Typography variant="body2" fontWeight={700}>Plantão #{duty.duty_id}</Typography>
           </Stack>
         </TableCell>
@@ -128,10 +136,11 @@ function DutyTableRow({
           </Typography>
         </TableCell>
         <TableCell>
-          <Stack direction="row" spacing={0.5}>
+          <Stack direction="row" spacing={0.5} useFlexGap flexWrap="wrap">
             {hasViolation && <Chip size="small" color="error" label="Violação" sx={{ height: 18, fontSize: 10 }} />}
             {hasOvertime && <Chip size="small" color="warning" label="HE" sx={{ height: 18, fontSize: 10 }} />}
             {!hasViolation && !hasOvertime && <IconCheck size={16} color="green" />}
+            <Chip size="small" variant="outlined" label={`${minToDuration(duty.work_time)} úteis`} sx={{ height: 18, fontSize: 10 }} />
           </Stack>
         </TableCell>
         <TableCell align="right">

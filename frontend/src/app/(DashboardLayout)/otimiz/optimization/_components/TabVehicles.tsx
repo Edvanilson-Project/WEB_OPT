@@ -43,7 +43,10 @@ export function TabVehicles({
 
   return (
     <Box>
-      <Typography variant="subtitle1" fontWeight={700} mb={2}>{blocks.length} Blocos de Veículo</Typography>
+      <Stack direction="row" justifyContent="space-between" alignItems="center" mb={1.5}>
+        <Typography variant="subtitle1" fontWeight={700}>{blocks.length} Blocos de Veículo</Typography>
+        <Typography variant="caption" color="text.secondary">Clique no bloco para abrir sequência e custos</Typography>
+      </Stack>
       <TableContainer component={Paper} variant="outlined" sx={{ borderRadius: 2, maxHeight: 600 }}>
         <Table stickyHeader size="small">
           <TableHead>
@@ -107,9 +110,7 @@ function VehicleTableRow({
       >
         <TableCell>
           <Stack direction="row" alignItems="center" spacing={1}>
-            <Box sx={{ width: 32, height: 32, borderRadius: 1.5, bgcolor: 'info.main', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white' }}>
-              <IconBus size={18} />
-            </Box>
+            <Chip size="small" icon={<IconBus size={14} />} label="Ativo" color="info" variant="outlined" sx={{ height: 22 }} />
             <Typography variant="body2" fontWeight={700}>Veículo #{block.block_id}</Typography>
           </Stack>
         </TableCell>
@@ -117,7 +118,10 @@ function VehicleTableRow({
           <Typography variant="body2" fontWeight={600}>{minToHHMM(blockWindow.start)} → {minToHHMM(blockWindow.end)}</Typography>
         </TableCell>
         <TableCell>
-          <Chip size="small" label={`${block.num_trips || block.trips?.length || 0} trips`} sx={{ height: 20 }} />
+          <Stack direction="row" spacing={0.5} useFlexGap flexWrap="wrap">
+            <Chip size="small" label={`${block.num_trips || block.trips?.length || 0} trips`} sx={{ height: 20 }} />
+            <Chip size="small" variant="outlined" label={`${minToDuration(totalDur)}`} sx={{ height: 20 }} />
+          </Stack>
         </TableCell>
         <TableCell>
           <Typography variant="body2">{minToDuration(totalDur)}</Typography>

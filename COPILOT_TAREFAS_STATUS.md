@@ -16,11 +16,13 @@ Branch: feat/extreme-optimizer-refactor
   - cabecalho/tabulacao mais limpa,
   - texto orientado a decisao operacional.
 - Validacao de build do frontend concluida com sucesso (Next.js build OK).
+- Refinamento de densidade informacional concluido em Escalas e Veiculos.
+- Suite de testes de interacao do Gantt adicionada e validada (3 testes passando).
 
 ## Fazendo agora
-- Preparando proxima iteracao de UX focada em microinteracoes e auditoria visual de conflitos.
+- Fechamento da iteracao atual e consolidacao do estado para proximo ciclo.
 
 ## Proximo
-- Aplicar refinamento de densidade informacional nas abas de Escalas/Veiculos.
-- Adicionar testes de componente para validar interacoes do novo Gantt (drawer/legenda/ciclo).
+- Expandir testes para cenarios com multiplas linhas e alto volume visual.
+- Adicionar indicador de conflitos operacionais no cabecalho do Gantt (sem poluir grid).
 - Manter este arquivo atualizado em toda nova tarefa solicitada.

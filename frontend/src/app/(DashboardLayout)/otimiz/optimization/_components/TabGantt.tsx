@@ -320,6 +320,7 @@ export function TabGantt({
                           title={`Tempo improdutivo ${minToHHMM(window.start)}-${minToHHMM(window.end)} (${minToDuration(window.duration)})`}
                         >
                           <Box
+                            data-testid="gantt-idle-window"
                             sx={{
                               position: 'absolute',
                               left: `${left}%`,
@@ -358,7 +359,7 @@ export function TabGantt({
                             border: '1px solid',
                             borderColor: alpha(cycleColor ?? theme.palette.primary.main, 0.35),
                           })
-                        }}>
+                        }} data-testid={group.type === 'cycle' ? 'gantt-cycle-group' : 'gantt-group'}>
                           {group.type === 'cycle' && (
                             <Tooltip title={`${cycleLabel} (${minToHHMM(group.trips[0].start_time)}-${minToHHMM(group.trips[group.trips.length - 1].end_time)})`}>
                               <Box
@@ -486,7 +487,7 @@ export function TabGantt({
               {showLinesLegend ? 'Ocultar linhas' : 'Mostrar linhas'}
             </Button>
             <Tooltip title="Abrir painel de legenda e critérios visuais">
-              <IconButton size="small" onClick={() => setDetailsOpen(true)}>
+              <IconButton aria-label="abrir-guia-gantt" size="small" onClick={() => setDetailsOpen(true)}>
                 <IconInfoCircle size={16} />
               </IconButton>
             </Tooltip>
