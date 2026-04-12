@@ -9,6 +9,7 @@ import {
   UseGuards,
   ParseIntPipe,
   Query,
+  Request,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
@@ -20,25 +21,30 @@ import { TerminalsService } from './terminals.service';
 import { CreateTerminalDto } from './dto/create-terminal.dto';
 import { UpdateTerminalDto } from './dto/update-terminal.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../../common/guards/roles.guard';
+import { resolveScopedCompanyId } from '../../common/utils/company-scope.util';
+import { AuthRequest } from '../../common/interfaces/auth.interface';
 
 @ApiTags('terminals')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('terminals')
 export class TerminalsController {
   constructor(private readonly terminalsService: TerminalsService) {}
 
   @Post()
   @ApiOperation({ summary: 'Criar terminal' })
-  create(@Body() dto: CreateTerminalDto) {
+  create(@Body() dto: CreateTerminalDto, @Request() req: AuthRequest) {
     return this.terminalsService.create(dto);
   }
 
   @Get()
   @ApiOperation({ summary: 'Listar terminais' })
   @ApiQuery({ name: 'companyId', required: false })
-  findAll(@Query('companyId') companyId?: string) {
-    return this.terminalsService.findAll(companyId ? +companyId : undefined);
+  findAll(@Request() req: AuthRequest, @Query('companyId') companyId?: string) {
+    return this.terminalsService.findAll(
+      resolveScopedCompanyId(req.user?.companyId, companyId, req.user?.role),
+    );
   }
 
   @Get(':id')

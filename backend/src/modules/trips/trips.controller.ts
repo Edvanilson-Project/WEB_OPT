@@ -21,31 +21,34 @@ import { TripsService } from './trips.service';
 import { CreateTripDto } from './dto/create-trip.dto';
 import { UpdateTripDto } from './dto/update-trip.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../../common/guards/roles.guard';
 import { resolveScopedCompanyId } from '../../common/utils/company-scope.util';
+import { AuthRequest } from '../../common/interfaces/auth.interface';
 
 @ApiTags('trips')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('trips')
 export class TripsController {
   constructor(private readonly tripsService: TripsService) {}
 
   @Post()
   @ApiOperation({ summary: 'Criar viagem' })
-  create(@Body() dto: CreateTripDto, @Request() req: any) {
-    dto.companyId = resolveScopedCompanyId(req.user?.companyId, dto.companyId);
+  create(@Body() dto: CreateTripDto, @Request() req: AuthRequest) {
+    dto.companyId = resolveScopedCompanyId(req.user?.companyId, dto.companyId, req.user?.role);
     return this.tripsService.create(dto);
   }
 
   @Post('bulk')
   @ApiOperation({ summary: 'Criar múltiplas viagens de uma vez' })
-  createBulk(@Body() dtos: CreateTripDto[], @Request() req: any) {
+  createBulk(@Body() dtos: CreateTripDto[], @Request() req: AuthRequest) {
     const scopedCompanyId = resolveScopedCompanyId(
       req.user?.companyId,
       dtos[0]?.companyId,
+      req.user?.role,
     );
     dtos.forEach((dto) => {
-      dto.companyId = resolveScopedCompanyId(scopedCompanyId, dto.companyId);
+      dto.companyId = resolveScopedCompanyId(scopedCompanyId, dto.companyId, req.user?.role);
     });
     return this.tripsService.createBulk(dtos);
   }
@@ -54,18 +57,18 @@ export class TripsController {
   @ApiQuery({ name: 'companyId', required: false })
   @ApiQuery({ name: 'lineId', required: false })
   findAll(
-    @Request() req: any,
+    @Request() req: AuthRequest,
     @Query('companyId') companyId?: string,
     @Query('lineId') lineId?: string,
   ) {
     return this.tripsService.findAll(
-      resolveScopedCompanyId(req.user?.companyId, companyId),
+      resolveScopedCompanyId(req.user?.companyId, companyId, req.user?.role),
       lineId ? +lineId : undefined,
     );
   }
 
   @Get(':id')
-  findOne(@Param('id', ParseIntPipe) id: number, @Request() req: any) {
+  findOne(@Param('id', ParseIntPipe) id: number, @Request() req: AuthRequest) {
     return this.tripsService.findOne(id, req.user?.companyId);
   }
 
@@ -73,13 +76,13 @@ export class TripsController {
   update(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdateTripDto,
-    @Request() req: any,
+    @Request() req: AuthRequest,
   ) {
     return this.tripsService.update(id, dto, req.user?.companyId);
   }
 
   @Delete(':id')
-  remove(@Param('id', ParseIntPipe) id: number, @Request() req: any) {
+  remove(@Param('id', ParseIntPipe) id: number, @Request() req: AuthRequest) {
     return this.tripsService.remove(id, req.user?.companyId);
   }
 }

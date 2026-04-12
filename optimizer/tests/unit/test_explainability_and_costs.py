@@ -161,7 +161,7 @@ def test_optimizer_result_payload_serializes_block_and_duty_cost_fields():
     assert payload["duties"][0]["total_cost"] == pytest.approx(131.25)
 
 
-def test_greedy_csp_computes_overtime_from_spread_not_only_work_time():
+def test_greedy_csp_computes_overtime_from_work_time_not_spread_time():
     duty = Duty(id=165, work_time=484, spread_time=560)
 
     solution = GreedyCSP(
@@ -170,8 +170,34 @@ def test_greedy_csp_computes_overtime_from_spread_not_only_work_time():
         overtime_limit_minutes=120,
     ).finalize_selected_duties([duty])
 
-    assert solution.duties[0].overtime_minutes == 80
+    assert solution.duties[0].overtime_minutes == 4
     assert solution.cct_violations == 0
+
+
+def test_csp_cost_breakdown_preserves_raw_precision_until_final_rounding():
+    duty_a = Duty(id=1, work_time=20, paid_minutes=20)
+    duty_b = Duty(id=2, work_time=20, paid_minutes=20)
+
+    breakdown = CostEvaluator().csp_cost_breakdown(CSPSolution(duties=[duty_a, duty_b]))
+
+    # 20 min at 25/h = 8.333..., twice = 16.666... -> 16.67.
+    # If each duty were rounded first, the result would drift to 16.66.
+    assert breakdown["work_cost"] == pytest.approx(16.67)
+    assert breakdown["total"] == pytest.approx(16.67)
+
+
+def test_csp_cost_breakdown_uses_piecewise_long_unpaid_break_penalty():
+    duty = Duty(id=10, work_time=60, spread_time=240, paid_minutes=60)
+    duty.meta["unpaid_break_total_minutes"] = 180
+
+    breakdown = CostEvaluator(
+        long_unpaid_break_limit_minutes=90,
+        long_unpaid_break_penalty_weight=0.05,
+    ).csp_cost_breakdown(CSPSolution(duties=[duty]))
+
+    # Excess = 90 min -> 30*1 + 60*3 = 210 weight-units -> 10.5 monetary units.
+    assert breakdown["long_unpaid_break_penalty"] == pytest.approx(10.5)
+    assert breakdown["duties"][0]["long_unpaid_break_penalty"] == pytest.approx(10.5)
 
 
 def test_optimizer_result_exposes_solver_explanation_and_trip_group_audit():
@@ -195,6 +221,12 @@ def test_optimizer_result_exposes_solver_explanation_and_trip_group_audit():
     assert payload["trip_group_audit"]["same_roster_groups"] == 1
     assert payload["phase_summary"]["vsp"]["vehicles"] >= 1
     assert payload["phase_summary"]["csp"]["crew"] >= 1
+    assert result.meta["reproducibility"]["input_hash"]
+    assert result.meta["reproducibility"]["params_hash"]
+    assert result.meta["performance"]["phase_timings_ms"]["input_validation_ms"] >= 0
+    assert result.meta["performance"]["phase_timings_ms"]["solver_ms"] >= 0
+    assert result.meta["performance"]["phase_timings_ms"]["output_validation_ms"] >= 0
+    assert result.meta["performance"]["phase_timings_ms"]["audit_enrichment_ms"] >= 0
 
 
 def test_greedy_csp_prefers_existing_trip_group_duty_when_feasible():
@@ -233,7 +265,7 @@ def test_build_failure_payload_exposes_infeasibility_explanation():
         trips,
         AlgorithmType.HYBRID_PIPELINE,
         {"max_shift_minutes": 480},
-        {"random_seed": 7},
+        {"random_seed": 7, "time_budget_s": 9},
         stage="output_validation",
     )
 
@@ -241,6 +273,9 @@ def test_build_failure_payload_exposes_infeasibility_explanation():
     assert payload["infeasibility_explanation"]["reason"] == "spread_limit"
     assert payload["issue_count"] == 2
     assert payload["input_snapshot"]["trip_count"] == 2
+    assert payload["input_snapshot"]["input_hash"]
+    assert payload["input_snapshot"]["params_hash"]
+    assert payload["input_snapshot"]["time_budget_s"] == pytest.approx(9.0)
 
 
 def test_optimize_route_returns_structured_diagnostics_on_failure():
@@ -296,7 +331,12 @@ def test_same_random_seed_produces_same_hybrid_solution_signature():
     signature_a = [[trip.id for trip in block.trips] for block in result_a.vsp.blocks]
     signature_b = [[trip.id for trip in block.trips] for block in result_b.vsp.blocks]
     assert signature_a == signature_b
-    assert result_a.meta["reproducibility"]["deterministic_replay_possible"] is True
+    assert result_a.meta["reproducibility"]["deterministic_replay_possible"] is False
+    assert "budget por tempo" in result_a.meta["reproducibility"]["note"]
+    assert result_a.meta["reproducibility"]["input_hash"] == result_b.meta["reproducibility"]["input_hash"]
+    assert result_a.meta["reproducibility"]["params_hash"] == result_b.meta["reproducibility"]["params_hash"]
+    assert result_a.meta["reproducibility"]["time_budget_s"] == pytest.approx(4.0)
     assert result_a.meta["solver_version"]
     assert "phase_timings_ms" in result_a.meta.get("performance", {})
     assert result_a.meta["performance"]["phase_timings_ms"].get("vsp_mcnf_ms") is not None
+    assert result_a.meta["performance"]["phase_timings_ms"].get("solver_ms") is not None

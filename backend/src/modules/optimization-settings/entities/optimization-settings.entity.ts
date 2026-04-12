@@ -308,6 +308,14 @@ export class OptimizationSettingsEntity extends BaseCompanyEntity {
   @Column({ name: 'operator_single_vehicle_only', default: false })
   operatorSingleVehicleOnly: boolean;
 
+  /** Aborta em violações hard de entrada/saída em vez de apenas auditar */
+  @Column({ name: 'strict_hard_validation', default: true })
+  strictHardValidation: boolean;
+
+  /** Modo de operação: urbano ou fretamento */
+  @Column({ name: 'operation_mode', default: 'urban', nullable: true })
+  operationMode: string;
+
   /** Máximo de sucessores candidatos por tarefa na geração de colunas */
   @Column({ name: 'max_candidate_successors_per_task', default: 5 })
   maxCandidateSuccessorsPerTask: number;

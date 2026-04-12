@@ -24,6 +24,7 @@ class HardConstraintValidator:
         seen_ids: set[int] = set()
         strict_gps = bool(cct_params.get("strict_gps_validation", True))
         strict_sync = bool(cct_params.get("strict_terminal_sync_validation", True))
+        allow_relief_points = bool(cct_params.get("allow_relief_points", False))
 
         for trip in trips:
             if trip.id in seen_ids:
@@ -47,8 +48,10 @@ class HardConstraintValidator:
                 if trip.gps_valid is False:
                     issues.append(f"GPS_FLAG_INVALID T{trip.id}")
 
+            issues.extend(self._validate_mid_trip_relief(trip, allow_relief_points))
+
         max_shift = int(cct_params.get("max_shift_minutes", 480) or 480)
-        max_driving = 600
+        max_driving = int(cct_params.get("max_driving_minutes", 270) or 270)
         inter_shift = int(cct_params.get("inter_shift_rest_minutes", 660) or 660)
         if max_shift > 1440:
             issues.append(f"LEGAL_MAX_SHIFT_EXCEEDED config={max_shift}")
@@ -140,6 +143,13 @@ class HardConstraintValidator:
                     issues.append(f"MANDATORY_GROUP_SPLIT {group_ids}")
 
         issues.extend(self._audit_operator_assignment(result, cct_params))
+        issues.extend(
+            self._audit_source_block_handoffs(
+                result.csp.duties,
+                operator_change_terminals_only,
+                allow_relief_points,
+            )
+        )
 
         # Separar violações hard (bloqueantes) de soft (avisos)
         _SOFT_PREFIXES = ("MEAL_BREAK_MISSING", "CONTINUOUS_DRIVING_EXCEEDED", "MANDATORY_GROUP_SPLIT")
@@ -242,6 +252,56 @@ class HardConstraintValidator:
                 return f"GPS_LONGITUDE_INVALID_{label} T{trip.id}"
         return None
 
+    def _validate_mid_trip_relief(self, trip: Trip, allow_relief_points: bool) -> List[str]:
+        issues: List[str] = []
+        has_point = trip.mid_trip_relief_point_id is not None
+        has_offset = trip.mid_trip_relief_offset_minutes is not None
+        if not has_point and not has_offset:
+            return issues
+        if has_point != has_offset:
+            issues.append(f"MID_TRIP_RELIEF_INCOMPLETE T{trip.id}")
+            return issues
+        if not allow_relief_points:
+            issues.append(f"MID_TRIP_RELIEF_DISABLED T{trip.id}")
+        split_offset = int(trip.mid_trip_relief_offset_minutes or 0)
+        trip_duration = int(trip.duration or max(0, trip.end_time - trip.start_time))
+        if split_offset <= 0 or (trip_duration > 0 and split_offset >= trip_duration):
+            issues.append(f"MID_TRIP_RELIEF_OFFSET_INVALID T{trip.id}")
+        relief_point_id = int(trip.mid_trip_relief_point_id or 0)
+        if relief_point_id <= 0:
+            issues.append(f"MID_TRIP_RELIEF_POINT_INVALID T{trip.id}")
+        if relief_point_id in {int(trip.origin_id), int(trip.destination_id)}:
+            issues.append(f"MID_TRIP_RELIEF_ENDPOINT_DUPLICATE T{trip.id}")
+        return issues
+
+    def _operator_change_boundary_ok(
+        self,
+        end_trip: Trip,
+        start_trip: Trip,
+        allow_relief_points: bool,
+    ) -> bool:
+        same_terminal = end_trip.destination_id == start_trip.origin_id
+        same_depot = (
+            end_trip.depot_id is not None
+            and start_trip.depot_id is not None
+            and end_trip.depot_id == start_trip.depot_id
+        )
+        relief_ok = False
+        if allow_relief_points:
+            relief_ok = bool(
+                end_trip.is_relief_point
+                or start_trip.is_relief_point
+                or (
+                    end_trip.relief_point_id is not None
+                    and end_trip.relief_point_id in {end_trip.destination_id, start_trip.origin_id}
+                )
+                or (
+                    start_trip.relief_point_id is not None
+                    and start_trip.relief_point_id in {end_trip.destination_id, start_trip.origin_id}
+                )
+            )
+        return same_terminal or same_depot or relief_ok
+
     def _audit_block(self, block, min_layover: int, enforce_same_depot: bool, allow_multi_line: bool = True) -> List[str]:
         issues: List[str] = []
         trips = list(getattr(block, "trips", []))
@@ -313,26 +373,47 @@ class HardConstraintValidator:
             if operator_change_terminals_only and current.trips and nxt.trips:
                 end_trip = current.trips[-1]
                 start_trip = nxt.trips[0]
-                same_terminal = end_trip.destination_id == start_trip.origin_id
-                same_depot = (
-                    end_trip.depot_id is not None
-                    and start_trip.depot_id is not None
-                    and end_trip.depot_id == start_trip.depot_id
-                )
-                relief_ok = False
-                if allow_relief_points:
-                    relief_ok = bool(
-                        end_trip.is_relief_point
-                        or start_trip.is_relief_point
-                        or (
-                            end_trip.relief_point_id is not None
-                            and end_trip.relief_point_id in {end_trip.destination_id, start_trip.origin_id}
-                        )
-                        or (
-                            start_trip.relief_point_id is not None
-                            and start_trip.relief_point_id in {end_trip.destination_id, start_trip.origin_id}
-                        )
-                    )
-                if not (same_terminal or same_depot or relief_ok):
+                if not self._operator_change_boundary_ok(end_trip, start_trip, allow_relief_points):
                     issues.append(f"OPERATOR_CHANGE_NON_TERMINAL D{duty.id} B{current.id}->{nxt.id}")
+        return issues
+
+    def _audit_source_block_handoffs(
+        self,
+        duties,
+        operator_change_terminals_only: bool,
+        allow_relief_points: bool,
+    ) -> List[str]:
+        if not operator_change_terminals_only:
+            return []
+
+        grouped: Dict[int, List[Tuple[int, Any]]] = {}
+        for duty in duties:
+            for task in getattr(duty, "tasks", []):
+                source_block_id = int(task.meta.get("source_block_id", task.id))
+                grouped.setdefault(source_block_id, []).append((int(duty.id), task))
+
+        issues: List[str] = []
+        for source_block_id, entries in grouped.items():
+            ordered = sorted(entries, key=lambda item: (item[1].start_time, item[1].id, item[0]))
+            for index in range(len(ordered) - 1):
+                current_duty_id, current_task = ordered[index]
+                next_duty_id, next_task = ordered[index + 1]
+                if current_duty_id == next_duty_id:
+                    continue
+                gap = next_task.start_time - current_task.end_time
+                if gap < 0:
+                    issues.append(
+                        f"SOURCE_BLOCK_DUTY_OVERLAP SB{source_block_id} D{current_duty_id}->{next_duty_id}"
+                    )
+                    continue
+                if not current_task.trips or not next_task.trips:
+                    continue
+                if not self._operator_change_boundary_ok(
+                    current_task.trips[-1],
+                    next_task.trips[0],
+                    allow_relief_points,
+                ):
+                    issues.append(
+                        f"OPERATOR_CHANGE_NON_TERMINAL SB{source_block_id} D{current_duty_id}->{next_duty_id}"
+                    )
         return issues

@@ -1,15 +1,68 @@
 import {
   IsInt,
   IsOptional,
+  IsString,
   IsEnum,
   IsObject,
   IsBoolean,
   IsArray,
+  IsNumber,
+  Min,
+  Max,
+  ValidateNested,
 } from 'class-validator';
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { Type } from 'class-transformer';
+import { ApiPropertyOptional } from '@nestjs/swagger';
 import { OptimizationAlgorithm } from '../entities/optimization-run.entity';
 
+export class VspParamsDto {
+  @IsOptional() @IsNumber() restarts?: number;
+  @IsOptional() @IsNumber() maxLocalIterations?: number;
+  @IsOptional() @IsBoolean() enablePerturbation?: boolean;
+  @IsOptional() @IsNumber() timeLimitSeconds?: number;
+  @IsOptional() @IsNumber() timeBudgetSeconds?: number;
+  @IsOptional() @IsNumber() maxVehicles?: number;
+  @IsOptional() @IsNumber() fixedVehicleActivationCost?: number;
+  @IsOptional() @IsNumber() deadheadCostPerMinute?: number;
+  @IsOptional() @IsNumber() idleCostPerMinute?: number;
+  @IsOptional() @IsNumber() randomSeed?: number;
+  @IsOptional() @IsNumber() maxConnectionCostForReuseRatio?: number;
+  @IsOptional() @IsBoolean() strictHardValidation?: boolean;
+  @IsOptional() @IsBoolean() allowMultiLineBlock?: boolean;
+  @IsOptional() @IsBoolean() allowVehicleSplitShifts?: boolean;
+  @IsOptional() @IsNumber() splitShiftMinGapMinutes?: number;
+  @IsOptional() @IsNumber() splitShiftMaxGapMinutes?: number;
+}
+
+export class CspParamsDto {
+  @IsOptional() @IsNumber() maxWorkMinutes?: number;
+  @IsOptional() @IsNumber() minWorkMinutes?: number;
+  @IsOptional() @IsNumber() minShiftMinutes?: number;
+  @IsOptional() @IsNumber() maxShiftMinutes?: number;
+  @IsOptional() @IsNumber() maxDrivingMinutes?: number;
+  @IsOptional() @IsNumber() breakMinutes?: number;
+  @IsOptional() @IsNumber() connectionToleranceMinutes?: number;
+  @IsOptional() @IsBoolean() enforceSingleLineDuty?: boolean;
+  @IsOptional() @IsNumber() fairnessWeight?: number;
+  @IsOptional() @IsNumber() fairnessTargetWorkMinutes?: number;
+  @IsOptional() @IsNumber() fairnessToleranceMinutes?: number;
+  @IsOptional() @IsNumber() maxUnpaidBreakMinutes?: number;
+  @IsOptional() @IsNumber() maxTotalUnpaidBreakMinutes?: number;
+  @IsOptional() @IsNumber() longUnpaidBreakLimitMinutes?: number;
+  @IsOptional() @IsNumber() longUnpaidBreakPenaltyWeight?: number;
+  @IsOptional() @IsBoolean() strictHardValidation?: boolean;
+  @IsOptional() @IsBoolean() enforceTripGroupsHard?: boolean;
+  @IsOptional() @IsBoolean() operatorChangeTerminalsOnly?: boolean;
+  @IsOptional() @IsBoolean() operatorSingleVehicleOnly?: boolean;
+  @IsOptional() @IsNumber() timeLimitSeconds?: number;
+}
+
 export class RunOptimizationDto {
+  @ApiPropertyOptional({ description: 'Nome amigável para a execução da otimização' })
+  @IsOptional()
+  @IsString()
+  name?: string;
+
   @ApiPropertyOptional({
     description: 'ID de uma única linha (use lineIds para múltiplas)',
   })
@@ -57,54 +110,25 @@ export class RunOptimizationDto {
 
   @ApiPropertyOptional({ description: 'Parâmetros do VSP' })
   @IsOptional()
-  @IsObject()
-  vspParams?: {
-    restarts?: number;
-    maxLocalIterations?: number;
-    enablePerturbation?: boolean;
-    timeLimitSeconds?: number;
-    timeBudgetSeconds?: number;
-    maxVehicles?: number;
-    fixedVehicleActivationCost?: number;
-    deadheadCostPerMinute?: number;
-    idleCostPerMinute?: number;
-    randomSeed?: number;
-    maxConnectionCostForReuseRatio?: number;
-    strictHardValidation?: boolean;
-    allowMultiLineBlock?: boolean;
-    allowVehicleSplitShifts?: boolean;
-    splitShiftMinGapMinutes?: number;
-    splitShiftMaxGapMinutes?: number;
-  };
+  @ValidateNested()
+  @Type(() => VspParamsDto)
+  vspParams?: VspParamsDto;
 
   @ApiPropertyOptional({ description: 'Parâmetros do CSP/CCT' })
   @IsOptional()
-  @IsObject()
-  cspParams?: {
-    maxWorkMinutes?: number;
-    minWorkMinutes?: number;
-    minShiftMinutes?: number;
-    maxShiftMinutes?: number; // jornada máxima total (spread)
-    maxDrivingMinutes?: number; // direção contínua máxima
-    breakMinutes?: number;
-    connectionToleranceMinutes?: number;
-    enforceSingleLineDuty?: boolean;
-    fairnessWeight?: number;
-    fairnessTargetWorkMinutes?: number;
-    fairnessToleranceMinutes?: number;
-    maxUnpaidBreakMinutes?: number;
-    maxTotalUnpaidBreakMinutes?: number;
-    longUnpaidBreakLimitMinutes?: number;
-    longUnpaidBreakPenaltyWeight?: number;
-    strictHardValidation?: boolean;
-    enforceTripGroupsHard?: boolean;
-    operatorChangeTerminalsOnly?: boolean;
-    operatorSingleVehicleOnly?: boolean;
-    timeLimitSeconds?: number;
-  };
+  @ValidateNested()
+  @Type(() => CspParamsDto)
+  cspParams?: CspParamsDto;
 
   @ApiPropertyOptional({ default: false })
   @IsOptional()
   @IsBoolean()
   dryRun?: boolean;
+
+  @ApiPropertyOptional({ description: 'Budget global de tempo em segundos (atalho para vspParams.timeBudgetSeconds + cspParams.timeLimitSeconds). Min: 5s, Max: 600s', default: 30, minimum: 5, maximum: 600 })
+  @IsOptional()
+  @IsNumber()
+  @Min(5, { message: 'timeBudgetSeconds deve ser no mínimo 5 segundos.' })
+  @Max(600, { message: 'timeBudgetSeconds não pode exceder 600 segundos (10 minutos).' })
+  timeBudgetSeconds?: number;
 }

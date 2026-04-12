@@ -89,6 +89,7 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
         super().__init__(name="greedy_csp", time_budget_s=30.0)
         self.params = params
         self.vsp_params = vsp_params or {}
+        self._next_synthetic_trip_id = -1
         self.legal_max_shift = int(params.get("legal_max_shift_minutes", 720))
         self.legal_max_continuous_driving = 600
         self.max_shift = min(int(params.get("max_shift_minutes", _DEF_MAX_SHIFT)), self.legal_max_shift)
@@ -161,9 +162,22 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
             return 0
         return max(0, int(work_minutes) - self.max_work)
 
+    def _long_unpaid_break_penalty(self, unpaid_break_minutes: float) -> float:
+        excess = max(0.0, float(unpaid_break_minutes) - float(self.long_unpaid_break_limit))
+        if excess <= 0.0:
+            return 0.0
+        tier1 = min(excess, 30.0)
+        tier2 = min(max(0.0, excess - 30.0), 60.0)
+        tier3 = max(0.0, excess - 90.0)
+        return self.long_unpaid_break_penalty_weight * (
+            tier1 * 1.0 + tier2 * 3.0 + tier3 * 10.0
+        )
+
     def _transfer_needed(self, a: Block, b: Block) -> int:
         last = a.trips[-1]
         first = b.trips[0]
+        if first.is_continuation_of(last):
+            return 0
         deadhead_needed = int(
             last.deadhead_times.get(first.origin_id, 0)
         )
@@ -177,6 +191,112 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
             return 0
         deficit = required - gap
         return deficit if deficit <= self.connection_tolerance else 0
+
+    def _reset_synthetic_trip_ids(self, blocks: Sequence[Block]) -> None:
+        existing_ids = [int(trip.id) for block in blocks for trip in block.trips]
+        min_existing = min(existing_ids) if existing_ids else 0
+        self._next_synthetic_trip_id = min(-1, min_existing - 1)
+
+    def _allocate_synthetic_trip_id(self) -> int:
+        synthetic_id = self._next_synthetic_trip_id
+        self._next_synthetic_trip_id -= 1
+        return synthetic_id
+
+    def _split_trip_for_relief(self, trip: Trip) -> List[Trip]:
+        if not self.allow_relief_points:
+            return [trip]
+
+        relief_point_id = trip.mid_trip_relief_point_id
+        relief_offset = trip.mid_trip_relief_offset_minutes
+        trip_duration = int(trip.duration or max(0, trip.end_time - trip.start_time))
+        if (
+            relief_point_id is None
+            or relief_offset is None
+            or trip_duration <= 0
+            or int(relief_offset) <= 0
+            or int(relief_offset) >= trip_duration
+        ):
+            return [trip]
+
+        split_offset = int(relief_offset)
+        split_time = int(trip.start_time) + split_offset
+        time_ratio = split_offset / trip_duration
+
+        # Fallback legacy approximation uses time ratio only. When the caller
+        # provides physical split ratios, we prefer them for EV-sensitive cost
+        # allocation.
+        raw_distance_ratio = getattr(trip, "mid_trip_relief_distance_ratio", None)
+        raw_elevation_ratio = getattr(trip, "mid_trip_relief_elevation_ratio", None)
+        distance_ratio = float(raw_distance_ratio) if raw_distance_ratio is not None else time_ratio
+        elevation_ratio = float(raw_elevation_ratio) if raw_elevation_ratio is not None else distance_ratio
+
+        distance_ratio = min(1.0, max(0.0, distance_ratio))
+        elevation_ratio = min(1.0, max(0.0, elevation_ratio))
+
+        total_distance = float(trip.distance_km)
+        total_elevation = float(trip.elevation_gain_m)
+        total_energy = float(trip.energy_kwh)
+
+        first_distance = total_distance * distance_ratio
+        first_elevation = total_elevation * elevation_ratio
+        energy_ratio = distance_ratio if total_elevation <= 0.0 else ((0.7 * distance_ratio) + (0.3 * elevation_ratio))
+
+        first_segment = copy.deepcopy(trip)
+        first_segment.end_time = split_time
+        first_segment.duration = split_offset
+        first_segment.destination_id = int(relief_point_id)
+        first_segment.distance_km = first_distance
+        first_segment.energy_kwh = total_energy * energy_ratio
+        first_segment.elevation_gain_m = first_elevation
+        first_segment.destination_latitude = None
+        first_segment.destination_longitude = None
+        first_segment.relief_point_id = None
+        first_segment.is_relief_point = False
+        first_segment.mid_trip_relief_point_id = None
+        first_segment.mid_trip_relief_offset_minutes = None
+        first_segment.mid_trip_relief_distance_ratio = None
+        first_segment.mid_trip_relief_elevation_ratio = None
+        first_segment.original_trip_id = int(trip.id)
+        first_segment.segment_index = 0
+        first_segment.segment_count = 2
+        first_segment.trip_group_id = None
+        first_segment.idle_after_minutes = 0
+        first_segment.is_pull_back = False
+
+        second_segment = copy.deepcopy(trip)
+        second_segment.id = self._allocate_synthetic_trip_id()
+        second_segment.start_time = split_time
+        second_segment.end_time = int(trip.end_time)
+        second_segment.duration = trip_duration - split_offset
+        second_segment.origin_id = int(relief_point_id)
+        second_segment.distance_km = max(0.0, float(trip.distance_km) - first_segment.distance_km)
+        second_segment.energy_kwh = max(0.0, float(trip.energy_kwh) - first_segment.energy_kwh)
+        second_segment.elevation_gain_m = max(0.0, float(trip.elevation_gain_m) - first_segment.elevation_gain_m)
+        second_segment.origin_latitude = None
+        second_segment.origin_longitude = None
+        second_segment.relief_point_id = None
+        second_segment.is_relief_point = False
+        second_segment.mid_trip_relief_point_id = None
+        second_segment.mid_trip_relief_offset_minutes = None
+        second_segment.mid_trip_relief_distance_ratio = None
+        second_segment.mid_trip_relief_elevation_ratio = None
+        second_segment.original_trip_id = int(trip.id)
+        second_segment.segment_index = 1
+        second_segment.segment_count = 2
+        second_segment.idle_before_minutes = 0
+        second_segment.is_pull_out = False
+
+        return [first_segment, second_segment]
+
+    def _expand_block_trips_for_relief(self, block: Block) -> Tuple[List[Trip], int]:
+        expanded: List[Trip] = []
+        split_count = 0
+        for trip in sorted(block.trips, key=lambda item: (item.start_time, item.id)):
+            split_trips = self._split_trip_for_relief(trip)
+            if len(split_trips) > 1:
+                split_count += 1
+            expanded.extend(split_trips)
+        return expanded, split_count
 
     def _break_resets(self, state: Dict[str, Any], gap: int) -> Tuple[bool, Dict[str, Any], int]:
         state = {"credit": int(state.get("credit", 0)), "has_long": bool(state.get("has_long", False))}
@@ -327,6 +447,13 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
                 "relief_start_id": trips[0].origin_id if trips else None,
                 "relief_end_id": trips[-1].destination_id if trips else None,
                 "task_drive_minutes": sum(t.duration for t in trips),
+                "original_trip_ids": list(dict.fromkeys(int(getattr(t, "public_id", t.id)) for t in trips)),
+                "contains_mid_trip_relief_segment": any(t.is_mid_trip_segment for t in trips),
+                "starts_at_mid_trip_relief": bool(trips and trips[0].starts_at_mid_trip_relief),
+                "ends_at_mid_trip_relief": bool(trips and trips[-1].ends_at_mid_trip_relief),
+                "mid_trip_original_trip_ids": list(
+                    dict.fromkeys(int(getattr(t, "public_id", t.id)) for t in trips if t.is_mid_trip_segment)
+                ),
                 "is_source_block_start": is_source_block_start,
                 "is_source_block_end": is_source_block_end,
                 "task_start_buffer_minutes": source_start_buffer if is_source_block_start else 0,
@@ -339,14 +466,19 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
 
     def prepare_tasks(self, blocks: List[Block]) -> Tuple[List[Block], Dict[str, Any]]:
         """Executa run-cutting sobre blocos VSP para gerar tarefas de CSP."""
+        self._reset_synthetic_trip_ids(blocks)
         self._annotate_source_block_boundaries(blocks)
         tasks: List[Block] = []
         relief_cuts = 0
+        mid_trip_relief_splits = 0
+        mid_trip_relief_segments = 0
         max_chunk_drive = max(60, min(self.max_work, self.mandatory_break_after, self.daily_driving_limit))
         meal_trigger = max(240, self.mandatory_break_after - max(0, self.meal_break_minutes)) if self.meal_break_minutes > 0 else self.mandatory_break_after
 
         for block in sorted(blocks, key=lambda item: (item.start_time, item.id)):
-            ordered = sorted(block.trips, key=lambda trip: (trip.start_time, trip.id))
+            ordered, block_mid_relief_splits = self._expand_block_trips_for_relief(block)
+            mid_trip_relief_splits += block_mid_relief_splits
+            mid_trip_relief_segments += sum(1 for trip in ordered if trip.is_mid_trip_segment)
             if not ordered:
                 continue
 
@@ -362,6 +494,9 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
 
                 gap = nxt.start_time - trip.end_time
                 boundary = self._is_relief_boundary(trip, nxt)
+                explicit_mid_trip_relief_boundary = (
+                    trip.ends_at_mid_trip_relief and nxt.starts_at_mid_trip_relief
+                )
                 next_duration = nxt.duration
                 pair_guard = (
                     trip.trip_group_id is not None
@@ -390,6 +525,8 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
 
                 if gap >= self.min_break:
                     should_cut = True
+                elif explicit_mid_trip_relief_boundary:
+                    should_cut = True
                 elif boundary and current_drive >= max_chunk_drive:
                     should_cut = True
                 elif boundary and current_drive >= meal_trigger:
@@ -408,6 +545,7 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
                     task = self._make_task(block, current, self._next_block_id())
                     task.meta["relief_cut"] = True
                     task.meta["split_reason"] = (
+                        "explicit_mid_trip_relief" if explicit_mid_trip_relief_boundary else
                         "natural_break" if gap >= self.min_break else
                         "mandatory_break" if current_drive >= max_chunk_drive else
                         "meal_break" if current_drive >= meal_trigger else
@@ -422,7 +560,9 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
             "task_count": len(tasks),
             "source_block_count": len(blocks),
             "relief_cuts": relief_cuts,
-            "run_cutting": "terminal_relief_and_break_windows",
+            "mid_trip_relief_splits": mid_trip_relief_splits,
+            "mid_trip_relief_segments": mid_trip_relief_segments,
+            "run_cutting": "terminal_and_intra_trip_relief_and_break_windows",
         }
 
     def _can_extend(self, duty: Duty, block: Block) -> Tuple[bool, str, Dict[str, Any]]:
@@ -441,6 +581,15 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
         effective_gap = self._effective_gap(gap)
         if gap < 0:
             return False, "overlap", {}
+
+        last_trip = last.trips[-1]
+        first_trip = block.trips[0]
+        if (
+            (last_trip.ends_at_mid_trip_relief or first_trip.starts_at_mid_trip_relief)
+            and not first_trip.is_continuation_of(last_trip)
+            and last_trip.destination_id != first_trip.origin_id
+        ):
+            return False, "mid_trip_relief_terminal_mismatch", {}
 
         last_service_day = self._service_day(last)
         block_service_day = self._service_day(block)
@@ -492,7 +641,7 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
         new_work = duty.work_time + block_drive
         overtime_minutes = self._regular_overtime_minutes(new_work)
         if overtime_minutes > self.overtime_limit:
-            return False, "overtime_hard", {"new_spread": new_spread, "overtime_minutes": overtime_minutes}
+            return False, "overtime_hard", {"new_spread": new_spread, "new_work": new_work, "overtime_minutes": overtime_minutes}
 
         start_depot = duty.meta.get("start_depot_id")
         candidate_end_depot = block.trips[-1].depot_id
@@ -595,6 +744,11 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
                 duty.meta["covered_trip_ids"].append(t.id)
             else:
                 raise ValueError(f"Trip {t.id} already in duty {duty.id} covered_trip_ids")
+        duty.meta.setdefault("covered_original_trip_ids", [])
+        for trip in block.trips:
+            original_trip_id = int(getattr(trip, "public_id", trip.id))
+            if original_trip_id not in duty.meta["covered_original_trip_ids"]:
+                duty.meta["covered_original_trip_ids"].append(original_trip_id)
         duty.meta.setdefault("covered_trip_group_ids", [])
         for trip in block.trips:
             group_id = getattr(trip, "trip_group_id", None)
@@ -849,7 +1003,7 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
                 _nocturnal_overlap(t.start_time, t.end_time, self.nocturnal_start_hour, self.nocturnal_end_hour)
                 for block in duty.tasks for t in block.trips
             )
-            duty.overtime_minutes = self._regular_overtime_minutes(duty.spread_time)
+            duty.overtime_minutes = self._regular_overtime_minutes(duty.work_time)
             waiting_minutes = int(duty.meta.get("waiting_minutes", max(0, duty.spread_time - duty.work_time)))
             unpaid_total = max(0, duty.spread_time - duty.work_time)
             paid_waiting = int(round(waiting_minutes * self.waiting_time_pay_pct)) if self.idle_time_is_paid else 0
@@ -1071,8 +1225,7 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
                 projected_work = int(data.get("new_work", duty.work_time + self._block_drive(task)))
                 fairness_penalty = self._fairness_penalty(projected_work)
                 gap = float(data.get("gap", 0))
-                long_gap_minutes = max(0.0, gap - float(self.long_unpaid_break_limit))
-                long_gap_penalty = long_gap_minutes * self.long_unpaid_break_penalty_weight
+                long_gap_penalty = self._long_unpaid_break_penalty(gap)
                 meal_penalty = 0.0
                 if self.meal_break_minutes > 0:
                     new_spread = float(data.get("new_spread", 0))
@@ -1112,11 +1265,15 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
             duties.append(duty)
 
         duties = self._merge_small_duties(duties)
+        duties, relief_reassignment_audit = self._relief_reassignment_postopt(duties, blocks)
+        if relief_reassignment_audit.get("accepted_moves"):
+            duties = self._merge_small_duties(duties)
 
         sol = self.finalize_selected_duties(duties, original_blocks=blocks)
         run_cut_meta["duplicate_task_skips"] = duplicate_task_skips
         sol.meta.update(run_cut_meta)
         sol.meta["duty_merge_diagnostics"] = self._extension_diagnostics_snapshot()
+        sol.meta["relief_reassignment_audit"] = relief_reassignment_audit
         _log.info(
             "[CSP-GREEDY] %d duties (roster_count=%s), avg_work=%d, short(<120)=%d",
             len(duties),
@@ -1163,7 +1320,7 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
                 if combined_spread > self.max_shift:
                     i += 1
                     continue
-                if self._regular_overtime_minutes(combined_spread) > self.overtime_limit:
+                if self._regular_overtime_minutes(combined_work) > self.overtime_limit:
                     i += 1
                     continue
 
@@ -1256,7 +1413,7 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
                 if combined_spread > self.max_shift:
                     reject_reasons["spread"] = reject_reasons.get("spread", 0) + 1
                     continue
-                if self._regular_overtime_minutes(combined_spread) > self.overtime_limit:
+                if self._regular_overtime_minutes(combined_work) > self.overtime_limit:
                     reject_reasons["overtime"] = reject_reasons.get("overtime", 0) + 1
                     continue
 
@@ -1304,15 +1461,23 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
                     # Prepend: rebuild from sd + nd tasks
                     tasks_to_add = sorted(best_target.tasks, key=lambda t: t.start_time)
                     # Reset sd to receive nd tasks
+                    all_applied = True
                     for task in tasks_to_add:
                         ok, _, data = self._can_extend(sd, task)
                         if ok:
                             self._apply_block(sd, task, data)
-                    # Replace best_target contents with merged sd
-                    best_target.tasks = sd.tasks
-                    best_target.work_time = sd.work_time
-                    best_target.spread_time = sd.spread_time
-                    best_target.meta = sd.meta
+                        else:
+                            all_applied = False
+                            break
+                    if all_applied:
+                        # Replace best_target contents with merged sd
+                        best_target.tasks = sd.tasks
+                        best_target.work_time = sd.work_time
+                        best_target.spread_time = sd.spread_time
+                        best_target.meta = sd.meta
+                    else:
+                        # Merge failed at apply time — skip this merge
+                        continue
                 merged_ids.add(sd.id)
                 _log.info(
                     "[CSP-CROSS-MERGE] Merged short duty %d (%dmin) into duty %d via %s (now %dmin work)",
@@ -1328,3 +1493,366 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
             duties = [d for d in duties if d.id not in merged_ids]
             _log.info("[CSP-CROSS-MERGE] Absorbed %d short duties, %d remain", len(merged_ids), len(duties))
         return duties
+
+    def _task_is_relief_reassignment_candidate(self, task: Block) -> bool:
+        if not task.trips:
+            return False
+        if bool(task.meta.get("starts_at_mid_trip_relief", False)):
+            return True
+        if bool(task.meta.get("ends_at_mid_trip_relief", False)):
+            return True
+        return bool(task.meta.get("contains_mid_trip_relief_segment", False))
+
+    def _task_summary(self, task: Block) -> Dict[str, Any]:
+        return {
+            "task_id": int(task.meta.get("task_id", task.id)),
+            "source_block_id": int(task.meta.get("source_block_id", task.id)),
+            "trip_ids": [int(getattr(trip, "public_id", trip.id)) for trip in task.trips],
+            "task_trip_ids": [int(trip.id) for trip in task.trips],
+            "mid_trip_original_trip_ids": [
+                int(item) for item in (task.meta.get("mid_trip_original_trip_ids") or [])
+            ],
+            "start_time": int(task.start_time),
+            "end_time": int(task.end_time),
+            "relief_start_id": task.meta.get("relief_start_id"),
+            "relief_end_id": task.meta.get("relief_end_id"),
+            "split_reason": task.meta.get("split_reason"),
+            "starts_at_mid_trip_relief": bool(task.meta.get("starts_at_mid_trip_relief", False)),
+            "ends_at_mid_trip_relief": bool(task.meta.get("ends_at_mid_trip_relief", False)),
+        }
+
+    def _seed_duty_with_task(self, duty_id: int, task: Block) -> Duty:
+        duty = Duty(id=duty_id)
+        block_drive = self._block_drive(task)
+        self._apply_block(
+            duty,
+            task,
+            {
+                "new_work": block_drive,
+                "new_spread": self._duty_spread_minutes([task]),
+                "new_cont": block_drive,
+                "daily_drive": block_drive,
+                "extended_days_used": 1 if block_drive > self.daily_driving_limit else 0,
+            },
+        )
+        return duty
+
+    def _rebuild_duty_from_tasks(self, tasks: Sequence[Block], duty_id: int) -> Tuple[Optional[Duty], str]:
+        ordered = sorted((task for task in tasks if task.trips), key=lambda item: (item.start_time, item.id))
+        if not ordered:
+            return None, "empty"
+
+        duty = self._seed_duty_with_task(duty_id, ordered[0])
+        for task in ordered[1:]:
+            ok, reason, data = self._can_extend(duty, task)
+            if not ok:
+                return None, reason or "rebuild_failed"
+            self._apply_block(duty, task, data)
+        return duty, ""
+
+    def _build_relief_reassignment_metrics(self, solution: CSPSolution) -> Dict[str, Any]:
+        duties = solution.duties or []
+        short_duties = sum(1 for duty in duties if self.min_work > 0 and duty.work_time < self.min_work)
+        split_duties = 0
+        waiting_minutes = 0
+        unpaid_break_minutes = 0
+        total_overtime_minutes = 0
+        total_paid_minutes = 0
+        relief_handoff_map: Dict[int, set[int]] = defaultdict(set)
+        vehicle_switches = 0
+
+        for duty in duties:
+            unique_sources: List[int] = []
+            for source_block_id in duty.meta.get("source_block_ids", []):
+                if source_block_id is None:
+                    continue
+                parsed_source = int(source_block_id)
+                if parsed_source not in unique_sources:
+                    unique_sources.append(parsed_source)
+            if len(unique_sources) > 1:
+                split_duties += 1
+                vehicle_switches += len(unique_sources) - 1
+
+            waiting_minutes += int(duty.meta.get("waiting_minutes", 0) or 0)
+            unpaid_break_minutes += int(
+                duty.meta.get("unpaid_break_total_minutes", max(0, duty.spread_time - duty.work_time)) or 0
+            )
+            total_overtime_minutes += int(duty.overtime_minutes or 0)
+            total_paid_minutes += int(duty.paid_minutes or 0)
+
+            for trip in duty.all_trips:
+                if trip.is_mid_trip_segment:
+                    relief_handoff_map[int(trip.public_id)].add(int(duty.id))
+
+        relief_handoffs = sum(1 for assigned_duties in relief_handoff_map.values() if len(assigned_duties) > 1)
+        fragmentation_score = (
+            len(duties) * 10000
+            + short_duties * 1000
+            + split_duties * 800
+            + vehicle_switches * 600
+            + waiting_minutes
+            + max(0, unpaid_break_minutes - waiting_minutes)
+            + total_overtime_minutes * 10
+        )
+
+        return {
+            "crew": int(solution.num_crew),
+            "duties": len(duties),
+            "violations": int(solution.cct_violations or 0),
+            "short_duties": short_duties,
+            "split_duties": split_duties,
+            "vehicle_switches": vehicle_switches,
+            "waiting_minutes": waiting_minutes,
+            "unpaid_break_minutes": unpaid_break_minutes,
+            "total_overtime_minutes": total_overtime_minutes,
+            "total_paid_minutes": total_paid_minutes,
+            "relief_handoffs": relief_handoffs,
+            "uncovered_blocks": len(solution.uncovered_blocks or []),
+            "fragmentation_score": fragmentation_score,
+        }
+
+    def _relief_reassignment_rank(self, metrics: Dict[str, Any]) -> Tuple[int, int, int, int, int, int, int, int, int]:
+        return (
+            int(metrics.get("violations", 0)),
+            int(metrics.get("crew", 0)),
+            int(metrics.get("duties", 0)),
+            int(metrics.get("split_duties", 0)),
+            int(metrics.get("vehicle_switches", 0)),
+            int(metrics.get("fragmentation_score", 0)),
+            int(metrics.get("short_duties", 0)),
+            int(metrics.get("total_overtime_minutes", 0)),
+            int(metrics.get("waiting_minutes", 0)),
+        )
+
+    def _evaluate_relief_candidate_duties(
+        self,
+        duties: Sequence[Duty],
+        original_blocks: Optional[List[Block]],
+    ) -> Tuple[List[Duty], CSPSolution, Dict[str, Any]]:
+        snapshot = copy.deepcopy(self._extension_diagnostics)
+        try:
+            normalized = copy.deepcopy(
+                sorted((duty for duty in duties if duty.tasks), key=lambda item: (item.start_time, item.id))
+            )
+            normalized = self._merge_small_duties(normalized)
+            solution = self.finalize_selected_duties(normalized, original_blocks=original_blocks)
+            metrics = self._build_relief_reassignment_metrics(solution)
+        finally:
+            self._extension_diagnostics = snapshot
+        return normalized, solution, metrics
+
+    def _relief_reassignment_postopt(
+        self,
+        duties: List[Duty],
+        original_blocks: Optional[List[Block]],
+    ) -> Tuple[List[Duty], Dict[str, Any]]:
+        enabled = bool(self.params.get("enable_relief_reassignment_postopt", True))
+        max_passes = max(1, int(self.params.get("relief_reassignment_max_passes", 4) or 4))
+        target_limit = max(1, int(self.params.get("relief_reassignment_target_limit", 12) or 12))
+        sample_limit = max(10, int(self.params.get("relief_reassignment_sample_limit", 24) or 24))
+        audit: Dict[str, Any] = {
+            "enabled": enabled,
+            "passes": 0,
+            "considered": 0,
+            "evaluated": 0,
+            "feasible_targets": 0,
+            "accepted": 0,
+            "accepted_moves": [],
+            "rejection_reasons": {},
+            "samples": [],
+            "baseline_metrics": None,
+            "final_metrics": None,
+            "relief_task_candidates": 0,
+            "improved": False,
+        }
+
+        if not enabled:
+            audit["skipped"] = "disabled"
+            return duties, audit
+
+        seeded_duties = [duty for duty in duties if duty.tasks]
+        if not seeded_duties:
+            audit["skipped"] = "no_duties"
+            return duties, audit
+
+        current_duties, _, current_metrics = self._evaluate_relief_candidate_duties(seeded_duties, original_blocks)
+        audit["baseline_metrics"] = current_metrics
+        audit["final_metrics"] = current_metrics
+        audit["relief_task_candidates"] = sum(
+            1
+            for duty in current_duties
+            for task in duty.tasks
+            if self._task_is_relief_reassignment_candidate(task)
+        )
+
+        if audit["relief_task_candidates"] == 0:
+            audit["skipped"] = "no_relief_candidates"
+            return current_duties, audit
+
+        def record_rejection(reason: str, sample: Dict[str, Any]) -> None:
+            reason_key = reason or "unknown"
+            audit["rejection_reasons"][reason_key] = int(audit["rejection_reasons"].get(reason_key, 0)) + 1
+            if len(audit["samples"]) < sample_limit:
+                audit["samples"].append(sample)
+
+        current_rank = self._relief_reassignment_rank(current_metrics)
+
+        for pass_index in range(max_passes):
+            audit["passes"] = pass_index + 1
+            best_candidate: Optional[Dict[str, Any]] = None
+            best_rank: Optional[Tuple[int, int, int, int, int, int, int]] = None
+
+            for source_duty in sorted(current_duties, key=lambda item: (item.start_time, item.id)):
+                for task_index, task in enumerate(source_duty.tasks):
+                    if not self._task_is_relief_reassignment_candidate(task):
+                        continue
+
+                    source_remaining = [candidate_task for idx, candidate_task in enumerate(source_duty.tasks) if idx != task_index]
+                    source_rebuilt: Optional[Duty] = None
+                    if source_remaining:
+                        source_rebuilt, source_reason = self._rebuild_duty_from_tasks(source_remaining, source_duty.id)
+                        if source_rebuilt is None:
+                            record_rejection(
+                                f"source_rebuild_{source_reason}",
+                                {
+                                    "reason": f"source_rebuild_{source_reason}",
+                                    "source_duty_id": int(source_duty.id),
+                                    "target_duty_id": None,
+                                    "mode": None,
+                                    "task": self._task_summary(task),
+                                },
+                            )
+                            continue
+
+                    candidate_targets = [
+                        duty
+                        for duty in current_duties
+                        if duty.id != source_duty.id and duty.tasks
+                    ]
+                    candidate_targets.sort(
+                        key=lambda duty: (
+                            min(
+                                abs(int(task.start_time) - int(duty.tasks[-1].end_time)),
+                                abs(int(duty.tasks[0].start_time) - int(task.end_time)),
+                            ),
+                            duty.id,
+                        )
+                    )
+
+                    for target_duty in candidate_targets[:target_limit]:
+                        for mode in ("append", "prepend"):
+                            audit["considered"] = int(audit.get("considered", 0)) + 1
+                            if mode == "append":
+                                if int(target_duty.tasks[-1].end_time) > int(task.start_time):
+                                    record_rejection(
+                                        "append_target_overlap",
+                                        {
+                                            "reason": "append_target_overlap",
+                                            "source_duty_id": int(source_duty.id),
+                                            "target_duty_id": int(target_duty.id),
+                                            "mode": mode,
+                                            "task": self._task_summary(task),
+                                        },
+                                    )
+                                    continue
+                                target_task_sequence = [*target_duty.tasks, task]
+                            else:
+                                if int(task.end_time) > int(target_duty.tasks[0].start_time):
+                                    record_rejection(
+                                        "prepend_target_overlap",
+                                        {
+                                            "reason": "prepend_target_overlap",
+                                            "source_duty_id": int(source_duty.id),
+                                            "target_duty_id": int(target_duty.id),
+                                            "mode": mode,
+                                            "task": self._task_summary(task),
+                                        },
+                                    )
+                                    continue
+                                target_task_sequence = [task, *target_duty.tasks]
+
+                            target_rebuilt, target_reason = self._rebuild_duty_from_tasks(
+                                target_task_sequence,
+                                target_duty.id,
+                            )
+                            if target_rebuilt is None:
+                                record_rejection(
+                                    f"{mode}_target_{target_reason}",
+                                    {
+                                        "reason": f"{mode}_target_{target_reason}",
+                                        "source_duty_id": int(source_duty.id),
+                                        "target_duty_id": int(target_duty.id),
+                                        "mode": mode,
+                                        "task": self._task_summary(task),
+                                    },
+                                )
+                                continue
+
+                            audit["feasible_targets"] = int(audit.get("feasible_targets", 0)) + 1
+
+                            candidate_duties: List[Duty] = []
+                            for existing_duty in current_duties:
+                                if existing_duty.id == source_duty.id:
+                                    if source_rebuilt is not None:
+                                        candidate_duties.append(source_rebuilt)
+                                    continue
+                                if existing_duty.id == target_duty.id:
+                                    candidate_duties.append(target_rebuilt)
+                                    continue
+                                candidate_duties.append(existing_duty)
+
+                            normalized_candidate, _, candidate_metrics = self._evaluate_relief_candidate_duties(
+                                candidate_duties,
+                                original_blocks,
+                            )
+                            audit["evaluated"] = int(audit.get("evaluated", 0)) + 1
+                            candidate_rank = self._relief_reassignment_rank(candidate_metrics)
+                            candidate_sample = {
+                                "source_duty_id": int(source_duty.id),
+                                "target_duty_id": int(target_duty.id),
+                                "mode": mode,
+                                "task": self._task_summary(task),
+                                "metrics_before": current_metrics,
+                                "metrics_after": candidate_metrics,
+                            }
+
+                            if candidate_rank < current_rank:
+                                if best_candidate is None or candidate_rank < (best_rank or candidate_rank):
+                                    best_candidate = {
+                                        "duties": normalized_candidate,
+                                        "metrics": candidate_metrics,
+                                        "details": candidate_sample,
+                                    }
+                                    best_rank = candidate_rank
+                                continue
+
+                            record_rejection(
+                                "not_better",
+                                {
+                                    **candidate_sample,
+                                    "reason": "not_better",
+                                },
+                            )
+
+            if best_candidate is None:
+                break
+
+            current_duties = best_candidate["duties"]
+            current_metrics = best_candidate["metrics"]
+            current_rank = self._relief_reassignment_rank(current_metrics)
+            audit["accepted"] = int(audit.get("accepted", 0)) + 1
+            if len(audit["accepted_moves"]) < sample_limit:
+                audit["accepted_moves"].append(best_candidate["details"])
+
+        audit["final_metrics"] = current_metrics
+        audit["improved"] = bool(
+            self._relief_reassignment_rank(current_metrics)
+            < self._relief_reassignment_rank(audit["baseline_metrics"] or current_metrics)
+        )
+        if not audit["improved"] and audit.get("accepted") == 0:
+            audit["result"] = "no_accepted_improvement"
+        elif audit["improved"]:
+            audit["result"] = "accepted_improvement"
+        else:
+            audit["result"] = "accepted_without_rank_gain"
+        return current_duties, audit

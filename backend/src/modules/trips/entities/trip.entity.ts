@@ -51,6 +51,12 @@ export class TripEntity extends BaseCompanyEntity {
   @Column({ name: 'trip_group_id', nullable: true })
   tripGroupId: number;
 
+  @Column({ name: 'mid_trip_relief_point_id', nullable: true })
+  midTripReliefPointId: number;
+
+  @Column({ name: 'mid_trip_relief_offset_minutes', nullable: true })
+  midTripReliefOffsetMinutes: number;
+
   @Column({ name: 'idle_before_minutes', default: 0 })
   idleBeforeMinutes: number;
 

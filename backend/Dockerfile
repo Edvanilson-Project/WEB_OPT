@@ -21,6 +21,9 @@ COPY --from=builder /app/dist ./dist
 ENV NODE_ENV=production
 ENV PORT=3001
 
+RUN addgroup -g 1001 -S nodejs && adduser -S nodejs -u 1001
+USER nodejs
+
 EXPOSE 3001
 
 CMD ["node", "dist/main.js"]

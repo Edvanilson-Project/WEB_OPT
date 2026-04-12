@@ -105,7 +105,7 @@ class MCNFVSP(BaseAlgorithm, IVSPAlgorithm):
                 if trips_sorted[i].destination_id == trips_sorted[j].origin_id:
                     cost -= (fixed_cost * 0.05) # "paired_trip_bonus"
                 
-                C[i, j] = cost
+                C[i, j] = max(0.0, cost)
 
         # 2. Matriz T -> D (Pull-in) -- top-right (N x N)
         # O custo reflete o recolhimento do veículo no fim do turno. 
@@ -132,9 +132,11 @@ class MCNFVSP(BaseAlgorithm, IVSPAlgorithm):
         # Traçar caminhos (De volta para Chains Block Form)
         # Se i conecta a j (onde i < N e j < N), significa que a viagem i é seguida pela viag j.
         next_trip = {}
+        targets = set()  # trips que são destino de conexão inter-trip
         for r, c in zip(row_ind, col_ind):
             if r < N and c < N:
                 next_trip[r] = c
+                targets.add(c)
                 
         visited = set()
         blocks = []
@@ -142,14 +144,8 @@ class MCNFVSP(BaseAlgorithm, IVSPAlgorithm):
         
         for i in range(N):
             if i not in visited:
-                # Verificamos se i não é alvo de nenhuma conexão inter-trip, o que diz que é raiz
-                is_root = True
-                for r, c in zip(row_ind, col_ind):
-                    if r < N and c == i:
-                        is_root = False
-                        break
-                        
-                if is_root:
+                # Raiz = não é destino de nenhuma conexão inter-trip
+                if i not in targets:
                     chain = []
                     curr = i
                     while curr is not None:

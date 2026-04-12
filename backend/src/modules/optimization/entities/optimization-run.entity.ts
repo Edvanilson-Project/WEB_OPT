@@ -29,6 +29,9 @@ export enum OptimizationAlgorithm {
 
 @Entity('optimization_runs')
 export class OptimizationRunEntity extends BaseCompanyEntity {
+  @Column({ name: 'name', type: 'varchar', length: 255, nullable: true })
+  name?: string;
+
   @Index()
   @Column({ name: 'line_id', nullable: true })
   lineId: number;

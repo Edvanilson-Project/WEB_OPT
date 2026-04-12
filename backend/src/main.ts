@@ -8,6 +8,7 @@ import {
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { ConfigService } from '@nestjs/config';
 import { Reflector } from '@nestjs/core';
+import helmet from 'helmet';
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
@@ -20,6 +21,9 @@ async function bootstrap() {
   const corsOrigins = config
     .get<string>('CORS_ORIGINS', 'http://localhost:3000')
     .split(',');
+
+  // Security headers
+  app.use(helmet());
 
   // CORS
   app.enableCors({
@@ -62,14 +66,17 @@ async function bootstrap() {
     .addTag('reports', 'Relatórios')
     .build();
 
-  const document = SwaggerModule.createDocument(app, swaggerConfig);
-  SwaggerModule.setup('api/docs', app, document, {
-    swaggerOptions: { persistAuthorization: true },
-  });
+  const nodeEnv = config.get<string>('app.nodeEnv', 'development');
+  if (nodeEnv !== 'production') {
+    const document = SwaggerModule.createDocument(app, swaggerConfig);
+    SwaggerModule.setup('api/docs', app, document, {
+      swaggerOptions: { persistAuthorization: true },
+    });
+    logger.log(`📖 Swagger disponível em http://localhost:${port}/api/docs`);
+  }
 
   await app.listen(port);
   logger.log(`🚀 OTIMIZ API rodando em http://localhost:${port}/api/v1`);
-  logger.log(`📖 Swagger disponível em http://localhost:${port}/api/docs`);
 }
 
 bootstrap();

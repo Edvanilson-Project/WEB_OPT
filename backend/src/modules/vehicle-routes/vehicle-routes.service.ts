@@ -1,7 +1,7 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { VehicleRouteEntity, VehicleRouteStatus } from './entities/vehicle-route.entity';
+import { VehicleRouteEntity } from './entities/vehicle-route.entity';
 import { CreateVehicleRouteDto } from './dto/create-vehicle-route.dto';
 import { EntityNotFoundException } from '../../common/exceptions/not-found.exception';
 
@@ -17,7 +17,9 @@ export class VehicleRoutesService {
     return this.vehicleRouteRepo.save(vehicleRoute);
   }
 
-  async createBulk(dtos: CreateVehicleRouteDto[]): Promise<VehicleRouteEntity[]> {
+  async createBulk(
+    dtos: CreateVehicleRouteDto[],
+  ): Promise<VehicleRouteEntity[]> {
     const vehicleRoutes = dtos.map((dto) => this.vehicleRouteRepo.create(dto));
     return this.vehicleRouteRepo.save(vehicleRoutes);
   }
@@ -41,7 +43,9 @@ export class VehicleRoutesService {
     });
   }
 
-  async findByOptimizationRun(optimizationRunId: number): Promise<VehicleRouteEntity[]> {
+  async findByOptimizationRun(
+    optimizationRunId: number,
+  ): Promise<VehicleRouteEntity[]> {
     return this.vehicleRouteRepo.find({
       where: { optimizationRunId },
       order: { startTimeMinutes: 'ASC' },
@@ -85,6 +89,9 @@ export class VehicleRoutesService {
     const routes = await this.vehicleRouteRepo.find({
       where: { optimizationRunId },
     });
-    return routes.reduce((total, route) => total + (route.estimatedCost || 0), 0);
+    return routes.reduce(
+      (total, route) => total + (route.estimatedCost || 0),
+      0,
+    );
   }
 }

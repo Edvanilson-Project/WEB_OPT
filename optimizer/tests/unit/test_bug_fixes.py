@@ -35,13 +35,15 @@ def make_trips(n: int = 6, gap: int = 90) -> list:
     trips = []
     start = 360
     for i in range(n):
+        origin = 1 if i % 2 == 0 else 2
+        destination = 2 if i % 2 == 0 else 1
         t = Trip(
             id=i + 1,
             line_id=1,
             start_time=start,
             end_time=start + 60,
-            origin_id=1,
-            destination_id=2,
+            origin_id=origin,
+            destination_id=destination,
             duration=60,
             distance_km=20.0,
         )

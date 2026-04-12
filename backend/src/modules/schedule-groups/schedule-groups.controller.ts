@@ -8,6 +8,7 @@ import {
   UseGuards,
   ParseIntPipe,
   Query,
+  Request,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
@@ -18,10 +19,13 @@ import {
 import { ScheduleGroupsService } from './schedule-groups.service';
 import { CreateScheduleGroupDto } from './dto/create-schedule-group.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../../common/guards/roles.guard';
+import { resolveScopedCompanyId } from '../../common/utils/company-scope.util';
+import { AuthRequest } from '../../common/interfaces/auth.interface';
 
 @ApiTags('schedule-groups')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('schedule-groups')
 export class ScheduleGroupsController {
   constructor(private readonly service: ScheduleGroupsService) {}
@@ -35,8 +39,10 @@ export class ScheduleGroupsController {
   @Get()
   @ApiOperation({ summary: 'Listar grupos de programação' })
   @ApiQuery({ name: 'companyId', required: false })
-  findAll(@Query('companyId') companyId?: string) {
-    return this.service.findAll(companyId ? +companyId : undefined);
+  findAll(@Request() req: AuthRequest, @Query('companyId') companyId?: string) {
+    return this.service.findAll(
+      resolveScopedCompanyId(req.user?.companyId, companyId, req.user?.role),
+    );
   }
 
   @Get(':id')

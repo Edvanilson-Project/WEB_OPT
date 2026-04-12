@@ -1,4 +1,5 @@
 'use client';
+import { getErrorMessage } from "@/utils/getErrorMessage";
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Box, Grid, Typography, Button, Paper, Stack, Alert, Skeleton, Tooltip,
@@ -17,6 +18,7 @@ import { NotifyProvider, useNotify } from '../_components/Notify';
 import { linesApi, terminalsApi, vehicleTypesApi, getSessionUser } from '@/lib/api';
 import type { Line, Terminal, VehicleType } from '../_types';
 import { extractArray } from '../_types';
+import { dialogTitleSx } from '../_tokens/design-tokens';
 
 interface LineForm {
   code: string;
@@ -145,8 +147,8 @@ function LinesInner() {
       }
       setDialogOpen(false);
       load();
-    } catch (e: any) {
-      notify.error(e?.response?.data?.message ?? 'Erro ao salvar linha.');
+    } catch (e: unknown) {
+      notify.error(getErrorMessage(e, 'Erro ao salvar linha.'));
     } finally {
       setSaving(false);
     }
@@ -160,8 +162,8 @@ function LinesInner() {
       notify.success('Linha excluída com sucesso!');
       setDeleteTarget(null);
       load();
-    } catch (e: any) {
-      notify.error(e?.response?.data?.message ?? 'Erro ao excluir linha.');
+    } catch (e: unknown) {
+      notify.error(getErrorMessage(e, 'Erro ao excluir linha.'));
     } finally {
       setDeleting(false);
     }
@@ -310,7 +312,7 @@ function LinesInner() {
 
       {/* Dialog Criar/Editar */}
       <Dialog open={dialogOpen} onClose={() => !saving && setDialogOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle sx={{ fontWeight: 700 }}>{editTarget ? 'Editar Linha' : 'Nova Linha'}</DialogTitle>
+        <DialogTitle sx={dialogTitleSx}>{editTarget ? 'Editar Linha' : 'Nova Linha'}</DialogTitle>
         <DialogContent dividers>
           <Stack spacing={2.5} sx={{ pt: 0.5 }}>
             <Stack direction="row" spacing={2}>

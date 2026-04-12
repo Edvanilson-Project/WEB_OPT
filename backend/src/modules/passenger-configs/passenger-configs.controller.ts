@@ -9,10 +9,10 @@ import {
   UseGuards,
   ParseIntPipe,
   Query,
+  Request,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
-  ApiOperation,
   ApiTags,
   ApiQuery,
 } from '@nestjs/swagger';
@@ -22,10 +22,13 @@ import {
   SavePassengerBandDto,
 } from './dto/create-passenger-config.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../../common/guards/roles.guard';
+import { resolveScopedCompanyId } from '../../common/utils/company-scope.util';
+import { AuthRequest } from '../../common/interfaces/auth.interface';
 
 @ApiTags('passenger-configs')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('passenger-configs')
 export class PassengerConfigsController {
   constructor(private readonly service: PassengerConfigsService) {}
@@ -37,8 +40,10 @@ export class PassengerConfigsController {
 
   @Get()
   @ApiQuery({ name: 'companyId', required: false })
-  findAll(@Query('companyId') companyId?: string) {
-    return this.service.findAll(companyId ? +companyId : undefined);
+  findAll(@Request() req: AuthRequest, @Query('companyId') companyId?: string) {
+    return this.service.findAll(
+      resolveScopedCompanyId(req.user?.companyId, companyId, req.user?.role),
+    );
   }
 
   @Get(':id')

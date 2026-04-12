@@ -9,12 +9,17 @@ from __future__ import annotations
 
 import random
 from collections import deque
-from copy import deepcopy
 from typing import Deque, List, Optional, Tuple
 
 from ...core.config import get_settings
 from ...domain.interfaces import IVSPAlgorithm
 from ...domain.models import Block, Trip, VehicleType, VSPSolution
+
+
+def _copy_blocks(blocks: List[Block]) -> List[Block]:
+    """Shallow copy: new list + new Block/trips-list wrappers, shared Trip refs."""
+    return [Block(id=b.id, trips=list(b.trips), vehicle_type_id=b.vehicle_type_id,
+                  warnings=b.warnings, meta=dict(b.meta)) for b in blocks]
 from ..base import BaseAlgorithm
 from ..utils import blocks_are_feasible, preferred_pair_penalty, quick_cost_sorted, sort_block_trips
 from .greedy import GreedyVSP, build_preferred_pairs
@@ -25,7 +30,7 @@ settings = get_settings()
 Move = Tuple[int, int, int, int]
 
 
-def _generate_reloc_neighbours(blocks: List[Block], sample_n: int = 30) -> List[Tuple[Move, List[Block]]]:
+def _generate_reloc_neighbours(blocks: List[Block], sample_n: int = 30, min_gap: int = 8) -> List[Tuple[Move, List[Block]]]:
     """Gera até `sample_n` vizinhos via Relocation e Merge."""
     if len(blocks) < 2:
         return []
@@ -48,12 +53,12 @@ def _generate_reloc_neighbours(blocks: List[Block], sample_n: int = 30) -> List[
             continue
         seen.add(key)
 
-        new_blocks = deepcopy(blocks)
+        new_blocks = _copy_blocks(blocks)
         trip = new_blocks[src_idx].trips.pop(trip_pos)
         new_blocks[dst_idx].trips.append(trip)
         new_blocks = [b for b in new_blocks if b.trips]
         sort_block_trips(new_blocks)
-        if not blocks_are_feasible(new_blocks):
+        if not blocks_are_feasible(new_blocks, min_gap):
             continue
 
         move: Move = (trip.id, blocks[src_idx].id, blocks[dst_idx].id, insert_pos)
@@ -69,13 +74,13 @@ def _generate_reloc_neighbours(blocks: List[Block], sample_n: int = 30) -> List[
         if merge_key in seen:
             continue
         seen.add(merge_key)
-        new_blocks = deepcopy(blocks)
+        new_blocks = _copy_blocks(blocks)
         new_blocks[i].trips.extend(new_blocks[j].trips)
         del new_blocks[j]
         sort_block_trips(new_blocks)
-        if not blocks_are_feasible(new_blocks):
+        if not blocks_are_feasible(new_blocks, min_gap):
             continue
-        move: Move = (0, blocks[j].id, blocks[i].id, 0)
+        move: Move = (-1, blocks[j].id, blocks[i].id, -1)  # sentinel -1 distinguishes merge from reloc
         neighbours.append((move, new_blocks))
 
     return neighbours
@@ -110,6 +115,7 @@ class TabuSearchVSP(BaseAlgorithm, IVSPAlgorithm):
         crew_cw = float(self.vsp_params.get("crew_cost_weight", fvc * 0.5))
         pair_break_penalty = float(self.vsp_params.get("pair_break_penalty", fvc * 1.25))
         paired_trip_bonus = float(self.vsp_params.get("paired_trip_bonus", fvc * 0.05))
+        min_gap = int(self.vsp_params.get("min_layover_minutes", 8) or 8)
         preferred_pairs = (
             build_preferred_pairs(
                 trips,
@@ -132,9 +138,9 @@ class TabuSearchVSP(BaseAlgorithm, IVSPAlgorithm):
             hard_pairing_penalty,
         )
 
-        current_blocks = deepcopy(GreedyVSP(vsp_params=self.vsp_params).solve(trips, vehicle_types).blocks)
+        current_blocks = _copy_blocks(GreedyVSP(vsp_params=self.vsp_params).solve(trips, vehicle_types).blocks)
         current_cost = cost_fn(current_blocks)
-        best_blocks = deepcopy(current_blocks)
+        best_blocks = _copy_blocks(current_blocks)
         best_cost = current_cost
 
         tabu_list: Deque[Move] = deque(maxlen=self.tabu_size)
@@ -145,7 +151,7 @@ class TabuSearchVSP(BaseAlgorithm, IVSPAlgorithm):
         while not self._check_timeout():
             iteration += 1
 
-            neighbours = _generate_reloc_neighbours(current_blocks, sample_n=40)
+            neighbours = _generate_reloc_neighbours(current_blocks, sample_n=40, min_gap=min_gap)
             if not neighbours:
                 # Diversification: perturb and continue
                 stale_count += 1
@@ -177,7 +183,7 @@ class TabuSearchVSP(BaseAlgorithm, IVSPAlgorithm):
             current_cost = chosen_cost
 
             if current_cost < best_cost:
-                best_blocks = deepcopy(current_blocks)
+                best_blocks = _copy_blocks(current_blocks)
                 best_cost = current_cost
                 stale_count = 0
             else:
@@ -185,7 +191,7 @@ class TabuSearchVSP(BaseAlgorithm, IVSPAlgorithm):
 
             # Diversification restart if stagnant
             if stale_count > 25:
-                current_blocks = deepcopy(best_blocks)
+                current_blocks = _copy_blocks(best_blocks)
                 current_cost = best_cost
                 tabu_list.clear()
                 stale_count = 0

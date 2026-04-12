@@ -1,4 +1,5 @@
 'use client';
+import { getErrorMessage } from "@/utils/getErrorMessage";
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Box, Avatar, Typography, Button, Paper, Stack, Skeleton, Tooltip, IconButton,
@@ -15,6 +16,8 @@ import { NotifyProvider, useNotify } from '../_components/Notify';
 import { companiesApi } from '@/lib/api';
 import type { Company } from '../_types';
 import { extractArray } from '../_types';
+import { useDebounce } from '@/utils/useDebounce';
+import { dialogTitleSx } from '../_tokens/design-tokens';
 
 interface CompanyForm { name: string; tradeName: string; cnpj: string; phone: string; address: string; city: string; state: string; status: string; }
 const EMPTY: CompanyForm = { name: '', tradeName: '', cnpj: '', phone: '', address: '', city: '', state: '', status: 'active' };
@@ -39,6 +42,7 @@ function CompaniesInner() {
   const [items, setItems] = useState<Company[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const debouncedSearch = useDebounce(search, 300);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<Company | null>(null);
   const [form, setForm] = useState<CompanyForm>(EMPTY);
@@ -56,9 +60,9 @@ function CompaniesInner() {
   useEffect(() => { load(); }, [load]);
 
   const filtered = items.filter((c) =>
-    c.name.toLowerCase().includes(search.toLowerCase()) ||
-    (c.tradeName ?? '').toLowerCase().includes(search.toLowerCase()) ||
-    (c.cnpj ?? '').includes(search),
+    c.name.toLowerCase().includes(debouncedSearch.toLowerCase()) ||
+    (c.tradeName ?? '').toLowerCase().includes(debouncedSearch.toLowerCase()) ||
+    (c.cnpj ?? '').includes(debouncedSearch),
   );
 
   const openCreate = () => { setEditTarget(null); setForm(EMPTY); setDialogOpen(true); };
@@ -74,14 +78,14 @@ function CompaniesInner() {
       if (editTarget) { await companiesApi.update(editTarget.id, p); notify.success('Empresa atualizada!'); }
       else { await companiesApi.create(p); notify.success('Empresa criada!'); }
       setDialogOpen(false); load();
-    } catch (e: any) { notify.error(e?.response?.data?.message ?? 'Erro ao salvar.'); }
+    } catch (e: unknown) { notify.error(getErrorMessage(e, 'Erro ao salvar.')); }
     finally { setSaving(false); }
   };
 
   const handleDelete = async () => {
     if (!deleteTarget) return; setDeleting(true);
     try { await companiesApi.delete(deleteTarget.id); notify.success('Empresa excluída!'); setDeleteTarget(null); load(); }
-    catch (e: any) { notify.error(e?.response?.data?.message ?? 'Erro ao excluir.'); }
+    catch (e: unknown) { notify.error(getErrorMessage(e, 'Erro ao excluir.')); }
     finally { setDeleting(false); }
   };
 
@@ -158,7 +162,7 @@ function CompaniesInner() {
       </DashboardCard>
 
       <Dialog open={dialogOpen} onClose={() => !saving && setDialogOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle sx={{ fontWeight: 700 }}>{editTarget ? 'Editar Empresa' : 'Nova Empresa'}</DialogTitle>
+        <DialogTitle sx={dialogTitleSx}>{editTarget ? 'Editar Empresa' : 'Nova Empresa'}</DialogTitle>
         <DialogContent dividers>
           <Stack spacing={2.5} sx={{ pt: 0.5 }}>
             <TextField label="Razão Social" required fullWidth value={form.name} onChange={cf('name')} />

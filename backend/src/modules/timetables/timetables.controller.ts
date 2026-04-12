@@ -9,6 +9,7 @@ import {
   UseGuards,
   ParseIntPipe,
   Query,
+  Request,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
@@ -19,10 +20,13 @@ import {
 import { TimetablesService } from './timetables.service';
 import { CreateTimetableDto } from './dto/create-timetable.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../../common/guards/roles.guard';
+import { resolveScopedCompanyId } from '../../common/utils/company-scope.util';
+import { AuthRequest } from '../../common/interfaces/auth.interface';
 
 @ApiTags('timetables')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('timetables')
 export class TimetablesController {
   constructor(private readonly service: TimetablesService) {}
@@ -35,8 +39,10 @@ export class TimetablesController {
 
   @Get()
   @ApiQuery({ name: 'companyId', required: false })
-  findAll(@Query('companyId') companyId?: string) {
-    return this.service.findAll(companyId ? +companyId : undefined);
+  findAll(@Request() req: AuthRequest, @Query('companyId') companyId?: string) {
+    return this.service.findAll(
+      resolveScopedCompanyId(req.user?.companyId, companyId, req.user?.role),
+    );
   }
 
   @Get(':id')

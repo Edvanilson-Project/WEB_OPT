@@ -28,4 +28,26 @@ describe('resolveScopedCompanyId', () => {
       ForbiddenException,
     );
   });
+
+  describe('super_admin', () => {
+    it('permite acesso cross-company', () => {
+      expect(resolveScopedCompanyId(1, '99', 'super_admin')).toBe(99);
+    });
+
+    it('exige companyId explícito quando super_admin sem companyId próprio', () => {
+      expect(resolveScopedCompanyId(undefined, '5', 'super_admin')).toBe(5);
+    });
+
+    it('rejeita super_admin sem companyId e sem requestedCompanyId', () => {
+      expect(() => resolveScopedCompanyId(undefined, null, 'super_admin')).toThrow(
+        BadRequestException,
+      );
+    });
+
+    it('rejeita companyId invalido mesmo para super_admin', () => {
+      expect(() => resolveScopedCompanyId(1, 'abc', 'super_admin')).toThrow(
+        BadRequestException,
+      );
+    });
+  });
 });

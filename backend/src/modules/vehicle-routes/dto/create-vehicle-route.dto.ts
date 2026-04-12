@@ -78,7 +78,10 @@ export class CreateVehicleRouteDto {
   @Max(1000000)
   estimatedCost?: number;
 
-  @ApiPropertyOptional({ enum: VehicleRouteStatus, default: VehicleRouteStatus.DRAFT })
+  @ApiPropertyOptional({
+    enum: VehicleRouteStatus,
+    default: VehicleRouteStatus.DRAFT,
+  })
   @IsOptional()
   @IsEnum(VehicleRouteStatus)
   status?: VehicleRouteStatus;

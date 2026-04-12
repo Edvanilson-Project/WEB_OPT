@@ -5,6 +5,7 @@ import {
   ParseIntPipe,
   Query,
   UseGuards,
+  Request,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
@@ -14,18 +15,26 @@ import {
 } from '@nestjs/swagger';
 import { ReportsService } from './reports.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../../common/guards/roles.guard';
+import { resolveScopedCompanyId } from '../../common/utils/company-scope.util';
+import { AuthRequest } from '../../common/interfaces/auth.interface';
 
 @ApiTags('reports')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('reports')
 export class ReportsController {
   constructor(private readonly reportsService: ReportsService) {}
 
   @Get('kpis/:companyId')
   @ApiOperation({ summary: 'KPIs gerais da empresa' })
-  getKpis(@Param('companyId', ParseIntPipe) companyId: number) {
-    return this.reportsService.getKpisByCompany(companyId);
+  getKpis(
+    @Param('companyId', ParseIntPipe) companyId: number,
+    @Request() req: AuthRequest,
+  ) {
+    return this.reportsService.getKpisByCompany(
+      resolveScopedCompanyId(req.user?.companyId, companyId, req.user?.role),
+    );
   }
 
   @Get('history/:companyId')
@@ -33,10 +42,11 @@ export class ReportsController {
   @ApiQuery({ name: 'days', required: false })
   getHistory(
     @Param('companyId', ParseIntPipe) companyId: number,
+    @Request() req: AuthRequest,
     @Query('days') days?: string,
   ) {
     return this.reportsService.getOptimizationHistory(
-      companyId,
+      resolveScopedCompanyId(req.user?.companyId, companyId, req.user?.role),
       days ? +days : 30,
     );
   }

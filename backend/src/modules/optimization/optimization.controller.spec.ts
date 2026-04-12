@@ -20,7 +20,7 @@ describe('OptimizationController company scoping', () => {
 
   it('injeta o companyId do usuario ao iniciar a execucao', () => {
     const dto: any = { lineId: 16 };
-    const req = { user: { id: 99, companyId: 7 } };
+    const req = { user: { id: 99, email: 't@t.com', role: 'analyst', companyId: 7 } };
 
     controller.run(dto, req);
 
@@ -29,14 +29,14 @@ describe('OptimizationController company scoping', () => {
   });
 
   it('bloqueia listagem com companyId diferente do escopo do usuario', () => {
-    expect(() => controller.findAll({ user: { companyId: 7 } }, '9')).toThrow(
+    expect(() => controller.findAll({ user: { id: 1, email: 't@t.com', role: 'analyst', companyId: 7 } }, '9')).toThrow(
       ForbiddenException,
     );
     expect(service.findAll).not.toHaveBeenCalled();
   });
 
   it('propaga o escopo do usuario para audit, compare, detail e cancel', () => {
-    const req = { user: { companyId: 7 } };
+    const req = { user: { id: 1, email: 't@t.com', role: 'analyst', companyId: 7 } };
 
     controller.audit(11, req);
     controller.compare(11, 12, req);

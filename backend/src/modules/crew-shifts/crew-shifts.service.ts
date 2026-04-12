@@ -41,7 +41,9 @@ export class CrewShiftsService {
     });
   }
 
-  async findByOptimizationRun(optimizationRunId: number): Promise<CrewShiftEntity[]> {
+  async findByOptimizationRun(
+    optimizationRunId: number,
+  ): Promise<CrewShiftEntity[]> {
     return this.crewShiftRepo.find({
       where: { optimizationRunId },
       order: { startTimeMinutes: 'ASC' },
@@ -52,7 +54,8 @@ export class CrewShiftsService {
     const where: Record<string, number> =
       companyId != null ? { id, companyId } : { id };
     const crewShift = await this.crewShiftRepo.findOne({ where });
-    if (!crewShift) throw new EntityNotFoundException('Turno de tripulação', id);
+    if (!crewShift)
+      throw new EntityNotFoundException('Turno de tripulação', id);
     return crewShift;
   }
 

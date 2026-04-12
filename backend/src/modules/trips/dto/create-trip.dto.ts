@@ -70,6 +70,21 @@ export class CreateTripDto {
   @IsInt()
   tripGroupId?: number;
 
+  @ApiPropertyOptional({
+    description: 'Ponto operacional intermediario onde a rendicao pode ocorrer dentro da viagem',
+  })
+  @IsOptional()
+  @IsInt()
+  midTripReliefPointId?: number;
+
+  @ApiPropertyOptional({
+    description: 'Minutos apos o inicio da viagem em que a rendicao intra-viagem pode ocorrer',
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  midTripReliefOffsetMinutes?: number;
+
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()

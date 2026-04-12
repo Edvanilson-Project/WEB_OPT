@@ -267,11 +267,14 @@ class SetPartitioningOptimizedCSP(BaseAlgorithm, ICSPAlgorithm):
         - É chamada repetidamente para os mesmos pares de tarefas
         - O custo de cache é desprezível comparado ao recálculo
 
-        CHAVE DO CACHE: (id_última_tarefa, id_tarefa_atual)
+        CHAVE DO CACHE: (id_última_tarefa, id_tarefa_atual, spread_time, work_time, continuous_drive)
         Para duty vazia, usamos 0 como id da última tarefa.
+        Inclui estado da duty para evitar falso positivo quando duties
+        têm a mesma última tarefa mas estado diferente (O-M8).
         """
         last_id = duty.tasks[-1].id if duty.tasks else 0
-        key = (last_id, block.id)
+        key = (last_id, block.id, duty.spread_time, duty.work_time,
+               int(duty.meta.get("continuous_drive", 0)))
 
         if key in self._can_extend_cache:
             self._cache_hits += 1

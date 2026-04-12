@@ -4,6 +4,7 @@ import {
   IsNumber,
   IsBoolean,
   IsOptional,
+  IsEnum,
   Min,
   Max,
 } from 'class-validator';
@@ -402,5 +403,13 @@ export class CreateOptimizationSettingsDto {
 
   @IsBoolean()
   @IsOptional()
+  strictHardValidation?: boolean;
+
+  @IsBoolean()
+  @IsOptional()
   isActive?: boolean;
+
+  @IsEnum(['urban', 'charter'])
+  @IsOptional()
+  operationMode?: 'urban' | 'charter';
 }

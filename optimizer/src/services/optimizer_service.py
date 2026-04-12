@@ -3,6 +3,8 @@ OptimizerService — orquestra a seleção e execução de algoritmos.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import re
 import time
@@ -59,6 +61,18 @@ class OptimizerService:
         t0 = time.perf_counter()
         cct_params = self._normalize_rules(cct_params)
         vsp_params = self._normalize_rules(vsp_params)
+        normalized_time_budget_s = (
+            float(time_budget_s)
+            if time_budget_s is not None
+            else float(vsp_params.get("time_budget_s", settings.hybrid_time_budget_seconds))
+        )
+        replay_fingerprint = self._build_replay_fingerprint(
+            trips,
+            algorithm,
+            cct_params,
+            vsp_params,
+            normalized_time_budget_s,
+        )
         had_explicit_mandatory_groups = bool(cct_params.get("mandatory_trip_groups_same_duty"))
         self._inject_trip_group_constraints(trips, cct_params, vsp_params)
         if not had_explicit_mandatory_groups and not bool(cct_params.get("enforce_trip_groups_hard", False)):
@@ -68,7 +82,9 @@ class OptimizerService:
             vsp_params.get("strict_hard_validation", cct_params.get("strict_hard_validation", True))
         )
 
+        t_input = time.perf_counter()
         input_report = self.validator.audit_input(trips, cct_params, vsp_params)
+        input_validation_ms = (time.perf_counter() - t_input) * 1000
         if strict_hard_validation and not input_report["ok"]:
             raise HardConstraintViolationError(
                 input_report["issues"],
@@ -79,18 +95,21 @@ class OptimizerService:
                     cct_params,
                     vsp_params,
                     stage="input_validation",
+                    replay_fingerprint=replay_fingerprint,
                 ),
             )
 
+        t_solver = time.perf_counter()
         result = self._dispatch(
             algorithm,
             trips,
             vehicle_types,
             depot_id,
-            time_budget_s,
+            normalized_time_budget_s,
             cct_params,
             vsp_params,
         )
+        solver_ms = (time.perf_counter() - t_solver) * 1000
         result.total_elapsed_ms = (time.perf_counter() - t0) * 1000
         result.algorithm = algorithm
         result.meta.setdefault("input", {})
@@ -99,7 +118,9 @@ class OptimizerService:
             "input": input_report,
         }
 
+        t_output = time.perf_counter()
         output_report = self.validator.audit_result(result, trips, cct_params, vsp_params)
+        output_validation_ms = (time.perf_counter() - t_output) * 1000
         result.meta["hard_constraint_report"]["output"] = output_report
         if strict_hard_validation and not output_report["ok"]:
             raise HardConstraintViolationError(
@@ -111,18 +132,47 @@ class OptimizerService:
                     cct_params,
                     vsp_params,
                     stage="output_validation",
+                    replay_fingerprint=replay_fingerprint,
                 ),
             )
 
+        t_audit = time.perf_counter()
         cost_breakdown = self.evaluator.total_cost_breakdown(result, vehicle_types)
         result.total_cost = float(cost_breakdown["total"])
         result.meta["cost_breakdown"] = cost_breakdown
         result.meta["operational_kpis"] = self._build_operational_kpis(result, cct_params)
         result.meta["trip_group_audit"] = self._build_trip_group_audit(result, trips)
         result.meta["phase_summary"] = self._build_phase_summary(result, cost_breakdown)
-        result.meta["reproducibility"] = self._build_reproducibility_snapshot(algorithm, vsp_params)
+        result.meta["reproducibility"] = self._build_reproducibility_snapshot(
+            algorithm,
+            trips,
+            cct_params,
+            vsp_params,
+            normalized_time_budget_s,
+        )
         result.meta["solver_version"] = settings.app_version
         result.meta["solver_explanation"] = self._build_solver_explanation(result)
+        audit_enrichment_ms = (time.perf_counter() - t_audit) * 1000
+
+        performance_meta = dict((result.meta or {}).get("performance") or {})
+        phase_timings_ms = dict(performance_meta.get("phase_timings_ms") or {})
+        phase_timings_ms.update(
+            {
+                "input_validation_ms": round(input_validation_ms, 2),
+                "solver_ms": round(solver_ms, 2),
+                "output_validation_ms": round(output_validation_ms, 2),
+                "audit_enrichment_ms": round(audit_enrichment_ms, 2),
+            }
+        )
+        performance_meta.update(
+            {
+                "phase_timings_ms": phase_timings_ms,
+                "total_elapsed_ms": round(result.total_elapsed_ms, 2),
+                "trip_count": len(trips),
+                "vehicle_type_count": len(vehicle_types),
+            }
+        )
+        result.meta["performance"] = performance_meta
 
         result.meta["input"].update(
             {
@@ -130,6 +180,7 @@ class OptimizerService:
                 "n_vehicle_types": len(vehicle_types),
                 "cct_params": cct_params,
                 "vsp_params": vsp_params,
+                "replay_fingerprint": replay_fingerprint,
             }
         )
         return result
@@ -142,9 +193,17 @@ class OptimizerService:
         cct_params: Dict[str, Any] | None,
         vsp_params: Dict[str, Any] | None,
         stage: str = "solver",
+        replay_fingerprint: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         cct_params = cct_params or {}
         vsp_params = vsp_params or {}
+        replay_fingerprint = replay_fingerprint or self._build_replay_fingerprint(
+            trips,
+            algorithm,
+            cct_params,
+            vsp_params,
+            float(vsp_params.get("time_budget_s", settings.hybrid_time_budget_seconds) or settings.hybrid_time_budget_seconds),
+        )
         algorithm_name = str(algorithm.value if hasattr(algorithm, "value") else algorithm)
         issue_strings: List[str] = []
         phase = "integrated"
@@ -201,7 +260,55 @@ class OptimizerService:
                 "line_ids": sorted({int(trip.line_id) for trip in trips}) if trips else [],
                 "cct_params": cct_params,
                 "vsp_params": vsp_params,
+                "input_hash": replay_fingerprint.get("input_hash"),
+                "params_hash": replay_fingerprint.get("params_hash"),
+                "time_budget_s": replay_fingerprint.get("time_budget_s"),
             },
+        }
+
+    def _stable_json(self, value: Any) -> str:
+        return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+
+    def _build_replay_fingerprint(
+        self,
+        trips: List[Trip],
+        algorithm: AlgorithmType | str,
+        cct_params: Dict[str, Any],
+        vsp_params: Dict[str, Any],
+        time_budget_s: float,
+    ) -> Dict[str, Any]:
+        algorithm_name = str(algorithm.value if hasattr(algorithm, "value") else algorithm)
+        trips_snapshot = [
+            {
+                "id": int(trip.id),
+                "line_id": int(trip.line_id),
+                "trip_group_id": int(trip.trip_group_id) if trip.trip_group_id is not None else None,
+                "start_time": int(trip.start_time),
+                "end_time": int(trip.end_time),
+                "origin_id": int(trip.origin_id),
+                "destination_id": int(trip.destination_id),
+                "duration": int(trip.duration),
+                "distance_km": float(trip.distance_km),
+                "direction": trip.direction,
+                "is_pull_out": bool(trip.is_pull_out),
+                "is_pull_back": bool(trip.is_pull_back),
+            }
+            for trip in sorted(trips, key=lambda item: (item.id, item.start_time, item.end_time))
+        ]
+        params_snapshot = {
+            "algorithm": algorithm_name,
+            "time_budget_s": float(time_budget_s),
+            "cct_params": cct_params,
+            "vsp_params": vsp_params,
+        }
+        input_hash = hashlib.sha256(self._stable_json(trips_snapshot).encode("ascii")).hexdigest()[:12]
+        params_hash = hashlib.sha256(self._stable_json(params_snapshot).encode("ascii")).hexdigest()[:12]
+        return {
+            "input_hash": input_hash,
+            "params_hash": params_hash,
+            "trip_count": len(trips_snapshot),
+            "line_ids": sorted({int(trip["line_id"]) for trip in trips_snapshot}),
+            "time_budget_s": float(time_budget_s),
         }
 
     def _dominant_failure_phase(self, issues: List[str]) -> str:
@@ -365,7 +472,14 @@ class OptimizerService:
             "sample_splits": sample_splits,
         }
 
-    def _build_reproducibility_snapshot(self, algorithm: AlgorithmType, vsp_params: Dict[str, Any]) -> Dict[str, Any]:
+    def _build_reproducibility_snapshot(
+        self,
+        algorithm: AlgorithmType,
+        trips: List[Trip],
+        cct_params: Dict[str, Any],
+        vsp_params: Dict[str, Any],
+        time_budget_s: float,
+    ) -> Dict[str, Any]:
         random_seed = vsp_params.get("random_seed")
         algorithm_name = str(algorithm.value if hasattr(algorithm, "value") else algorithm)
         stochastic_algorithms = {
@@ -375,16 +489,30 @@ class OptimizerService:
             AlgorithmType.HYBRID_PIPELINE.value,
         }
         stochastic = algorithm_name in stochastic_algorithms
-        deterministic_replay_possible = (not stochastic) or random_seed is not None
+        deterministic_replay_possible = not stochastic
+        replay_fingerprint = self._build_replay_fingerprint(
+            trips,
+            algorithm,
+            cct_params,
+            vsp_params,
+            time_budget_s,
+        )
         return {
             "algorithm": algorithm_name,
             "random_seed": random_seed,
             "stochastic_algorithm": stochastic,
             "deterministic_replay_possible": deterministic_replay_possible,
+            "input_hash": replay_fingerprint["input_hash"],
+            "params_hash": replay_fingerprint["params_hash"],
+            "time_budget_s": replay_fingerprint["time_budget_s"],
             "note": (
-                "Replicável se os mesmos dados, parâmetros e seed forem reutilizados."
+                "Replicável se os mesmos dados e parâmetros forem reutilizados."
                 if deterministic_replay_possible
-                else "Algoritmo estocástico sem seed explícita: execuções equivalentes podem divergir."
+                else (
+                    "Seed explícita reduz a variabilidade, mas o solver usa budget por tempo; execuções equivalentes podem divergir no número de iterações e no resultado final."
+                    if random_seed is not None
+                    else "Algoritmo estocástico sem seed explícita: execuções equivalentes podem divergir mesmo com o mesmo input."
+                )
             ),
         }
 

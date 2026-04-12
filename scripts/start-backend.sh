@@ -4,6 +4,25 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+resolve_backend_port() {
+  if [[ -n "${BACKEND_PORT:-}" ]]; then
+    printf '%s\n' "${BACKEND_PORT}"
+    return 0
+  fi
+
+  local env_file="$ROOT_DIR/backend/.env"
+  if [[ -f "$env_file" ]]; then
+    local env_port
+    env_port="$(awk -F= '/^PORT=/{print $2; exit}' "$env_file" | tr -d '[:space:]\r')"
+    if [[ -n "$env_port" ]]; then
+      printf '%s\n' "$env_port"
+      return 0
+    fi
+  fi
+
+  printf '3001\n'
+}
+
 resolve_npm() {
   if [[ -n "${NPM_BIN:-}" && -x "${NPM_BIN}" ]]; then
     printf '%s\n' "${NPM_BIN}"
@@ -33,8 +52,10 @@ resolve_npm() {
   return 1
 }
 
-if ss -ltn 2>/dev/null | awk '$4 ~ /:3001$/ { found = 1 } END { exit(found ? 0 : 1) }'; then
-  echo "backend already listening on :3001"
+BACKEND_PORT="$(resolve_backend_port)"
+
+if ss -ltn 2>/dev/null | awk -v port=":${BACKEND_PORT}$" '$4 ~ port { found = 1 } END { exit(found ? 0 : 1) }'; then
+  echo "backend already listening on :${BACKEND_PORT}"
   exit 0
 fi
 

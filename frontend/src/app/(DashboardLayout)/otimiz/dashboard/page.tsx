@@ -1,6 +1,7 @@
 'use client';
 import React, { useEffect, useState, useCallback } from 'react';
 import dynamic from 'next/dynamic';
+import { useDebounce } from '@/utils/useDebounce';
 import {
   Grid,
   Box,
@@ -8,6 +9,13 @@ import {
   Button,
   Paper,
   TableContainer,
+  MenuItem,
+  Select,
+  FormControl,
+  InputLabel,
+  Chip,
+  InputAdornment,
+  TextField,
   Table,
   TableHead,
   TableBody,
@@ -33,6 +41,8 @@ import {
   IconClockHour4,
   IconCurrencyDollar,
   IconUsers,
+  IconFilter,
+  IconChartBar,
 } from '@tabler/icons-react';
 import Link from 'next/link';
 import PageContainer from '@/app/components/container/PageContainer';
@@ -66,12 +76,30 @@ function fmtCurrency(val?: number): string {
 
 const ALGO_LABEL: Record<string, string> = {
   full_pipeline: 'Pipeline Completo',
+  hybrid_pipeline: 'Pipeline Híbrido',
   vsp_only: 'Veículos (VSP)',
   csp_only: 'Tripulação (CSP)',
   greedy: 'Heurístico',
+  genetic: 'Genético',
+  simulated_annealing: 'Simulated Annealing',
+  tabu_search: 'Tabu Search',
+  set_partitioning: 'Set Partitioning',
+  joint_solver: 'Joint Solver',
 };
 
 function RunsTable({ runs, loading }: { runs: OptimizationRun[]; loading: boolean }) {
+  const [statusFilter, setStatusFilter] = React.useState('all');
+  const [algoFilter, setAlgoFilter] = React.useState('all');
+  const [searchFilter, setSearchFilter] = React.useState('');
+  const debouncedSearchFilter = useDebounce(searchFilter, 300);
+  
+  const filtered = runs.filter(r => {
+    if (statusFilter !== 'all' && r.status !== statusFilter) return false;
+    if (algoFilter !== 'all' && r.algorithm !== algoFilter) return false;
+    if (debouncedSearchFilter && !String(r.id).includes(debouncedSearchFilter) && !(r.name ?? '').toLowerCase().includes(debouncedSearchFilter.toLowerCase())) return false;
+    return true;
+  });
+
   const theme = useTheme();
   if (loading) {
     return (
@@ -103,6 +131,32 @@ function RunsTable({ runs, loading }: { runs: OptimizationRun[]; loading: boolea
     );
   }
   return (
+    <Box>
+      <Stack direction={{ xs: 'column', sm: 'row' }} gap={1.5} mb={2} flexWrap="wrap">
+        <TextField size="small" placeholder="Buscar por ID ou nome..." value={searchFilter} onChange={e => setSearchFilter(e.target.value)}
+          InputProps={{ startAdornment: <InputAdornment position="start"><IconFilter size={14} /></InputAdornment> }} sx={{ minWidth: 180, flex: 1 }} />
+        <FormControl size="small" sx={{ minWidth: 130 }}>
+          <InputLabel>Status</InputLabel>
+          <Select value={statusFilter} label="Status" onChange={e => setStatusFilter(e.target.value)}>
+            <MenuItem value="all">Todos</MenuItem>
+            <MenuItem value="completed">Concluído</MenuItem>
+            <MenuItem value="running">Executando</MenuItem>
+            <MenuItem value="failed">Falhou</MenuItem>
+          </Select>
+        </FormControl>
+        <FormControl size="small" sx={{ minWidth: 160 }}>
+          <InputLabel>Algoritmo</InputLabel>
+          <Select value={algoFilter} label="Algoritmo" onChange={e => setAlgoFilter(e.target.value)}>
+            <MenuItem value="all">Todos</MenuItem>
+            <MenuItem value="hybrid_pipeline">Pipeline Híbrido</MenuItem>
+            <MenuItem value="greedy">Heurístico</MenuItem>
+            <MenuItem value="simulated_annealing">Simulated Annealing</MenuItem>
+            <MenuItem value="tabu_search">Tabu Search</MenuItem>
+            <MenuItem value="joint_solver">Joint Solver</MenuItem>
+          </Select>
+        </FormControl>
+        <Chip size="small" variant="outlined" label={`${filtered.length} de ${runs.length}`} sx={{ alignSelf: 'center', fontWeight: 600 }} />
+      </Stack>
     <TableContainer>
       <Table size="small">
         <TableHead>
@@ -117,7 +171,7 @@ function RunsTable({ runs, loading }: { runs: OptimizationRun[]; loading: boolea
           </TableRow>
         </TableHead>
         <TableBody>
-          {runs.map((run) => (
+          {filtered.map((run) => (
             <TableRow key={run.id} hover>
               <TableCell>
                 <Box>
@@ -154,6 +208,7 @@ function RunsTable({ runs, loading }: { runs: OptimizationRun[]; loading: boolea
         </TableBody>
       </Table>
     </TableContainer>
+    </Box>
   );
 }
 
@@ -225,17 +280,8 @@ function DashboardInner() {
 
   useEffect(() => { load(); }, [load]);
 
-  const handleQuickRun = async () => {
-    setFiring(true);
-    try {
-      const res = await optimizationApi.run({ companyId, algorithm: 'full_pipeline' });
-      notify.success(`Otimização iniciada! ID: #${String((res as OptimizationRun).id ?? '').padStart(4, '0')}`);
-      setTimeout(load, 2500);
-    } catch {
-      notify.error('Erro ao iniciar otimização. Verifique se há linhas cadastradas.');
-    } finally {
-      setFiring(false);
-    }
+  const handleQuickRun = () => {
+    window.location.href = '/otimiz/optimization';
   };
 
   const kpiCards = [
@@ -259,8 +305,8 @@ function DashboardInner() {
               <IconRefresh size={18} />
             </IconButton>
           </Tooltip>
-          <Button variant="contained" startIcon={<IconPlayerPlay size={18} />} onClick={handleQuickRun} disabled={firing || loading} sx={{ borderRadius: 2 }}>
-            {firing ? 'Iniciando...' : 'Nova Otimização'}
+          <Button variant="contained" startIcon={<IconPlayerPlay size={18} />} onClick={handleQuickRun} disabled={loading} sx={{ borderRadius: 2 }}>
+            Nova Otimização
           </Button>
         </Stack>
       </Stack>

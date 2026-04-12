@@ -10,15 +10,17 @@ evaluator = CostEvaluator()
 def _try_merge_vsp_blocks(vsp_sol: VSPSolution, vsp_params: Dict[str, Any]) -> VSPSolution:
     """
     Tenta fundir blocos VSP adjacentes para reduzir veículos.
-    Percorre pares de blocos e, se o último trip de b1 pode conectar ao primeiro de b2
-    (gap >= deadhead, duração total <= max_vehicle_shift), funde b2 em b1.
-    Faz múltiplos passes até não haver mais merges.
+    Percorre APENAS pares adjacentes (por start_time) — O(B²) no pior caso
+    vs O(B³) antigo que escaneava todos os j > i.
     """
     min_layover = int(vsp_params.get("min_layover_minutes", 8))
     max_vehicle_shift = int(vsp_params.get("max_vehicle_shift_minutes", 960))
     allow_multi_line = bool(vsp_params.get("allow_multi_line_block", True))
+    connection_tolerance = int(vsp_params.get("connection_tolerance_minutes", 0))
 
-    blocks = copy.deepcopy(vsp_sol.blocks)
+    # Shallow copy: new Block objects with new trips lists, independent meta dicts
+    blocks = [Block(id=b.id, trips=list(b.trips), vehicle_type_id=b.vehicle_type_id,
+                    warnings=b.warnings, meta=dict(b.meta)) for b in vsp_sol.blocks]
     changed = True
     total_merges = 0
 
@@ -27,53 +29,48 @@ def _try_merge_vsp_blocks(vsp_sol: VSPSolution, vsp_params: Dict[str, Any]) -> V
         blocks.sort(key=lambda b: b.start_time)
 
         i = 0
-        while i < len(blocks):
-            best_j = None
-            best_gap = float("inf")
-
-            for j in range(i + 1, len(blocks)):
-                b1 = blocks[i]
-                b2 = blocks[j]
-                if not b1.trips or not b2.trips:
-                    continue
-
-                last_t = b1.trips[-1]
-                first_t = b2.trips[0]
-                gap = first_t.start_time - last_t.end_time
-                if gap < 0:
-                    continue
-
-                # Verificar deadhead
-                deadhead = int(last_t.deadhead_times.get(first_t.origin_id, 0))
-                needed = max(min_layover, deadhead)
-                if gap < needed:
-                    continue
-
-                # Verificar duração total do bloco consolidado
-                total_duration = b2.trips[-1].end_time - b1.trips[0].start_time
-                if total_duration > max_vehicle_shift:
-                    continue
-
-                # Verificar multi-linha
-                if not allow_multi_line:
-                    lines_b1 = {t.line_id for t in b1.trips}
-                    lines_b2 = {t.line_id for t in b2.trips}
-                    if lines_b1 != lines_b2:
-                        continue
-
-                if gap < best_gap:
-                    best_gap = gap
-                    best_j = j
-
-            if best_j is not None:
-                blocks[i].trips.extend(blocks[best_j].trips)
-                blocks[i].trips.sort(key=lambda t: t.start_time)
-                blocks.pop(best_j)
-                changed = True
-                total_merges += 1
-                # Não incrementa i — tenta fundir mais blocos neste
-            else:
+        while i < len(blocks) - 1:
+            b1 = blocks[i]
+            b2 = blocks[i + 1]
+            if not b1.trips or not b2.trips:
                 i += 1
+                continue
+
+            last_t = b1.trips[-1]
+            first_t = b2.trips[0]
+            gap = first_t.start_time - last_t.end_time
+            if gap < 0:
+                i += 1
+                continue
+
+            # Verificar deadhead — respeita connection_tolerance_minutes
+            deadhead = int(last_t.deadhead_times.get(first_t.origin_id, 0))
+            needed = max(min_layover, deadhead)
+            if gap + connection_tolerance < needed:
+                i += 1
+                continue
+
+            # Verificar duração total do bloco consolidado
+            total_duration = b2.trips[-1].end_time - b1.trips[0].start_time
+            if total_duration > max_vehicle_shift:
+                i += 1
+                continue
+
+            # Verificar multi-linha
+            if not allow_multi_line:
+                lines_b1 = {t.line_id for t in b1.trips}
+                lines_b2 = {t.line_id for t in b2.trips}
+                if lines_b1 != lines_b2:
+                    i += 1
+                    continue
+
+            # Merge b2 into b1
+            b1.trips.extend(b2.trips)
+            b1.trips.sort(key=lambda t: t.start_time)
+            blocks.pop(i + 1)
+            changed = True
+            total_merges += 1
+            # Não incrementa i — tenta fundir mais blocos neste
 
     # Filtrar blocos vazios independente de merge
     blocks = [b for b in blocks if b.trips]
@@ -95,6 +92,67 @@ def _renumber_blocks(blocks: List[Block]) -> List[Block]:
     for idx, block in enumerate(ordered, start=1):
         block.id = idx
     return ordered
+
+
+def _csp_feedback_candidates(
+    csp_sol: CSPSolution,
+    vsp_sol: VSPSolution,
+    vsp_params: Dict[str, Any],
+) -> List[VSPSolution]:
+    """Generate VSP refinements guided by CSP evaluation results (O-C5 feedback).
+
+    Identifies blocks involved in CSP violations/overtime and creates VSP
+    candidates that split those blocks, giving CSP shorter blocks to work with.
+    """
+    # Identify blocks contributing to duties with violations or overtime
+    problem_block_ids: set = set()
+    for duty in (csp_sol.duties or []):
+        has_issue = (
+            duty.rest_violations > 0
+            or duty.shift_violations > 0
+            or duty.overtime_minutes > 0
+            or duty.continuous_driving_violation
+        )
+        if has_issue:
+            for seg in duty.segments:
+                problem_block_ids.add(seg.block_id)
+
+    if not problem_block_ids:
+        return []
+
+    candidates: List[VSPSolution] = []
+    max_id = max((b.id for b in vsp_sol.blocks), default=0)
+
+    for target_id in problem_block_ids:
+        new_blocks: List[Block] = []
+        split_done = False
+        next_id = max_id + 1
+        for b in vsp_sol.blocks:
+            if b.id == target_id and len(b.trips) >= 4:
+                # Split at midpoint — creates two smaller blocks for CSP
+                mid = len(b.trips) // 2
+                b1 = Block(id=b.id, trips=list(b.trips[:mid]),
+                           vehicle_type_id=b.vehicle_type_id,
+                           warnings=b.warnings, meta=dict(b.meta))
+                b2 = Block(id=next_id, trips=list(b.trips[mid:]),
+                           vehicle_type_id=b.vehicle_type_id,
+                           warnings=b.warnings, meta=dict(b.meta))
+                new_blocks.extend([b1, b2])
+                next_id += 1
+                split_done = True
+            else:
+                new_blocks.append(b)
+
+        if split_done:
+            refined_blocks = _renumber_blocks(new_blocks)
+            refined_vsp = VSPSolution(
+                blocks=refined_blocks,
+                algorithm=vsp_sol.algorithm,
+                meta=dict(vsp_sol.meta or {}),
+            )
+            candidates.append(refined_vsp)
+
+    return candidates
 
 
 def _vsp_signature(vsp_sol: VSPSolution) -> Tuple[Tuple[int, ...], ...]:
@@ -322,7 +380,63 @@ def joint_duty_vehicle_swap(
     try:
         from .csp.greedy import GreedyCSP
 
+        def _post_opt_meta(
+            *,
+            accepted: bool,
+            baseline: Dict[str, Any],
+            selected_phase: Optional[str],
+            selected_candidate: Optional[Dict[str, Any]],
+            selected_metrics: Optional[Dict[str, Any]],
+            candidates_evaluated: int,
+            merged_blocks: int,
+            swaps: int,
+            fragmentation_enabled: bool,
+            candidate_limit: int,
+            max_tail_trips: int,
+            tail_stats: Dict[str, Any],
+            outcome: str,
+        ) -> Dict[str, Any]:
+            return {
+                "accepted": accepted,
+                "outcome": outcome,
+                "baseline": baseline,
+                "selected_phase": selected_phase,
+                "selected_candidate": selected_candidate,
+                "selected_metrics": selected_metrics,
+                "joint_swap": {
+                    "merged_blocks": merged_blocks,
+                    "swaps": swaps,
+                },
+                "tail_relocation": {
+                    "enabled": fragmentation_enabled,
+                    "candidate_limit": candidate_limit,
+                    "max_tail_trips": max_tail_trips,
+                    "considered": int(tail_stats.get("considered", 0)),
+                    "generated": int(tail_stats.get("generated", 0)),
+                    "reasons": dict(tail_stats.get("reasons", {})),
+                },
+                "candidates_evaluated": candidates_evaluated,
+            }
+
         if len(vsp_sol.blocks) < 2:
+            baseline_metrics = _build_post_opt_metrics(csp_sol, vsp_sol, 0)
+            post_opt_meta = _post_opt_meta(
+                accepted=False,
+                baseline=baseline_metrics,
+                selected_phase=None,
+                selected_candidate=None,
+                selected_metrics=None,
+                candidates_evaluated=0,
+                merged_blocks=0,
+                swaps=0,
+                fragmentation_enabled=bool(vsp_sol.meta.get("enable_fragmentation_postopt", True)) if vsp_sol.meta else True,
+                candidate_limit=int((vsp_sol.meta or {}).get("fragmentation_candidate_limit", 16) or 16),
+                max_tail_trips=int((vsp_sol.meta or {}).get("fragmentation_max_tail_trips", 4) or 4),
+                tail_stats={"considered": 0, "generated": 0, "reasons": {}},
+                outcome="skipped_single_block",
+            )
+            csp_sol.meta = {**(csp_sol.meta or {}), "post_optimization": post_opt_meta}
+            vsp_sol.meta = {**(vsp_sol.meta or {}), "post_optimization": post_opt_meta}
             return csp_sol, vsp_sol
 
         vsp_params = dict(kwargs.get("vsp_params", {})) if kwargs.get("vsp_params") else (dict(vsp_sol.meta) if vsp_sol.meta else {})
@@ -483,26 +597,42 @@ def joint_duty_vehicle_swap(
                     "metrics": candidate_metrics,
                 }
 
+        # ── CSP Feedback Round (O-C5): use CSP results to refine VSP ─────
+        if best_metrics["violations"] > 0:
+            feedback_vsps = _csp_feedback_candidates(best_csp, best_vsp, vsp_params)
+            for fb_vsp in feedback_vsps:
+                fb_sig = _vsp_signature(fb_vsp)
+                if fb_sig in evaluated_signatures:
+                    continue
+                evaluated_signatures.add(fb_sig)
+                fb_csp = GreedyCSP(vsp_params=vsp_params, **solver_kwargs).solve(fb_vsp.blocks, trips)
+                fb_metrics = _build_post_opt_metrics(fb_csp, fb_vsp, min_work)
+                if _is_better_post_opt_candidate(best_metrics, fb_metrics):
+                    best_csp = fb_csp
+                    best_vsp = fb_vsp
+                    best_metrics = fb_metrics
+                    best_candidate = {
+                        "phase": "csp_feedback",
+                        "details": {"split_violation_blocks": True},
+                        "metrics": fb_metrics,
+                    }
+
         if best_candidate is not None:
-            post_opt_meta = {
-                "baseline": baseline_metrics,
-                "selected_phase": best_candidate["phase"],
-                "selected_candidate": best_candidate["details"],
-                "selected_metrics": best_candidate["metrics"],
-                "joint_swap": {
-                    "merged_blocks": original_vehicles - len(merged_vsp.blocks),
-                    "swaps": total_swaps,
-                },
-                "tail_relocation": {
-                    "enabled": fragmentation_enabled,
-                    "candidate_limit": tail_candidate_limit,
-                    "max_tail_trips": max_tail_trips,
-                    "considered": int(tail_stats.get("considered", 0)),
-                    "generated": int(tail_stats.get("generated", 0)),
-                    "reasons": dict(tail_stats.get("reasons", {})),
-                },
-                "candidates_evaluated": len(evaluated_signatures) - 1,
-            }
+            post_opt_meta = _post_opt_meta(
+                accepted=True,
+                baseline=baseline_metrics,
+                selected_phase=best_candidate["phase"],
+                selected_candidate=best_candidate["details"],
+                selected_metrics=best_candidate["metrics"],
+                candidates_evaluated=len(evaluated_signatures) - 1,
+                merged_blocks=original_vehicles - len(merged_vsp.blocks),
+                swaps=total_swaps,
+                fragmentation_enabled=fragmentation_enabled,
+                candidate_limit=tail_candidate_limit,
+                max_tail_trips=max_tail_trips,
+                tail_stats=tail_stats,
+                outcome="accepted_improvement",
+            )
             best_csp.meta = {**(best_csp.meta or {}), "post_optimization": post_opt_meta}
             best_vsp.meta = {**(best_vsp.meta or {}), "post_optimization": post_opt_meta}
             logger.info(
@@ -518,6 +648,24 @@ def joint_duty_vehicle_swap(
                 best_metrics["fragmentation_score"],
             )
             return best_csp, best_vsp
+
+        post_opt_meta = _post_opt_meta(
+            accepted=False,
+            baseline=baseline_metrics,
+            selected_phase=None,
+            selected_candidate=None,
+            selected_metrics=None,
+            candidates_evaluated=len(evaluated_signatures) - 1,
+            merged_blocks=original_vehicles - len(merged_vsp.blocks),
+            swaps=total_swaps,
+            fragmentation_enabled=fragmentation_enabled,
+            candidate_limit=tail_candidate_limit,
+            max_tail_trips=max_tail_trips,
+            tail_stats=tail_stats,
+            outcome="no_better_candidate" if candidate_vsps else "no_candidate_generated",
+        )
+        csp_sol.meta = {**(csp_sol.meta or {}), "post_optimization": post_opt_meta}
+        vsp_sol.meta = {**(vsp_sol.meta or {}), "post_optimization": post_opt_meta}
 
         if candidate_vsps:
             logger.info(

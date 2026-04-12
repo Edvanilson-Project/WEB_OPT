@@ -41,6 +41,13 @@ class Trip:
     depot_id: Optional[int] = None
     relief_point_id: Optional[int] = None
     is_relief_point: bool = False
+    mid_trip_relief_point_id: Optional[int] = None
+    mid_trip_relief_offset_minutes: Optional[int] = None
+    mid_trip_relief_distance_ratio: Optional[float] = None
+    mid_trip_relief_elevation_ratio: Optional[float] = None
+    original_trip_id: Optional[int] = None
+    segment_index: int = 0
+    segment_count: int = 1
     energy_kwh: float = 0.0
     elevation_gain_m: float = 0.0
     service_day: Optional[int] = None
@@ -64,6 +71,8 @@ class Trip:
             self.service_day = self.start_time // 1440
 
     def can_precede(self, other: "Trip", default_deadhead: int = 0) -> bool:
+        if other.is_continuation_of(self):
+            return True
         gap = other.start_time - self.end_time
         needed = self.deadhead_times.get(other.origin_id, default_deadhead)
         return gap >= needed
@@ -79,6 +88,31 @@ class Trip:
     @property
     def end_fmt(self) -> str:
         return self.fmt_time(self.end_time)
+
+    @property
+    def public_id(self) -> int:
+        return int(self.original_trip_id or self.id)
+
+    @property
+    def is_mid_trip_segment(self) -> bool:
+        return self.original_trip_id is not None and self.segment_count > 1
+
+    @property
+    def ends_at_mid_trip_relief(self) -> bool:
+        return self.is_mid_trip_segment and self.segment_index < self.segment_count - 1
+
+    @property
+    def starts_at_mid_trip_relief(self) -> bool:
+        return self.is_mid_trip_segment and self.segment_index > 0
+
+    def is_continuation_of(self, other: "Trip") -> bool:
+        if self.original_trip_id is None or other.original_trip_id is None:
+            return False
+        if self.original_trip_id != other.original_trip_id:
+            return False
+        if self.segment_index != other.segment_index + 1:
+            return False
+        return self.start_time == other.end_time and self.origin_id == other.destination_id
 
 
 @dataclass
@@ -98,8 +132,7 @@ class VehicleType:
 
     def trip_cost(self, trip: Trip) -> float:
         return (
-            self.fixed_cost
-            + self.cost_per_km * trip.distance_km
+            self.cost_per_km * trip.distance_km
             + self.cost_per_hour * (trip.duration / 60)
         )
 
@@ -327,21 +360,61 @@ class OptimizationResult:
             "duties": [
                 {
                     "duty_id": d.id,
+                    "start_time": d.start_time,
+                    "end_time": d.end_time,
                     "blocks": list(dict.fromkeys(int(b.meta.get("source_block_id", b.id)) for b in d.tasks)),
-                    "trip_ids": list(dict.fromkeys(int(tid) for tid in d.meta.get("covered_trip_ids", []))),
+                    "trip_ids": list(
+                        dict.fromkeys(
+                            int(tid)
+                            for tid in (
+                                d.meta.get("covered_original_trip_ids")
+                                or [getattr(trip, "public_id", trip.id) for trip in d.all_trips]
+                            )
+                        )
+                    ),
                     "trips": [
                         {
                             "id": t.id,
+                            "trip_id": t.public_id,
+                            "segment_index": t.segment_index,
+                            "segment_count": t.segment_count,
                             "start_time": t.start_time,
                             "end_time": t.end_time,
                             "origin_id": t.origin_id,
                             "destination_id": t.destination_id,
                             "line_id": t.line_id,
+                            "block_id": int(next((task.meta.get("source_block_id", task.id) for task in d.tasks if t in task.trips), 0) or 0),
                             "is_pull_out": t.is_pull_out,
                             "is_pull_back": t.is_pull_back,
                             "duration": t.duration,
                         }
                         for t in d.all_trips
+                    ],
+                    "segments": [
+                        {
+                            "block_id": int(task.meta.get("source_block_id", task.id)),
+                            "drive_minutes": sum(t.duration for t in task.trips),
+                            "trip_ids": list(dict.fromkeys(int(getattr(t, "public_id", t.id)) for t in task.trips)),
+                            "trips": [
+                                {
+                                    "id": t.id,
+                                    "trip_id": t.public_id,
+                                    "segment_index": t.segment_index,
+                                    "segment_count": t.segment_count,
+                                    "start_time": t.start_time,
+                                    "end_time": t.end_time,
+                                    "origin_id": t.origin_id,
+                                    "destination_id": t.destination_id,
+                                    "line_id": t.line_id,
+                                    "block_id": int(task.meta.get("source_block_id", task.id)),
+                                    "is_pull_out": t.is_pull_out,
+                                    "is_pull_back": t.is_pull_back,
+                                    "duration": t.duration,
+                                }
+                                for t in task.trips
+                            ],
+                        }
+                        for task in d.tasks
                     ],
                     "work_time": d.work_time,
                     "spread_time": d.spread_time,

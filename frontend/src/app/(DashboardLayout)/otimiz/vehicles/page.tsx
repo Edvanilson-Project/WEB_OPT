@@ -1,13 +1,14 @@
 'use client';
 import React, { useState, useEffect, useCallback } from 'react';
 import {
-  Box, Grid, Typography, Button, Paper, Stack, Skeleton, Tooltip, IconButton,
+  Box, Typography, Button, Paper, Stack, Skeleton, Tooltip, IconButton,
   Dialog, DialogTitle, DialogContent, DialogActions, TextField,
-  Switch, FormControlLabel, InputAdornment, useTheme, Card, CardContent, Divider
+  Switch, FormControlLabel, InputAdornment, Chip,
+  Table, TableHead, TableBody, TableRow, TableCell, TableContainer
 } from '@mui/material';
 import {
   IconPlus, IconEdit, IconTrash, IconSearch, IconRefresh, IconBus,
-  IconCurrencyDollar, IconUsers
+  IconCurrencyDollar, IconUsers, 
 } from '@tabler/icons-react';
 import PageContainer from '@/app/components/container/PageContainer';
 import ConfirmDialog from '../_components/ConfirmDialog';
@@ -25,7 +26,6 @@ const EMPTY: VehicleForm = { name: '', code: '', passengerCapacity: '', costPerK
 const fmtR = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 2 });
 
 function VehiclesInner() {
-  const theme = useTheme();
   const notify = useNotify();
   const [items, setItems] = useState<VehicleType[]>([]);
   const [loading, setLoading] = useState(true);
@@ -95,108 +95,90 @@ function VehiclesInner() {
   
   return (
     <PageContainer title="Frota Enterprise — OTIMIZ" description="Catálogo de frotas operacionais">
-      <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" alignItems={{ xs: 'flex-start', md: 'center' }} gap={2} mb={4} pt={2}>
-        <Box>
-          <Typography variant="overline" sx={{ letterSpacing: 1.6, color: 'primary.main', fontWeight: 800 }}>
-            FLEET ASSETS
-          </Typography>
-          <Typography variant="h3" fontWeight={800} mt={0.5}>Frotas e Costing</Typography>
-          <Typography variant="body1" color="text.secondary" mt={1}>Gerenciamento dos chassis e perfis de custo para otimização.</Typography>
-        </Box>
-        <Stack direction="row" gap={2}>
-          <Tooltip title="Recarregar">
-            <IconButton onClick={load} sx={{ bgcolor: 'background.paper', border: '1px solid', borderColor: 'divider' }}>
-              <IconRefresh size={20} color={theme.palette.primary.main} />
-            </IconButton>
-          </Tooltip>
-          <Button variant="contained" size="large" startIcon={<IconPlus />} onClick={openCreate} sx={{ borderRadius: 2 }}>
-            Novo Chassi
-          </Button>
+      <Stack direction="row" justifyContent="space-between" alignItems="center" mb={3}>
+        <Typography variant="h5" fontWeight={700}>Frota</Typography>
+        <Stack direction="row" spacing={1}>
+          <Tooltip title="Recarregar"><IconButton onClick={load} size="small"><IconRefresh size={18} /></IconButton></Tooltip>
+          <Button variant="contained" startIcon={<IconPlus size={16} />} onClick={openCreate}>Novo Veículo</Button>
         </Stack>
       </Stack>
 
-      {!loading && items.length > 0 && (
-         <Grid container spacing={3} mb={4}>
-           {[
-             { title: 'Catálogo de Frota', value: items.length, color: 'primary.main' },
-             { title: 'Chassis Ativos', value: active.length, color: 'success.main' },
-             { title: 'Lotação Média', value: avgCapacity, color: 'warning.main' },
-           ].map((c) => (
-             <Grid item xs={12} md={4} key={c.title}>
-               <Card variant="outlined" sx={{ borderRadius: 3, borderLeft: `6px solid`, borderLeftColor: c.color }}>
-                 <CardContent>
-                   <Typography variant="caption" color="text.secondary">{c.title}</Typography>
-                   <Typography variant="h4" fontWeight={800} mt={1}>{c.value}</Typography>
-                 </CardContent>
-               </Card>
-             </Grid>
-           ))}
-         </Grid>
-      )}
 
-      <Paper variant="outlined" sx={{ borderRadius: 3, p: 2, mb: 4 }}>
-        <Stack direction="row" gap={2} alignItems="center" flexWrap="wrap">
-          <TextField size="small" placeholder="Localizar modelo ou código..." value={search} onChange={(e) => setSearch(e.target.value)} fullWidth sx={{ maxWidth: { md: 400 } }} InputProps={{ startAdornment: <InputAdornment position="start"><IconSearch size={16} /></InputAdornment> }} />
-          <Typography variant="subtitle2" fontWeight={700} color="primary.main" ml="auto">{filtered.length} chassis cadastrados</Typography>
-        </Stack>
-      </Paper>
+
+      <Stack direction="row" spacing={2} alignItems="center" mb={2}>
+        <TextField size="small" placeholder="Buscar veículo..." value={search} onChange={(e) => setSearch(e.target.value)} sx={{ width: 300 }}
+          InputProps={{ startAdornment: <InputAdornment position="start"><IconSearch size={16} /></InputAdornment> }} />
+        <Typography variant="body2" color="text.secondary">{filtered.length} registros</Typography>
+      </Stack>
 
       {loading ? (
-        <Grid container spacing={2}>
-           {[...Array(6)].map((_, i) => <Grid item xs={12} sm={6} md={4} key={i}><Skeleton variant="rounded" height={160} /></Grid>)}
-        </Grid>
+        <Box>
+          {[...Array(6)].map((_, i) => (
+            <Skeleton key={i} variant="rectangular" height={52} sx={{ mb: 0.5, borderRadius: 1 }} />
+          ))}
+        </Box>
       ) : filtered.length === 0 ? (
         <Box textAlign="center" py={12} bgcolor="grey.50" borderRadius={3} border="1px dashed" borderColor="divider">
           <IconBus size={64} color="#BDBDBD" />
-          <Typography variant="h6" color="text.secondary" mt={2}>Nenhum chassi encontrado nesse filtro.</Typography>
+          <Typography variant="h6" color="text.secondary" mt={2}>Nenhum modelo encontrado nesse filtro.</Typography>
         </Box>
       ) : (
-        <Grid container spacing={2}>
-           {filtered.map((t) => (
-             <Grid item xs={12} sm={6} md={4} key={t.id}>
-                <Card variant="outlined" sx={{ borderRadius: 3, transition: '0.2s', '&:hover': { borderColor: 'primary.main', boxShadow: '0 8px 16px rgba(0,0,0,0.05)' }}}>
-                   <CardContent sx={{ p: '20px !important' }}>
-                      <Stack direction="row" justifyContent="space-between" mb={1}>
-                         <Box sx={{ p: 1, borderRadius: 2, bgcolor: 'primary.lighter', color: 'primary.dark' }}>
-                            <IconBus size={24} />
-                         </Box>
-                         <Stack direction="row" spacing={0.5}>
-                            <IconButton size="small" onClick={() => openEdit(t)} sx={{ bgcolor: 'grey.50'}}><IconEdit size={16} /></IconButton>
-                            <IconButton size="small" onClick={() => setDeleteTarget(t)} sx={{ bgcolor: 'error.lighter', color: 'error.main' }}><IconTrash size={16} /></IconButton>
-                         </Stack>
-                      </Stack>
-                      <Typography variant="caption" fontFamily="monospace" fontWeight={700} color="text.secondary">{t.code ?? 'S/N'}</Typography>
-                      <Typography variant="h6" fontWeight={800} noWrap>{t.name}</Typography>
-                      
-                      <Stack direction="row" gap={3} mt={2} mb={2}>
-                         <Box>
-                           <Typography variant="caption" color="text.secondary" display="block">Capacidade</Typography>
-                           <Stack direction="row" alignItems="center" gap={0.5}>
-                             <IconUsers size={14} color={theme.palette.text.disabled}/>
-                             <Typography variant="body2" fontWeight={700}>{t.passengerCapacity}</Typography>
-                           </Stack>
-                         </Box>
-                         <Box>
-                           <Typography variant="caption" color="text.secondary" display="block">Custo Diário</Typography>
-                           <Stack direction="row" alignItems="center" gap={0.5}>
-                             <IconCurrencyDollar size={14} color={theme.palette.text.disabled}/>
-                             <Typography variant="body2" fontWeight={700}>{fmtR(t.fixedCost)}</Typography>
-                           </Stack>
-                         </Box>
-                      </Stack>
-                      <Divider sx={{ mb: 2 }} />
-                      <Stack direction="row" justifyContent="space-between" alignItems="center">
-                         <Typography variant="caption" color="text.secondary">Rodagem: {fmtR(t.costPerKm)}/km</Typography>
-                         <StatusChip type="status" value={t.isActive ? 'active' : 'inactive'} />
-                      </Stack>
-                   </CardContent>
-                </Card>
-             </Grid>
-           ))}
-        </Grid>
+        <TableContainer component={Paper} variant="outlined" sx={{ borderRadius: 2 }}>
+          <Table size="small">
+            <TableHead>
+              <TableRow sx={{ bgcolor: 'grey.50' }}>
+                <TableCell sx={{ fontWeight: 700 }}>Modelo</TableCell>
+                <TableCell align="center" sx={{ fontWeight: 700 }}>Capacidade</TableCell>
+                <TableCell align="right" sx={{ fontWeight: 700 }}>Custo/km</TableCell>
+                <TableCell align="right" sx={{ fontWeight: 700 }}>Custo/h</TableCell>
+                <TableCell align="right" sx={{ fontWeight: 700 }}>Fixo Diário</TableCell>
+                <TableCell align="center" sx={{ fontWeight: 700 }}>Status</TableCell>
+                <TableCell align="right" sx={{ fontWeight: 700 }}>Ações</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {filtered.map((t) => (
+                <TableRow key={t.id} hover sx={{ '&:last-child td': { border: 0 } }}>
+                  <TableCell>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+                      <Box sx={{ p: 0.75, borderRadius: 1.5, bgcolor: 'primary.lighter', color: 'primary.dark', display: 'flex' }}>
+                        <IconBus size={16} />
+                      </Box>
+                      <Box>
+                        <Typography variant="body2" fontWeight={700}>{t.name}</Typography>
+                        {t.code && <Typography variant="caption" fontFamily="monospace" color="text.secondary">{t.code}</Typography>}
+                      </Box>
+                    </Box>
+                  </TableCell>
+                  <TableCell align="center">
+                    <Chip size="small" label={`${t.passengerCapacity} pass.`} variant="outlined" sx={{ height: 20, fontSize: 11 }} />
+                  </TableCell>
+                  <TableCell align="right">
+                    <Typography variant="body2">{fmtR(t.costPerKm)}/km</Typography>
+                  </TableCell>
+                  <TableCell align="right">
+                    <Typography variant="body2">{fmtR(t.costPerHour)}/h</Typography>
+                  </TableCell>
+                  <TableCell align="right">
+                    <Typography variant="body2" fontWeight={600}>{fmtR(t.fixedCost)}</Typography>
+                  </TableCell>
+                  <TableCell align="center">
+                    <StatusChip type="status" value={t.isActive ? 'active' : 'inactive'} />
+                  </TableCell>
+                  <TableCell align="right">
+                    <Stack direction="row" spacing={0.5} justifyContent="flex-end">
+                      <Tooltip title="Editar"><IconButton size="small" onClick={() => openEdit(t)} sx={{ bgcolor: 'grey.50' }}><IconEdit size={15} /></IconButton></Tooltip>
+                      <Tooltip title="Excluir"><IconButton size="small" onClick={() => setDeleteTarget(t)} sx={{ bgcolor: 'error.lighter', color: 'error.main' }}><IconTrash size={15} /></IconButton></Tooltip>
+                    </Stack>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </TableContainer>
       )}
 
-      <Dialog open={dialogOpen} onClose={() => !saving && setDialogOpen(false)} maxWidth="sm" fullWidth PaperProps={{ sx: { borderRadius: 3 } }}>
+      <Dialog open={dialogOpen} onClose={() => !saving && setDialogOpen(false)} maxWidth="sm" fullWidth>
         <DialogTitle sx={{ fontWeight: 800 }}>{editTarget ? 'Editar Chassi' : 'Novo Chassi Operacional'}</DialogTitle>
         <DialogContent dividers>
           <Stack spacing={3} sx={{ pt: 1 }}>

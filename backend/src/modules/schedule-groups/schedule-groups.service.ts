@@ -113,36 +113,58 @@ export class ScheduleGroupsService {
       const tripsByLine: Record<string, number> = {};
       let tripIdCounter = 0;
 
+      // ── B-M3: Batch fetch schedules, rules, profiles to avoid N+1 ──
+      const schedules = await qr.query(
+        `SELECT s.*, l.code as line_code, l.name as line_name,
+                l.origin_terminal_id, l.destination_terminal_id,
+                l.distance_km, l.avg_trip_duration_minutes,
+                l.pullout_duration_minutes, l.pullback_duration_minutes
+         FROM schedules s
+         JOIN lines l ON l.id = s.line_id
+         WHERE s.id = ANY($1)`,
+        [group.scheduleIds],
+      );
+      const scheduleMap = new Map(schedules.map((s: any) => [Number(s.id), s]));
+
+      const allRules = schedules.length
+        ? await qr.query(
+            `SELECT tr.*, tb.name as band_name, tb.start_minutes, tb.end_minutes, tb.is_peak
+             FROM timetable_rules tr
+             JOIN time_bands tb ON tb.id = tr.time_band_id
+             WHERE tr.schedule_id = ANY($1)
+             ORDER BY tr.schedule_id, tb.start_minutes`,
+            [group.scheduleIds],
+          )
+        : [];
+      const rulesMap = new Map<number, any[]>();
+      for (const r of allRules) {
+        const sid = Number(r.schedule_id);
+        if (!rulesMap.has(sid)) rulesMap.set(sid, []);
+        rulesMap.get(sid)!.push(r);
+      }
+
+      const lineIds = [...new Set(schedules.map((s: any) => Number(s.line_id)))];
+      const allProfiles = lineIds.length
+        ? await qr.query(
+            `SELECT * FROM line_trip_profiles WHERE line_id = ANY($1)`,
+            [lineIds],
+          )
+        : [];
+      const profilesByLine = new Map<number, any[]>();
+      for (const p of allProfiles) {
+        const lid = Number(p.line_id);
+        if (!profilesByLine.has(lid)) profilesByLine.set(lid, []);
+        profilesByLine.get(lid)!.push(p);
+      }
+
       for (const scheduleId of group.scheduleIds) {
-        // Buscar schedule (quadro horário)
-        const [schedule] = await qr.query(
-          `SELECT s.*, l.code as line_code, l.name as line_name,
-                  l.origin_terminal_id, l.destination_terminal_id,
-                  l.distance_km, l.avg_trip_duration_minutes,
-                  l.pullout_duration_minutes, l.pullback_duration_minutes
-           FROM schedules s
-           JOIN lines l ON l.id = s.line_id
-           WHERE s.id = $1`,
-          [scheduleId],
-        );
+        const schedule: any = scheduleMap.get(Number(scheduleId));
         if (!schedule) continue;
 
-        // Buscar regras (headway por faixa)
-        const rules = await qr.query(
-          `SELECT tr.*, tb.name as band_name, tb.start_minutes, tb.end_minutes, tb.is_peak
-           FROM timetable_rules tr
-           JOIN time_bands tb ON tb.id = tr.time_band_id
-           WHERE tr.schedule_id = $1
-           ORDER BY tb.start_minutes`,
-          [scheduleId],
-        );
+        const rules = rulesMap.get(Number(scheduleId)) || [];
         if (!rules.length) continue;
 
-        // Buscar perfis de viagem (duração por sentido+faixa)
-        const profiles = await qr.query(
-          `SELECT * FROM line_trip_profiles WHERE line_id = $1`,
-          [schedule.line_id],
-        );
+        const profiles = profilesByLine.get(Number(schedule.line_id)) || [];
 
         // Mapear perfis: { "outbound_3": { duration: 45, ... } }
         const profileMap: Record<string, any> = {};
@@ -172,9 +194,7 @@ export class ScheduleGroupsService {
             const duration = profile
               ? Number(profile.trip_duration_minutes)
               : avgDuration;
-            const distance = profile
-              ? Number(profile.distance_km || schedule.distance_km || 0)
-              : Number(schedule.distance_km || 0);
+            // distance_km disponível em profile.distance_km ou schedule.distance_km (não usado aqui)
             const demand = profile ? Number(profile.passenger_demand || 0) : 0;
 
             const originId =

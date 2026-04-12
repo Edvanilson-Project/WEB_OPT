@@ -12,12 +12,17 @@ from __future__ import annotations
 
 import math
 import random
-from copy import deepcopy
 from typing import List, Optional
 
 from ...core.config import get_settings
 from ...domain.interfaces import IVSPAlgorithm
 from ...domain.models import Block, Trip, VehicleType, VSPSolution
+
+
+def _copy_blocks(blocks: List[Block]) -> List[Block]:
+    """Shallow copy: new list + new Block/trips-list wrappers, shared Trip refs."""
+    return [Block(id=b.id, trips=list(b.trips), vehicle_type_id=b.vehicle_type_id,
+                  warnings=b.warnings, meta=dict(b.meta)) for b in blocks]
 from ..base import BaseAlgorithm
 from ..utils import blocks_are_feasible, preferred_pair_penalty, quick_cost_sorted, sort_block_trips
 from .greedy import GreedyVSP, build_preferred_pairs
@@ -37,12 +42,12 @@ def _quick_cost(
                              max_work_minutes, crew_cost_weight)
 
 
-def _reloc(blocks: List[Block]) -> List[Block]:
+def _reloc(blocks: List[Block], min_gap: int = 8) -> List[Block]:
     """Move 1 viagem aleatória de um bloco para outro. Re-ordena e valida (corrige B1)."""
     if len(blocks) < 2:
         return blocks
     original = blocks
-    blocks = deepcopy(blocks)
+    blocks = _copy_blocks(blocks)
     src = random.randint(0, len(blocks) - 1)
     if not blocks[src].trips:
         return original
@@ -52,17 +57,17 @@ def _reloc(blocks: List[Block]) -> List[Block]:
     blocks[dst].trips.append(trip)  # Adiciona ao final, depois ordena
     blocks = [b for b in blocks if b.trips]
     sort_block_trips(blocks)  # CORREÇÃO B1: ordena por start_time
-    if not blocks_are_feasible(blocks):  # Rejeita movimentos inviáveis
+    if not blocks_are_feasible(blocks, min_gap):  # Rejeita movimentos inviáveis
         return original
     return blocks
 
 
-def _swap2(blocks: List[Block]) -> List[Block]:
+def _swap2(blocks: List[Block], min_gap: int = 8) -> List[Block]:
     """Troca 1 viagem entre dois blocos distintos. Re-ordena e valida (corrige B1)."""
     if len(blocks) < 2:
         return blocks
     original = blocks
-    blocks = deepcopy(blocks)
+    blocks = _copy_blocks(blocks)
     i, j = random.sample(range(len(blocks)), 2)
     if not blocks[i].trips or not blocks[j].trips:
         return original
@@ -70,7 +75,7 @@ def _swap2(blocks: List[Block]) -> List[Block]:
     jj = random.randint(0, len(blocks[j].trips) - 1)
     blocks[i].trips[ii], blocks[j].trips[jj] = blocks[j].trips[jj], blocks[i].trips[ii]
     sort_block_trips(blocks)  # CORREÇÃO B1: re-ordena por start_time
-    if not blocks_are_feasible(blocks):  # Rejeita movimentos inviáveis
+    if not blocks_are_feasible(blocks, min_gap):  # Rejeita movimentos inviáveis
         return original
     return blocks
 
@@ -79,7 +84,7 @@ def _split(blocks: List[Block], next_id: int) -> List[Block]:
     """Divide um bloco aleatório em dois na posição aleatória."""
     if not blocks:
         return blocks
-    blocks = deepcopy(blocks)
+    blocks = _copy_blocks(blocks)
     idx = random.randint(0, len(blocks) - 1)
     if len(blocks[idx].trips) < 2:
         return blocks
@@ -88,21 +93,22 @@ def _split(blocks: List[Block], next_id: int) -> List[Block]:
     blocks[idx].trips = blocks[idx].trips[:cut]
     if new_block.trips:
         new_block.vehicle_type_id = blocks[idx].vehicle_type_id
+        new_block.meta = dict(blocks[idx].meta)
         blocks.append(new_block)
     return blocks
 
 
-def _merge(blocks: List[Block]) -> List[Block]:
+def _merge(blocks: List[Block], min_gap: int = 8) -> List[Block]:
     """Combina dois blocos em um, reduzindo o número de veículos."""
     if len(blocks) < 2:
         return blocks
     original = blocks
-    blocks = deepcopy(blocks)
+    blocks = _copy_blocks(blocks)
     i, j = random.sample(range(len(blocks)), 2)
     blocks[i].trips.extend(blocks[j].trips)
     del blocks[j]
     sort_block_trips(blocks)
-    if not blocks_are_feasible(blocks):
+    if not blocks_are_feasible(blocks, min_gap):
         return original
     return blocks
 
@@ -139,6 +145,7 @@ class SimulatedAnnealingVSP(BaseAlgorithm, IVSPAlgorithm):
         crew_cw = float(self.vsp_params.get("crew_cost_weight", fvc * 0.5))
         pair_break_penalty = float(self.vsp_params.get("pair_break_penalty", fvc * 1.25))
         paired_trip_bonus = float(self.vsp_params.get("paired_trip_bonus", fvc * 0.05))
+        min_gap = int(self.vsp_params.get("min_layover_minutes", 8) or 8)
         preferred_pairs = (
             build_preferred_pairs(
                 trips,
@@ -163,10 +170,10 @@ class SimulatedAnnealingVSP(BaseAlgorithm, IVSPAlgorithm):
 
         # Estado inicial via Greedy
         current_sol = GreedyVSP(vsp_params=self.vsp_params).solve(trips, vehicle_types)
-        current_blocks = deepcopy(current_sol.blocks)
+        current_blocks = _copy_blocks(current_sol.blocks)
         current_cost = cost_fn(current_blocks)
 
-        best_blocks = deepcopy(current_blocks)
+        best_blocks = _copy_blocks(current_blocks)
         best_cost = current_cost
 
         min_temp = 0.1
@@ -178,7 +185,7 @@ class SimulatedAnnealingVSP(BaseAlgorithm, IVSPAlgorithm):
             temp = self.initial_temp
             # On restart, perturb from best known solution
             if restarts > 0:
-                current_blocks = deepcopy(best_blocks)
+                current_blocks = _copy_blocks(best_blocks)
                 current_cost = best_cost
                 # Apply random perturbations to escape local optima
                 for _ in range(min(5 + restarts, 20)):
@@ -186,7 +193,7 @@ class SimulatedAnnealingVSP(BaseAlgorithm, IVSPAlgorithm):
                     if op is _split:
                         perturbed = _split(current_blocks, self._next_block_id())
                     else:
-                        perturbed = op(current_blocks)
+                        perturbed = op(current_blocks, min_gap)
                     if perturbed:
                         current_blocks = perturbed
                         current_cost = cost_fn(current_blocks)
@@ -199,7 +206,7 @@ class SimulatedAnnealingVSP(BaseAlgorithm, IVSPAlgorithm):
                 if op is _split:
                     candidate = _split(current_blocks, self._next_block_id())
                 else:
-                    candidate = op(current_blocks)  # type: ignore[operator]
+                    candidate = op(current_blocks, min_gap)  # type: ignore[operator]
 
                 if not candidate:
                     temp *= self.cooling_rate
@@ -213,7 +220,7 @@ class SimulatedAnnealingVSP(BaseAlgorithm, IVSPAlgorithm):
                     current_cost = candidate_cost
 
                 if current_cost < best_cost:
-                    best_blocks = deepcopy(current_blocks)
+                    best_blocks = _copy_blocks(current_blocks)
                     best_cost = current_cost
 
                 temp *= self.cooling_rate

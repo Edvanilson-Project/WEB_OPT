@@ -1,3 +1,5 @@
+/// <reference types="jest" />
+
 import { OptimizationService } from './optimization.service';
 import {
   OptimizationAlgorithm,
@@ -6,6 +8,7 @@ import {
 
 describe('OptimizationService audit and compare', () => {
   const runRepo = {
+    find: jest.fn(),
     findOne: jest.fn(),
     update: jest.fn(),
   };
@@ -27,16 +30,155 @@ describe('OptimizationService audit and compare', () => {
     tripsService as any,
     settingsService as any,
     configService as any,
+    {} as any, // linesService
+    {} as any, // terminalsService
+    {} as any, // vehicleTypesService
   );
 
   beforeEach(() => {
     jest.clearAllMocks();
+    runRepo.find.mockResolvedValue([]);
     runRepo.update.mockResolvedValue(undefined);
     settingsService.findActive.mockResolvedValue(null);
     configService.get.mockReturnValue('http://localhost:8000');
   });
 
-  it.skip('returns audit payload with versioning and cost breakdown', async () => {
+  it('respects persisted operational and validation flags from active settings in optimizer payload', async () => {
+    tripsService.findAll.mockResolvedValue([
+      {
+        id: 8733,
+        lineId: 16,
+        startTimeMinutes: 1048,
+        endTimeMinutes: 1166,
+        originTerminalId: 13,
+        destinationTerminalId: 12,
+        durationMinutes: 118,
+      },
+    ]);
+    settingsService.findActive.mockResolvedValue({
+      id: 99,
+      allowReliefPoints: true,
+      operatorChangeTerminalsOnly: true,
+      operatorSingleVehicleOnly: false,
+      enforceTripGroupsHard: true,
+      strictHardValidation: false,
+    });
+
+    const callOptimizerService = jest
+      .spyOn(service as any, '_callOptimizerService')
+      .mockResolvedValue({ blocks: [], duties: [] });
+    jest.spyOn(service as any, '_saveResults').mockResolvedValue(undefined);
+
+    await (service as any)._executeOptimization(501, {
+      companyId: 1,
+      lineId: 16,
+      algorithm: OptimizationAlgorithm.HYBRID_PIPELINE,
+    });
+
+    expect(callOptimizerService).toHaveBeenCalledWith(
+      'http://localhost:8000',
+      expect.objectContaining({
+        cct_params: expect.objectContaining({
+          allow_relief_points: true,
+          operator_change_terminals_only: true,
+          operator_single_vehicle_only: false,
+          enforce_trip_groups_hard: true,
+          operator_pairing_hard: true,
+          strict_hard_validation: false,
+        }),
+        vsp_params: expect.objectContaining({
+          strict_hard_validation: false,
+        }),
+      }),
+    );
+  });
+
+  it('allows run overrides to change strict hard validation for cct and vsp', async () => {
+    tripsService.findAll.mockResolvedValue([
+      {
+        id: 9002,
+        lineId: 16,
+        startTimeMinutes: 600,
+        endTimeMinutes: 660,
+        originTerminalId: 1,
+        destinationTerminalId: 2,
+        durationMinutes: 60,
+      },
+    ]);
+    settingsService.findActive.mockResolvedValue({
+      id: 100,
+      strictHardValidation: true,
+    });
+
+    const callOptimizerService = jest
+      .spyOn(service as any, '_callOptimizerService')
+      .mockResolvedValue({ blocks: [], duties: [] });
+    jest.spyOn(service as any, '_saveResults').mockResolvedValue(undefined);
+
+    await (service as any)._executeOptimization(503, {
+      companyId: 1,
+      lineId: 16,
+      algorithm: OptimizationAlgorithm.HYBRID_PIPELINE,
+      cspParams: {
+        strictHardValidation: false,
+      },
+      vspParams: {
+        strictHardValidation: false,
+      },
+    });
+
+    expect(callOptimizerService).toHaveBeenCalledWith(
+      'http://localhost:8000',
+      expect.objectContaining({
+        cct_params: expect.objectContaining({
+          strict_hard_validation: false,
+        }),
+        vsp_params: expect.objectContaining({
+          strict_hard_validation: false,
+        }),
+      }),
+    );
+  });
+
+  it('keeps run override in sync for enforceTripGroupsHard pair enforcement', async () => {
+    tripsService.findAll.mockResolvedValue([
+      {
+        id: 9001,
+        lineId: 16,
+        startTimeMinutes: 600,
+        endTimeMinutes: 660,
+        originTerminalId: 1,
+        destinationTerminalId: 2,
+        durationMinutes: 60,
+      },
+    ]);
+
+    const callOptimizerService = jest
+      .spyOn(service as any, '_callOptimizerService')
+      .mockResolvedValue({ blocks: [], duties: [] });
+    jest.spyOn(service as any, '_saveResults').mockResolvedValue(undefined);
+
+    await (service as any)._executeOptimization(502, {
+      companyId: 1,
+      lineId: 16,
+      algorithm: OptimizationAlgorithm.HYBRID_PIPELINE,
+      cspParams: {
+        enforceTripGroupsHard: false,
+      },
+    });
+
+    expect(callOptimizerService).toHaveBeenCalledWith(
+      'http://localhost:8000',
+      expect.objectContaining({
+        cct_params: expect.objectContaining({
+          enforce_trip_groups_hard: false,
+          operator_pairing_hard: false,
+        }),
+      }),
+    );
+  });
+
+  it('returns audit payload with versioning and cost breakdown', async () => {
     runRepo.findOne.mockResolvedValue({
       id: 10,
       companyId: 1,
@@ -66,6 +208,12 @@ describe('OptimizationService audit and compare', () => {
       resultSummary: {
         warnings: ['warning-1'],
         trip_details: [{ id: 1 }, { id: 2 }],
+        reproducibility: {
+          random_seed: 7,
+          input_hash: 'inp-777',
+          params_hash: 'par-777',
+          time_budget_s: 30,
+        },
         cost_breakdown: {
           total: 45210,
           vsp: { total: 30000, idle_cost: 1200 },
@@ -97,10 +245,12 @@ describe('OptimizationService audit and compare', () => {
     expect(audit.result.tripDetailsCount).toBe(2);
     expect(audit.result.solverExplanation.status).toBe('feasible');
     expect(audit.result.solverVersion).toBe('2.0.0');
+    expect((audit.result as any).reproducibility.input_hash).toBe('inp-777');
+    expect((audit.result as any).reproducibility.params_hash).toBe('par-777');
     expect(audit.result.performance.phase_timings_ms.vsp_greedy_ms).toBe(10.5);
   });
 
-  it.skip('compares runs with metric, cost and parameter deltas', async () => {
+  it('compares runs with metric, cost and parameter deltas', async () => {
     runRepo.findOne
       .mockResolvedValueOnce({
         id: 21,
@@ -121,6 +271,21 @@ describe('OptimizationService audit and compare', () => {
           versioning: { ruleHash: 'base-hash' },
         },
         resultSummary: {
+          reproducibility: {
+            random_seed: 7,
+            input_hash: 'base-input',
+            params_hash: 'base-params',
+            time_budget_s: 30,
+          },
+          performance: {
+            total_elapsed_ms: 9100,
+            trip_count: 88,
+            vehicle_type_count: 2,
+            phase_timings_ms: {
+              input_validation_ms: 15,
+              solver_ms: 8200,
+            },
+          },
           cost_breakdown: {
             total: 48000,
             vsp: { total: 32000, activation: 24000, idle_cost: 1800 },
@@ -161,6 +326,21 @@ describe('OptimizationService audit and compare', () => {
           versioning: { ruleHash: 'other-hash' },
         },
         resultSummary: {
+          reproducibility: {
+            random_seed: 7,
+            input_hash: 'base-input',
+            params_hash: 'other-params',
+            time_budget_s: 24,
+          },
+          performance: {
+            total_elapsed_ms: 7600,
+            trip_count: 88,
+            vehicle_type_count: 1,
+            phase_timings_ms: {
+              input_validation_ms: 10,
+              solver_ms: 6800,
+            },
+          },
           cost_breakdown: {
             total: 45210,
             vsp: { total: 30000, activation: 20000, idle_cost: 1100 },
@@ -192,6 +372,11 @@ describe('OptimizationService audit and compare', () => {
     expect(comparison.costBreakdown.vsp_idle_cost.delta).toBe(-700);
     expect(comparison.costBreakdown.csp_guaranteed_cost.delta).toBe(-250);
     expect(comparison.costBreakdown.csp_overtime_cost.delta).toBe(-180);
+    expect(comparison.performance.totalElapsedMs.delta).toBe(-1500);
+    expect(comparison.performance.phaseTimings.solver_ms.delta).toBe(-1400);
+    expect(comparison.reproducibility.sameInputHash).toBe(true);
+    expect(comparison.reproducibility.sameParamsHash).toBe(false);
+    expect(comparison.reproducibility.sameTimeBudget).toBe(false);
     expect(comparison.paramsDiff).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -208,7 +393,7 @@ describe('OptimizationService audit and compare', () => {
     );
   });
 
-  it.skip('keeps optimizer diagnostics in failed run audit', async () => {
+  it('keeps optimizer diagnostics in failed run audit', async () => {
     runRepo.findOne.mockResolvedValue({
       id: 31,
       companyId: 1,
@@ -238,7 +423,7 @@ describe('OptimizationService audit and compare', () => {
     ).toBe('trip_group_split');
   });
 
-  it.skip('normalizes legacy summary fields when loading a run', async () => {
+  it('normalizes legacy summary fields when loading a run', async () => {
     runRepo.findOne.mockResolvedValue({
       id: 32,
       companyId: 1,
@@ -329,9 +514,61 @@ describe('OptimizationService audit and compare', () => {
     expect((run.resultSummary as any).reproducibility.random_seed).toBe(17);
   });
 
+  it('normalizes audit snapshots in run history list', async () => {
+    runRepo.find.mockResolvedValue([
+      {
+        id: 41,
+        companyId: 1,
+        status: OptimizationStatus.COMPLETED,
+        algorithm: OptimizationAlgorithm.HYBRID_PIPELINE,
+        totalCost: 1850,
+        durationMs: 6400,
+        params: {
+          versioning: {
+            inputHash: 'hist-input',
+            ruleHash: 'hist-rule',
+          },
+        },
+        resultSummary: {
+          total_cost: 1850,
+          meta: {
+            reproducibility: {
+              input_hash: 'hist-input',
+              params_hash: 'hist-params',
+              time_budget_s: 45,
+            },
+            performance: {
+              total_elapsed_ms: 6123,
+              phase_timings_ms: {
+                solver_ms: 5900,
+              },
+            },
+          },
+        },
+      },
+    ]);
 
+    const runs = await service.findAll(1);
 
-
+    expect(runRepo.find).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { companyId: 1 },
+        order: { createdAt: 'DESC' },
+        take: 50,
+      }),
+    );
+    expect(runs).toHaveLength(1);
+    expect(runs[0].totalCost).toBe(1850);
+    expect((runs[0].resultSummary as any).reproducibility.input_hash).toBe(
+      'hist-input',
+    );
+    expect((runs[0].resultSummary as any).reproducibility.params_hash).toBe(
+      'hist-params',
+    );
+    expect((runs[0].resultSummary as any).performance.total_elapsed_ms).toBe(
+      6123,
+    );
+  });
 
   it('forwards fairness tolerance from dto cspParams to optimizer cct_params', async () => {
     tripsService.findAll.mockResolvedValue([
@@ -378,6 +615,80 @@ describe('OptimizationService audit and compare', () => {
         cct_params: expect.objectContaining({
           fairness_tolerance_minutes: 20,
         }),
+      }),
+    );
+    expect(runRepo.update).toHaveBeenCalledWith(
+      77,
+      expect.objectContaining({
+        params: expect.objectContaining({
+          requested: expect.objectContaining({
+            lineId: 16,
+            algorithm: OptimizationAlgorithm.HYBRID_PIPELINE,
+          }),
+          resolved: expect.objectContaining({
+            algorithm: 'hybrid_pipeline',
+            cct: expect.objectContaining({
+              fairness_tolerance_minutes: 20,
+            }),
+          }),
+          settingsSnapshot: null,
+          versioning: expect.objectContaining({
+            settingsVersion: 'settings:none',
+          }),
+        }),
+      }),
+    );
+    expect(saveSpy).toHaveBeenCalled();
+  });
+
+  it('forwards mid-trip relief metadata from trips to optimizer payload', async () => {
+    tripsService.findAll.mockResolvedValue([
+      {
+        id: 11,
+        lineId: 16,
+        startTimeMinutes: 360,
+        endTimeMinutes: 540,
+        durationMinutes: 180,
+        originTerminalId: 1,
+        destinationTerminalId: 3,
+        midTripReliefPointId: 2,
+        midTripReliefOffsetMinutes: 90,
+        distanceKm: 18,
+      },
+    ]);
+
+    const optimizerSpy = jest
+      .spyOn(service as any, '_callOptimizerService')
+      .mockResolvedValue({
+        vehicles: 1,
+        crew: 2,
+        total_cost: 1200,
+        cct_violations: 0,
+        blocks: [],
+        duties: [],
+        warnings: [],
+        meta: {},
+      });
+    const saveSpy = jest
+      .spyOn(service as any, '_saveResults')
+      .mockResolvedValue(undefined);
+
+    await (service as any)._executeOptimization(88, {
+      companyId: 1,
+      lineId: 16,
+      algorithm: OptimizationAlgorithm.GREEDY,
+    });
+
+    expect(optimizerSpy).toHaveBeenCalledWith(
+      'http://localhost:8000',
+      expect.objectContaining({
+        trips: expect.arrayContaining([
+          expect.objectContaining({
+            id: 11,
+            mid_trip_relief_point_id: 2,
+            mid_trip_relief_offset_minutes: 90,
+          }),
+        ]),
       }),
     );
     expect(saveSpy).toHaveBeenCalled();

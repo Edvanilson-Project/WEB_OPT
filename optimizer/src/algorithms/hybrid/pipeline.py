@@ -61,15 +61,26 @@ class HybridPipeline(BaseAlgorithm):
 
         budget = self.time_budget_s
         n = len(trips)
+
+        # Pré-calcular preferred_pairs UMA vez — O(n²) evitado em cada _vsp_cost call
+        min_layover = int(self.vsp_params.get("min_layover_minutes", 8) or 8)
+        if bool(self.vsp_params.get("preserve_preferred_pairs", True)):
+            cached_pairs = build_preferred_pairs(
+                trips, min_layover,
+                int(self.vsp_params.get("preferred_pair_window_minutes", 120) or 120),
+            )
+        else:
+            cached_pairs = {}
+
         t_phase = time.perf_counter()
         # MCNF gera a baseline matemática perfeita (Bipartite Matching)
         best_vsp = MCNFVSP(vsp_params=self.vsp_params).solve(trips, vehicle_types, depot_id)
         phase_timings_ms["vsp_mcnf_ms"] = round((time.perf_counter() - t_phase) * 1000, 2)
-        best_cost = _vsp_cost(best_vsp, self.vsp_params)
+        best_cost = _vsp_cost(best_vsp, self.vsp_params, cached_pairs)
         best_issues = _vsp_hard_issue_count(best_vsp, self.vsp_params)
         best_vehicles = len(best_vsp.blocks)
         strict_hard = bool(self.vsp_params.get("strict_hard_validation", self.cct_params.get("strict_hard_validation", False)))
-        logger.info(f"[PIPELINE] greedy: {best_vehicles} veículos, cost={best_cost:.0f}, issues={best_issues}")
+        logger.info(f"[PIPELINE] mcnf baseline: {best_vehicles} veículos, cost={best_cost:.0f}, issues={best_issues}")
 
         def _is_better(sol, cost, issues):
             """Compara por: 1) menos hard issues, 2) menos veículos, 3) menor custo."""
@@ -94,7 +105,7 @@ class HybridPipeline(BaseAlgorithm):
         phase_timings_ms["vsp_sa_ms"] = round((time.perf_counter() - t_phase) * 1000, 2)
         sa_elapsed_s = (sa_sol.elapsed_ms or 0) / 1000.0
         sa_saved = max(0, sa_budget - sa_elapsed_s)
-        sa_cost = _vsp_cost(sa_sol, self.vsp_params)
+        sa_cost = _vsp_cost(sa_sol, self.vsp_params, cached_pairs)
         sa_issues = _vsp_hard_issue_count(sa_sol, self.vsp_params)
         sa_iters = getattr(sa_sol, 'iterations', 0)
         sa_restarts = (sa_sol.meta or {}).get('restarts', 0)
@@ -116,7 +127,7 @@ class HybridPipeline(BaseAlgorithm):
         phase_timings_ms["vsp_tabu_ms"] = round((time.perf_counter() - t_phase) * 1000, 2)
         ts_elapsed_s = (ts_sol.elapsed_ms or 0) / 1000.0
         ts_saved = max(0, ts_budget - ts_elapsed_s)
-        ts_cost = _vsp_cost(ts_sol, self.vsp_params)
+        ts_cost = _vsp_cost(ts_sol, self.vsp_params, cached_pairs)
         ts_issues = _vsp_hard_issue_count(ts_sol, self.vsp_params)
         ts_iters = getattr(ts_sol, 'iterations', 0)
         logger.info(f"[PIPELINE] Tabu: {len(ts_sol.blocks)} veículos, cost={ts_cost:.0f}, issues={ts_issues}, iters={ts_iters}, elapsed={ts_sol.elapsed_ms}ms")
@@ -135,7 +146,7 @@ class HybridPipeline(BaseAlgorithm):
             t_phase = time.perf_counter()
             ga_sol = ga.solve(trips, vehicle_types, depot_id)
             phase_timings_ms["vsp_genetic_ms"] = round((time.perf_counter() - t_phase) * 1000, 2)
-            ga_cost = _vsp_cost(ga_sol, self.vsp_params)
+            ga_cost = _vsp_cost(ga_sol, self.vsp_params, cached_pairs)
             ga_issues = _vsp_hard_issue_count(ga_sol, self.vsp_params)
             logger.info(f"[PIPELINE] Genetic: {len(ga_sol.blocks)} veículos, cost={ga_cost:.0f}, issues={ga_issues}")
             if _is_better(ga_sol, ga_cost, ga_issues):
@@ -241,7 +252,7 @@ class HybridPipeline(BaseAlgorithm):
         
 
 
-def _vsp_cost(sol, vsp_params=None) -> float:
+def _vsp_cost(sol, vsp_params=None, cached_pairs=None) -> float:
     vsp_params = vsp_params or {}
     unassigned_penalty = len(getattr(sol, "unassigned_trips", [])) * 5000.0
     crew_block_limit = int(vsp_params.get("crew_block_limit_minutes", 0) or 0)
@@ -255,8 +266,10 @@ def _vsp_cost(sol, vsp_params=None) -> float:
                 long_block_penalty += (duration - crew_block_limit) * 200.0
     min_layover = int(vsp_params.get("min_layover_minutes", 8) or 8)
     if bool(vsp_params.get("preserve_preferred_pairs", True)):
-        all_trips = [trip for block in getattr(sol, "blocks", []) for trip in getattr(block, "trips", [])]
-        preferred_pairs = build_preferred_pairs(all_trips, min_layover, int(vsp_params.get("preferred_pair_window_minutes", 120) or 120))
+        preferred_pairs = cached_pairs if cached_pairs is not None else build_preferred_pairs(
+            [trip for block in getattr(sol, "blocks", []) for trip in getattr(block, "trips", [])],
+            min_layover, int(vsp_params.get("preferred_pair_window_minutes", 120) or 120),
+        )
         pair_break_penalty = float(vsp_params.get("pair_break_penalty", 1000.0))
         paired_trip_bonus = float(vsp_params.get("paired_trip_bonus", 40.0))
         hard_pairing_penalty = (

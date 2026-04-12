@@ -93,9 +93,21 @@ async def optimize(body: OptimizeRequest) -> OptimizeResponse:
         vsp_algorithm=raw["vsp_algorithm"],
         csp_algorithm=raw["csp_algorithm"],
         elapsed_ms=raw["elapsed_ms"],
-        blocks=[BlockOutput(**b) for b in raw["blocks"]],
+        blocks=[
+            BlockOutput(**{
+                **b,
+                "trips": [t["id"] if isinstance(t, dict) else t for t in b.get("trips", [])],
+            })
+            for b in raw["blocks"]
+        ],
         duties=[DutyOutput(**d) for d in raw["duties"]],
         warnings=raw.get("warnings", []),
+        cost_breakdown=raw.get("cost_breakdown") or {},
+        solver_explanation=raw.get("solver_explanation") or {},
+        phase_summary=raw.get("phase_summary") or {},
+        trip_group_audit=raw.get("trip_group_audit") or {},
+        reproducibility=raw.get("reproducibility") or {},
+        performance=(raw.get("meta") or {}).get("performance") or {},
         meta={
             **(raw.get("meta") or {}),
             "run_id": body.run_id,

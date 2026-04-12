@@ -1,0 +1,184 @@
+name: Optimization Battery
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - .github/workflows/optimization-battery.yml
+      - backend/**
+      - frontend/**
+      - optimizer/**
+      - scripts/**
+      - test_mega_qa.sh
+  pull_request:
+    paths:
+      - .github/workflows/optimization-battery.yml
+      - backend/**
+      - frontend/**
+      - optimizer/**
+      - scripts/**
+      - test_mega_qa.sh
+  workflow_dispatch:
+
+jobs:
+  battery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: otmiz_new
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d otmiz_new"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      BACKEND_PORT: 3006
+      DB_DATABASE: otmiz_new
+      DB_HOST: 127.0.0.1
+      DB_PASSWORD: postgres
+      DB_PORT: 5432
+      DB_SYNCHRONIZE: 'true'
+      DB_USERNAME: postgres
+      JWT_EXPIRES_IN: 7d
+      JWT_SECRET: otimiz_ci_secret_key
+      NODE_ENV: development
+      OTIMIZ_BATTERY_OUTPUT_DIR: artifacts/optimization-battery/ci
+      OTIMIZ_BATTERY_PROFILE: ci
+      PORT: 3006
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+            package-lock.json
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install backend dependencies
+        run: npm ci --prefix backend
+
+      - name: Install frontend dependencies
+        run: npm ci --prefix frontend
+
+      - name: Create optimizer virtualenv
+        run: |
+          python -m venv .venv
+          . .venv/bin/activate
+          python -m pip install --upgrade pip
+          python -m pip install -r optimizer/requirements.txt
+
+      - name: Build backend
+        run: npm --prefix backend run build
+
+      - name: Bootstrap database schema
+        run: |
+          nohup node backend/dist/main > backend-bootstrap.log 2>&1 &
+          echo $! > backend-bootstrap.pid
+          for attempt in $(seq 1 60); do
+            if curl -fsS "http://127.0.0.1:${PORT}/api/docs" >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Backend schema bootstrap did not become ready in time" >&2
+          cat backend-bootstrap.log >&2 || true
+          exit 1
+
+      - name: Stop bootstrap backend
+        if: always()
+        run: |
+          if [[ -f backend-bootstrap.pid ]]; then
+            kill "$(cat backend-bootstrap.pid)" || true
+          fi
+
+      - name: Seed optimization battery fixture
+        run: |
+          chmod +x scripts/seed-optimization-battery-fixture.sh
+          scripts/seed-optimization-battery-fixture.sh
+
+      - name: Start optimizer service
+        run: |
+          nohup bash -lc 'cd optimizer && DEBUG=false ../.venv/bin/python main.py' > optimizer.log 2>&1 &
+          echo $! > optimizer.pid
+          for attempt in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:8000/health >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Optimizer did not become ready in time" >&2
+          cat optimizer.log >&2 || true
+          exit 1
+
+      - name: Start backend service
+        run: |
+          nohup node backend/dist/main > backend.log 2>&1 &
+          echo $! > backend.pid
+          for attempt in $(seq 1 60); do
+            if curl -fsS "http://127.0.0.1:${PORT}/api/docs" >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Backend did not become ready in time" >&2
+          cat backend.log >&2 || true
+          exit 1
+
+      - name: Frontend typecheck
+        run: npm --prefix frontend exec tsc --noEmit --pretty false
+
+      - name: Backend focused tests
+        run: npm --prefix backend test -- --runInBand modules/optimization/optimization.service.spec.ts modules/optimization/optimization.controller.spec.ts
+
+      - name: Optimizer focused tests
+        run: |
+          . .venv/bin/activate
+          cd optimizer
+          PYTHONPATH=$PWD python -m pytest tests/integration/test_optimize_success_contract.py tests/unit/test_explainability_and_costs.py tests/unit/test_bug_fixes.py -q
+
+      - name: Run optimization battery
+        run: |
+          chmod +x test_mega_qa.sh
+          ./test_mega_qa.sh
+
+      - name: Upload battery artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: optimization-battery-artifacts
+          path: |
+            artifacts/optimization-battery/**
+            backend.log
+            backend-bootstrap.log
+            optimizer.log
+          if-no-files-found: warn
+
+      - name: Cleanup services
+        if: always()
+        run: |
+          if [[ -f optimizer.pid ]]; then
+            kill "$(cat optimizer.pid)" || true
+          fi
+          if [[ -f backend.pid ]]; then
+            kill "$(cat backend.pid)" || true
+          fi
+          if [[ -f backend-bootstrap.pid ]]; then
+            kill "$(cat backend-bootstrap.pid)" || true
+          fi

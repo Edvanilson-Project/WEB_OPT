@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
+import { createHash } from 'crypto';
 import * as http from 'http';
 import {
   OptimizationRunEntity,
@@ -11,6 +12,9 @@ import {
 import { RunOptimizationDto } from './dto/run-optimization.dto';
 import { TripsService } from '../trips/trips.service';
 import { OptimizationSettingsService } from '../optimization-settings/optimization-settings.service';
+import { LinesService } from '../lines/lines.service';
+import { TerminalsService } from '../terminals/terminals.service';
+import { VehicleTypesService } from '../vehicle-types/vehicle-types.service';
 import { EntityNotFoundException } from '../../common/exceptions/not-found.exception';
 
 export interface ActiveSettingsDto {
@@ -22,18 +26,25 @@ export interface ActiveSettingsDto {
   preservePreferredPairs?: boolean;
   enforceSingleLineDuty?: boolean;
   timeBudgetSeconds?: number;
-  [key: string]: unknown;
+  operationMode?: 'urban' | 'charter';
+  [key: string]: any;
 }
 
 export interface OptimizationResultPayload {
-  cct_violations?: number;
-  cctViolations?: number;
-  num_vehicles?: number;
   vehicles?: number;
-  num_crew?: number;
+  num_vehicles?: number;
   crew?: number;
+  num_crew?: number;
   total_cost?: number | string;
   totalCost?: number | string;
+  cct_violations?: number;
+  cctViolations?: number;
+  total_trips?: number;
+  totalTrips?: number;
+  blocks?: any[];
+  duties?: any[];
+  unassigned_trips?: any[];
+  warnings?: any[];
   meta?: {
     hard_constraint_report?: {
       output?: {
@@ -56,6 +67,9 @@ export class OptimizationService {
     private readonly tripsService: TripsService,
     private readonly settingsService: OptimizationSettingsService,
     private readonly configService: ConfigService,
+    private readonly linesService: LinesService,
+    private readonly terminalsService: TerminalsService,
+    private readonly vehicleTypesService: VehicleTypesService,
   ) {}
 
   /**
@@ -84,6 +98,7 @@ export class OptimizationService {
       companyId: dto.companyId,
       scheduleId: dto.scheduleId,
       algorithm: algEnum,
+      name: dto.name,
       status: OptimizationStatus.PENDING,
       params: { vsp: dto.vspParams, csp: dto.cspParams },
       triggeredByUserId: userId,
@@ -131,8 +146,9 @@ export class OptimizationService {
         ),
       );
       const trips = tripsArrays.flat();
+      const totalTripsCount = trips.length;
 
-      if (!trips.length) {
+      if (!totalTripsCount) {
         const desc =
           lineIdsToFetch.length > 1
             ? 'as linhas selecionadas'
@@ -207,7 +223,7 @@ export class OptimizationService {
           waiting_time_pay_pct: activeSettings?.cctWaitingTimePayPct ?? 0.3,
           min_guaranteed_work_minutes:
             activeSettings?.cctMinGuaranteedWorkMinutes ?? 0,
-          allow_relief_points: true,
+          allow_relief_points: activeSettings?.allowReliefPoints ?? false,
           enforce_same_depot_start_end:
             activeSettings?.enforceSameDepotStartEnd ?? false,
           enforce_single_line_duty:
@@ -217,11 +233,16 @@ export class OptimizationService {
           fairness_tolerance_minutes: 30,
           long_unpaid_break_limit_minutes: 180,
           long_unpaid_break_penalty_weight: 1.0,
-          operator_change_terminals_only: true,
-          operator_single_vehicle_only: true,
-          enforce_trip_groups_hard: false,
-          operator_pairing_hard: false,
-          strict_hard_validation: true,
+          operator_change_terminals_only:
+            activeSettings?.operatorChangeTerminalsOnly ?? true,
+          operator_single_vehicle_only:
+            activeSettings?.operatorSingleVehicleOnly ?? false,
+          enforce_trip_groups_hard:
+            activeSettings?.enforceTripGroupsHard ?? true,
+          operator_pairing_hard:
+            activeSettings?.enforceTripGroupsHard ?? true,
+          strict_hard_validation:
+            activeSettings?.strictHardValidation ?? true,
           sunday_off_weight: activeSettings?.sundayOffWeight ?? 0,
           holiday_extra_pct: activeSettings?.holidayExtraPct ?? 1.0,
           goal_weights: {
@@ -254,9 +275,14 @@ export class OptimizationService {
             max_work_minutes: cctOverride.maxWorkMinutes,
           }),
           ...(cctOverride.breakMinutes !== undefined && {
-            min_break_minutes: 12,
+            min_break_minutes: cctOverride.breakMinutes,
           }),
-          ...((cctOverride as any).maxUnpaidBreakMinutes !== undefined ? { max_unpaid_break_minutes: (cctOverride as any).maxUnpaidBreakMinutes } : { max_unpaid_break_minutes: opMode === 'charter' ? 600 : 360 }),
+          ...((cctOverride as any).maxUnpaidBreakMinutes !== undefined
+            ? {
+                max_unpaid_break_minutes: (cctOverride as any)
+                  .maxUnpaidBreakMinutes,
+              }
+            : { max_unpaid_break_minutes: opMode === 'charter' ? 600 : 360 }),
           ...(cctOverride.minShiftMinutes !== undefined && {
             min_shift_minutes: cctOverride.minShiftMinutes,
           }),
@@ -279,10 +305,7 @@ export class OptimizationService {
           ...(cctOverride.fairnessToleranceMinutes !== undefined && {
             fairness_tolerance_minutes: cctOverride.fairnessToleranceMinutes,
           }),
-          ...((cctOverride as any).maxUnpaidBreakMinutes !== undefined && {
-            max_unpaid_break_minutes: (cctOverride as any)
-              .maxUnpaidBreakMinutes,
-          }),
+          // maxUnpaidBreakMinutes já aplicado acima (linhas 280-285)
           ...((cctOverride as any).maxTotalUnpaidBreakMinutes !== undefined && {
             max_total_unpaid_break_minutes: (cctOverride as any)
               .maxTotalUnpaidBreakMinutes,
@@ -302,6 +325,9 @@ export class OptimizationService {
           }),
           ...(cctOverride.enforceTripGroupsHard !== undefined && {
             enforce_trip_groups_hard: cctOverride.enforceTripGroupsHard,
+          }),
+          ...(cctOverride.enforceTripGroupsHard !== undefined && {
+            operator_pairing_hard: cctOverride.enforceTripGroupsHard,
           }),
           ...(cctOverride.operatorChangeTerminalsOnly !== undefined && {
             operator_change_terminals_only:
@@ -365,10 +391,14 @@ export class OptimizationService {
           max_generated_columns: activeSettings?.maxGeneratedColumns ?? 8000,
           max_pricing_iterations: activeSettings?.maxPricingIterations ?? 5,
           max_pricing_additions: activeSettings?.maxPricingAdditions ?? 512,
-          strict_hard_validation: true,
+          strict_hard_validation:
+            activeSettings?.strictHardValidation ?? true,
         };
         const vspParams = {
           ...vspBase,
+          ...(dto.timeBudgetSeconds !== undefined && {
+            time_budget_s: dto.timeBudgetSeconds,
+          }),
           ...(dto.vspParams?.timeBudgetSeconds !== undefined && {
             time_budget_s: dto.vspParams.timeBudgetSeconds,
           }),
@@ -466,6 +496,7 @@ export class OptimizationService {
           return dh;
         };
 
+        const mappedAlgorithm = this._mapAlgorithm(dto.algorithm as any);
         const optimizerPayload: Record<string, any> = {
           trips: trips.map((t: any) => ({
             id: t.id,
@@ -480,10 +511,13 @@ export class OptimizationService {
             destination_id: t.destinationTerminalId ?? 2,
             duration: t.durationMinutes ?? 0,
             distance_km: t.distanceKm ?? 0,
+            mid_trip_relief_point_id: t.midTripReliefPointId ?? null,
+            mid_trip_relief_offset_minutes:
+              t.midTripReliefOffsetMinutes ?? null,
             deadhead_times: buildDeadheadTimes(t.destinationTerminalId ?? 2),
           })),
           vehicle_types: [],
-          algorithm: this._mapAlgorithm(dto.algorithm as any),
+          algorithm: mappedAlgorithm,
           run_id: runId,
           line_id:
             (dto.lineIds?.length ?? 0) > 1
@@ -491,6 +525,7 @@ export class OptimizationService {
               : (dto.lineId ?? dto.lineIds?.[0] ?? null),
           company_id: dto.companyId,
           time_budget_s:
+            dto.timeBudgetSeconds ??
             dto.vspParams?.timeBudgetSeconds ??
             activeSettings?.timeBudgetSeconds ??
             null,
@@ -498,23 +533,64 @@ export class OptimizationService {
           vsp_params: vspParams,
         };
 
+        const requestedParams = this._cloneJson({
+          companyId: dto.companyId,
+          scheduleId: dto.scheduleId ?? null,
+          lineId: dto.lineId ?? null,
+          lineIds: dto.lineIds ?? null,
+          algorithm: dto.algorithm ?? null,
+          operationMode: dto.operationMode ?? 'urban',
+          timeBudgetSeconds: dto.timeBudgetSeconds ?? null,
+          vsp: dto.vspParams ?? null,
+          csp: dto.cspParams ?? null,
+        });
+        const settingsSnapshot = activeSettings
+          ? this._cloneJson(activeSettings)
+          : null;
+        const resolvedParams = this._cloneJson({
+          algorithm: mappedAlgorithm,
+          operationMode: dto.operationMode ?? 'urban',
+          timeBudgetSeconds: optimizerPayload.time_budget_s ?? null,
+          cct: cctParams,
+          vsp: vspParams,
+        });
+        const versioning = {
+          settingsVersion: activeSettings?.id
+            ? `settings:${String(activeSettings.id)}:${String(activeSettings.updatedAt ?? 'unknown')}`
+            : 'settings:none',
+          ruleHash: this._hashObject({
+            operationMode: dto.operationMode ?? 'urban',
+            cct: cctParams,
+            vsp: vspParams,
+            settingsSnapshot,
+          }),
+          inputHash: this._hashObject({
+            companyId: dto.companyId,
+            scheduleId: dto.scheduleId ?? null,
+            lineId: dto.lineId ?? null,
+            lineIds: dto.lineIds ?? null,
+            tripIds: trips.map((trip: any) => trip.id),
+          }),
+        };
+
+        await this.runRepo.update(runId, {
+          params: {
+            requested: requestedParams,
+            resolved: resolvedParams,
+            settingsSnapshot,
+            versioning,
+          } as any,
+        });
+
         try {
-          require('fs').writeFileSync(
-            '/tmp/optimizer_payload.json',
-            JSON.stringify(optimizerPayload, null, 2),
-          );
-          require('fs').writeFileSync(
-            '/tmp/optimizer_payload.json',
-            JSON.stringify(optimizerPayload, null, 2),
-          );
-          require('fs').writeFileSync(
-            '/tmp/optimizer_payload.json',
-            JSON.stringify(optimizerPayload, null, 2),
-          );
-          require('fs').writeFileSync(
-            '/tmp/optimizer_payload.json',
-            JSON.stringify(optimizerPayload, null, 2),
-          );
+          if (this.configService.get('DEBUG_DUMP_PAYLOAD', '') === 'true') {
+            try {
+              require('fs').writeFileSync(
+                '/tmp/optimizer_payload.json',
+                JSON.stringify(optimizerPayload, null, 2),
+              );
+            } catch { /* ignore dump errors */ }
+          }
           result = await this._callOptimizerService(
             optimizerUrl,
             optimizerPayload,
@@ -565,10 +641,13 @@ export class OptimizationService {
         this.logger.warn(
           `Microserviço optimizer indisponível (${optimizerError.message}). Usando fallback inline.`,
         );
-        result = await this._runInlineOptimization(trips, dto);
+        result = await this._runInlineOptimization(trips, dto, activeSettings);
       }
 
-      await this._saveResults(runId, result, trips.length);
+      // Enrich blocks with full trip details so the frontend can display them
+      this._enrichBlockTrips(result, trips);
+
+      await this._saveResults(runId, result, totalTripsCount);
     } catch (err) {
       const diagnostics = this._buildFailureDiagnostics(
         (err as Error).message,
@@ -676,13 +755,14 @@ export class OptimizationService {
   private async _runInlineOptimization(
     trips: any[],
     dto: RunOptimizationDto,
+    activeSettings?: any,
   ): Promise<any> {
     const MIN_LAYOVER = 0;
     const MAX_VEHICLE_SHIFT = 960;
-    const MAX_CCT_SHIFT = dto.cspParams?.maxShiftMinutes ?? 480;
-    const MAX_CCT_WORK = dto.cspParams?.maxWorkMinutes ?? 440;
-    const MAX_DRIVING = dto.cspParams?.maxDrivingMinutes ?? 270;
-    const MIN_BREAK = dto.cspParams?.breakMinutes ?? 30;
+    const MAX_CCT_SHIFT = dto.cspParams?.maxShiftMinutes ?? activeSettings?.cctMaxShiftMinutes ?? 480;
+    const MAX_CCT_WORK = dto.cspParams?.maxWorkMinutes ?? activeSettings?.cctMaxWorkMinutes ?? 440;
+    const MAX_DRIVING = dto.cspParams?.maxDrivingMinutes ?? activeSettings?.cctMaxDrivingMinutes ?? 270;
+    const MIN_BREAK = dto.cspParams?.breakMinutes ?? activeSettings?.cctMinBreakMinutes ?? 30;
     const PULLOUT = 10;
     const PULLBACK = 10;
 
@@ -983,52 +1063,81 @@ export class OptimizationService {
       }
     }
 
-    // ── 7. Formatar resultado ─────────────────────────────────────────────────
+    // ── 7. Buscar nomes dos terminais para o resultado ────────────────────────
+    const companyId = (await this.tripsService.findOne(sorted[0].id))?.companyId ?? 1;
+    const allTerms = await this.terminalsService.findAll(companyId);
+    const termMap = new Map(allTerms.map(t => [t.id, t.shortName || t.name]));
+
+    // ── 8. Formatar resultado ─────────────────────────────────────────────────
     const blocksOut = allBlocks.map((blk) => {
       const tripsSorted = [...blk.trips].sort(
         (a, b) => (a.startTimeMinutes ?? 0) - (b.startTimeMinutes ?? 0),
       );
       const spread = blk.endTime - blk.startTime;
+      const tripsDetails = tripsSorted.map((t) => ({
+        id: t.id,
+        trip_id: t.id,
+        start_time: t.startTimeMinutes ?? 0,
+        end_time: t.endTimeMinutes ?? 0,
+        origin_id: t.originTerminalId ?? 1,
+        destination_id: t.destinationTerminalId ?? 2,
+        origin_name: termMap.get(t.originTerminalId ?? 1) || 'T#1',
+        destination_name: termMap.get(t.destinationTerminalId ?? 2) || 'T#2',
+        duration: t.durationMinutes ?? 0,
+        line_id: t.lineId ?? null,
+        is_paired: pairedTrips.has(t.id),
+        direction:
+          (t.originTerminalId ?? 1) < (t.destinationTerminalId ?? 2)
+            ? ('outbound' as const)
+            : ('inbound' as const),
+      }));
+
       return {
         block_id: blk.blockId,
-        trips: tripsSorted.map((t) => t.id),
+        trips: tripsDetails,
         num_trips: tripsSorted.length,
         start_time: blk.startTime,
         end_time: blk.endTime,
         spread_minutes: spread,
         idle_minutes: spread - blk.workMinutes,
-        trip_details: tripsSorted.map((t) => ({
-          trip_id: t.id,
-          start_time: t.startTimeMinutes ?? 0,
-          end_time: t.endTimeMinutes ?? 0,
-          origin_id: t.originTerminalId ?? 1,
-          destination_id: t.destinationTerminalId ?? 2,
-          duration: t.durationMinutes ?? 0,
-          line_id: t.lineId ?? null,
-          is_paired: pairedTrips.has(t.id),
-          direction:
-            (t.originTerminalId ?? 1) < (t.destinationTerminalId ?? 2)
-              ? 'outbound'
-              : 'inbound',
-        })),
+        trip_details: tripsDetails,
       };
     });
 
-    const dutiesOut = duties.map((d) => ({
-      duty_id: d.dutyId,
-      blocks: [...new Set(d.segments.map((s) => s.blockId))],
-      trip_ids: d.segments.flatMap((s) => s.trips.map((t) => t.id)),
-      work_time: d.workTime,
-      spread_time: d.lastTripEnd - d.spreadFrom,
-      shift_violations: d.shiftViolations,
-      continuous_driving_violation: false,
-      warnings: d.warnings,
-      segments: d.segments.map((s) => ({
-        block_id: s.blockId,
-        drive_minutes: s.driveMin,
-        trip_ids: s.trips.map((t) => t.id),
-      })),
-    }));
+    const dutiesOut = duties.map((d) => {
+      const dutyTrips = d.segments.flatMap((s) => s.trips).map(t => ({
+        id: t.id,
+        trip_id: t.id,
+        start_time: t.startTimeMinutes ?? 0,
+        end_time: t.endTimeMinutes ?? 0,
+        origin_id: t.originTerminalId ?? 1,
+        destination_id: t.destinationTerminalId ?? 2,
+        duration: t.durationMinutes ?? 0,
+        line_id: t.lineId ?? null,
+      }));
+
+      return {
+        duty_id: d.dutyId,
+        blocks: [...new Set(d.segments.map((s) => s.blockId))],
+        trip_ids: d.segments.flatMap((s) => s.trips.map((t) => t.id)),
+        trips: dutyTrips,
+        work_time: d.workTime,
+        spread_time: d.lastTripEnd - d.spreadFrom,
+        shift_violations: d.shiftViolations,
+        continuous_driving_violation: false,
+        warnings: d.warnings,
+        segments: d.segments.map((s) => ({
+          block_id: s.blockId,
+          drive_minutes: s.driveMin,
+          trip_ids: s.trips.map((t) => t.id),
+          trips: s.trips.map(t => ({
+            id: t.id,
+            start_time: t.startTimeMinutes ?? 0,
+            end_time: t.endTimeMinutes ?? 0,
+          })),
+        })),
+      };
+    });
 
     const qaWarnings = warnings.slice(0, 20).map((msg) => ({
       type: msg.startsWith('OVERLAP')
@@ -1084,13 +1193,19 @@ export class OptimizationService {
     const needsSingleLineDuty =
       dto.cspParams?.enforceSingleLineDuty === true ||
       activeSettings?.enforceSingleLineDuty === true;
+    const needsMidTripRelief = trips.some(
+      (trip) =>
+        trip?.midTripReliefPointId != null ||
+        trip?.midTripReliefOffsetMinutes != null,
+    );
 
     return (
       multiLineRun ||
       algorithm === OptimizationAlgorithm.HYBRID_PIPELINE ||
       algorithm === OptimizationAlgorithm.SET_PARTITIONING ||
       needsPairing ||
-      needsSingleLineDuty
+      needsSingleLineDuty ||
+      needsMidTripRelief
     );
   }
 
@@ -1222,6 +1337,21 @@ export class OptimizationService {
       );
     }
 
+    if (message.includes('MID_TRIP_RELIEF')) {
+      code = 'MID_TRIP_RELIEF_INVALID';
+      summary =
+        'Os dados de rendição intra-viagem estão incompletos ou inconsistentes para pelo menos uma viagem.';
+      hints.push(
+        'Informe juntos o ponto intermediário e o minuto da rendição dentro da viagem.',
+      );
+      hints.push(
+        'Use um ponto intermediário real, diferente da origem e do destino da viagem.',
+      );
+      hints.push(
+        'A posição da rendição deve cair estritamente dentro da duração da viagem.',
+      );
+    }
+
     if (message.includes('Esta execução exige o solver completo')) {
       if (code === 'UNKNOWN_FAILURE') code = 'FULL_SOLVER_REQUIRED';
       hints.push('Essa execução não pode usar o modo simplificado inline.');
@@ -1276,16 +1406,31 @@ export class OptimizationService {
     };
   }
 
-  private async _runPythonOptimizer(
-    _pythonBin: string,
-    _optimizerPath: string,
-    _dto: RunOptimizationDto,
-    _trips: any[],
-  ): Promise<any> {
-    // Mantido por compatibilidade — não utilizado mais
-    throw new Error(
-      'runPythonOptimizer is deprecated. Use microservice instead.',
-    );
+  // _runPythonOptimizer foi removido: use o microserviço FastAPI via _executeOptimization.
+
+  /** Enriquece result.blocks[].trips com objetos TripDetail completos para exibição no frontend. */
+  private _enrichBlockTrips(result: any, trips: any[]): void {
+    if (!result?.blocks || !Array.isArray(result.blocks)) return;
+    const tripMap = new Map<number, any>(trips.map((t: any) => [t.id, t]));
+    result.blocks = result.blocks.map((block: any) => ({
+      ...block,
+      trips: (block.trips ?? []).map((tripIdOrObj: any) => {
+        const id = typeof tripIdOrObj === 'object' ? tripIdOrObj.id : tripIdOrObj;
+        const t = tripMap.get(id);
+        if (!t) return tripIdOrObj;
+        return {
+          id: t.id,
+          trip_id: t.id,
+          start_time: t.startTimeMinutes ?? null,
+          end_time: t.endTimeMinutes ?? null,
+          origin_id: String(t.originTerminalId ?? '--'),
+          destination_id: String(t.destinationTerminalId ?? '--'),
+          duration: t.durationMinutes ?? 0,
+          block_id: block.block_id,
+          status: 'assigned',
+        };
+      }),
+    }));
   }
 
   private async _saveResults(
@@ -1299,9 +1444,17 @@ export class OptimizationService {
       ? finishedAt.getTime() - run.startedAt.getTime()
       : 0;
 
-    const cctViolations = Number(
-      result.cct_violations ?? result.cctViolations ?? 0,
-    );
+    // Sanitize numeric fields — prevent NaN/Infinity from corrupting the DB
+    const safeNumber = (v: any, fallback = 0): number => {
+      const n = Number(v ?? fallback);
+      return Number.isFinite(n) ? n : fallback;
+    };
+
+    const cctViolations = safeNumber(result.cct_violations ?? result.cctViolations, 0);
+    const totalCost = safeNumber(result.total_cost ?? result.totalCost, 0);
+    const totalVehicles = safeNumber(result.vehicles ?? result.num_vehicles, 0);
+    const totalCrew = safeNumber(result.crew ?? result.num_crew, 0);
+
     const hardOutputOk = result?.meta?.hard_constraint_report?.output?.ok;
     const hasHardViolation = hardOutputOk === false;
 
@@ -1310,10 +1463,10 @@ export class OptimizationService {
         status: OptimizationStatus.FAILED,
         finishedAt,
         durationMs,
-        totalVehicles: result.vehicles || result.num_vehicles || 0,
-        totalCrew: result.crew || result.num_crew || 0,
+        totalVehicles,
+        totalCrew,
         totalTrips,
-        totalCost: Number(result.total_cost ?? result.totalCost ?? 0),
+        totalCost,
         cctViolations,
         errorMessage:
           'Execução encerrada por hard constraints inválidas. Ajuste parâmetros operacionais antes de publicar a escala.',
@@ -1326,23 +1479,592 @@ export class OptimizationService {
       status: OptimizationStatus.COMPLETED,
       finishedAt,
       durationMs,
-      totalVehicles: result.vehicles || result.num_vehicles || 0,
-      totalCrew: result.crew || result.num_crew || 0,
+      totalVehicles,
+      totalCrew,
       totalTrips,
-      totalCost: Number(result.total_cost ?? result.totalCost ?? 0),
+      totalCost,
       cctViolations,
       resultSummary: result,
     });
   }
 
+  private _cloneJson<T>(value: T): T {
+    if (value == null) return value;
+    try {
+      return JSON.parse(JSON.stringify(value)) as T;
+    } catch {
+      return value;
+    }
+  }
+
+  private _asObject(value: unknown): Record<string, any> {
+    return value && typeof value === 'object' && !Array.isArray(value)
+      ? (value as Record<string, any>)
+      : {};
+  }
+
+  private _toFiniteNumber(value: unknown, fallback = 0): number {
+    const num = Number(value);
+    return Number.isFinite(num) ? num : fallback;
+  }
+
+  private _roundCurrency(value: unknown): number {
+    return Math.round((this._toFiniteNumber(value, 0) + Number.EPSILON) * 100) / 100;
+  }
+
+  private _stableSerialize(value: unknown): string {
+    if (Array.isArray(value)) {
+      return `[${value.map((item) => this._stableSerialize(item)).join(',')}]`;
+    }
+
+    if (value && typeof value === 'object') {
+      const obj = value as Record<string, unknown>;
+      return `{${Object.keys(obj)
+        .sort()
+        .map((key) => `${JSON.stringify(key)}:${this._stableSerialize(obj[key])}`)
+        .join(',')}}`;
+    }
+
+    return JSON.stringify(value);
+  }
+
+  private _hashObject(value: unknown): string {
+    return createHash('sha256')
+      .update(this._stableSerialize(value))
+      .digest('hex')
+      .slice(0, 12);
+  }
+
+  private _comparisonMetric(base: unknown, other: unknown): {
+    base: number;
+    other: number;
+    delta: number;
+    pctDelta: number;
+  } {
+    const baseValue = this._roundCurrency(base);
+    const otherValue = this._roundCurrency(other);
+    const delta = this._roundCurrency(otherValue - baseValue);
+    const pctDelta =
+      baseValue === 0
+        ? otherValue === 0
+          ? 0
+          : 100
+        : this._roundCurrency((delta / Math.abs(baseValue)) * 100);
+
+    return {
+      base: baseValue,
+      other: otherValue,
+      delta,
+      pctDelta,
+    };
+  }
+
+  private _flattenObject(
+    value: unknown,
+    prefix: string,
+    acc: Record<string, string>,
+  ): void {
+    if (value == null) {
+      acc[prefix] = 'null';
+      return;
+    }
+
+    if (Array.isArray(value)) {
+      acc[prefix] = JSON.stringify(value);
+      return;
+    }
+
+    if (typeof value !== 'object') {
+      acc[prefix] = String(value);
+      return;
+    }
+
+    const entries = Object.entries(value as Record<string, unknown>);
+    if (!entries.length) {
+      acc[prefix] = '{}';
+      return;
+    }
+
+    for (const [key, nested] of entries) {
+      const path = prefix ? `${prefix}.${key}` : key;
+      if (
+        nested != null &&
+        typeof nested === 'object' &&
+        !Array.isArray(nested) &&
+        Object.keys(nested as Record<string, unknown>).length
+      ) {
+        this._flattenObject(nested, path, acc);
+      } else if (Array.isArray(nested)) {
+        acc[path] = JSON.stringify(nested);
+      } else if (nested == null) {
+        acc[path] = 'null';
+      } else {
+        acc[path] = String(nested);
+      }
+    }
+  }
+
+  private _diffObjects(base: unknown, other: unknown, prefix: string): Array<{
+    path: string;
+    base: string;
+    other: string;
+  }> {
+    const baseFlat: Record<string, string> = {};
+    const otherFlat: Record<string, string> = {};
+    const baseObj = this._asObject(base);
+    const otherObj = this._asObject(other);
+
+    if (Object.keys(baseObj).length) this._flattenObject(baseObj, prefix, baseFlat);
+    if (Object.keys(otherObj).length) this._flattenObject(otherObj, prefix, otherFlat);
+
+    const paths = new Set([...Object.keys(baseFlat), ...Object.keys(otherFlat)]);
+    return [...paths]
+      .sort()
+      .filter(
+        (path) =>
+          (baseFlat[path] ?? 'undefined') !== (otherFlat[path] ?? 'undefined'),
+      )
+      .map((path) => ({
+        path,
+        base: baseFlat[path] ?? 'undefined',
+        other: otherFlat[path] ?? 'undefined',
+      }));
+  }
+
+  private _extractConstraintCounts(summary: Record<string, any>): {
+    hardIssues: number;
+    softIssues: number;
+    unassignedTrips: number;
+    uncoveredBlocks: number;
+  } {
+    const meta = this._asObject(summary.meta);
+    const report = this._asObject(
+      summary.hard_constraint_report ?? meta.hard_constraint_report,
+    );
+    const output = this._asObject(report.output);
+    const counts = this._asObject(output.counts);
+
+    return {
+      hardIssues: Array.isArray(output.hard_issues)
+        ? output.hard_issues.length
+        : this._toFiniteNumber(counts.hard_issues, 0),
+      softIssues: Array.isArray(output.soft_issues)
+        ? output.soft_issues.length
+        : this._toFiniteNumber(counts.soft_issues, 0),
+      unassignedTrips: this._toFiniteNumber(
+        counts.unassigned_trips,
+        Array.isArray(summary.unassigned_trips) ? summary.unassigned_trips.length : 0,
+      ),
+      uncoveredBlocks: this._toFiniteNumber(counts.uncovered_blocks, 0),
+    };
+  }
+
+  private _extractPerformanceSummary(
+    summary: Record<string, any>,
+    run: OptimizationRunEntity,
+  ): {
+    totalElapsedMs: number;
+    tripCount: number;
+    vehicleTypeCount: number;
+    phaseTimings: Record<string, number>;
+  } {
+    const meta = this._asObject(summary.meta);
+    const performance = this._asObject(summary.performance ?? meta.performance);
+    const phaseTimings = this._asObject(
+      performance.phase_timings_ms ?? performance.phaseTimingsMs,
+    );
+    const normalizedPhaseTimings: Record<string, number> = {};
+
+    for (const [key, value] of Object.entries(phaseTimings)) {
+      const num = Number(value);
+      if (Number.isFinite(num)) {
+        normalizedPhaseTimings[key] = this._roundCurrency(num);
+      }
+    }
+
+    return {
+      totalElapsedMs: this._roundCurrency(
+        performance.total_elapsed_ms ??
+          performance.totalElapsedMs ??
+          run.durationMs ??
+          0,
+      ),
+      tripCount: this._toFiniteNumber(
+        performance.trip_count ?? performance.tripCount ?? run.totalTrips,
+        0,
+      ),
+      vehicleTypeCount: this._toFiniteNumber(
+        performance.vehicle_type_count ?? performance.vehicleTypeCount,
+        0,
+      ),
+      phaseTimings: normalizedPhaseTimings,
+    };
+  }
+
+  private _extractReproducibilitySummary(
+    summary: Record<string, any>,
+  ): Record<string, any> {
+    const meta = this._asObject(summary.meta);
+    const reproducibility = this._asObject(
+      summary.reproducibility ?? meta.reproducibility,
+    );
+
+    return {
+      algorithm: reproducibility.algorithm ?? null,
+      randomSeed:
+        reproducibility.randomSeed ?? reproducibility.random_seed ?? null,
+      stochasticAlgorithm:
+        reproducibility.stochasticAlgorithm ??
+        reproducibility.stochastic_algorithm ??
+        null,
+      deterministicReplayPossible:
+        reproducibility.deterministicReplayPossible ??
+        reproducibility.deterministic_replay_possible ??
+        null,
+      inputHash:
+        reproducibility.inputHash ?? reproducibility.input_hash ?? null,
+      paramsHash:
+        reproducibility.paramsHash ?? reproducibility.params_hash ?? null,
+      timeBudgetS: Number.isFinite(
+        Number(
+          reproducibility.timeBudgetS ?? reproducibility.time_budget_s,
+        ),
+      )
+        ? this._roundCurrency(
+            reproducibility.timeBudgetS ?? reproducibility.time_budget_s,
+          )
+        : null,
+      note: reproducibility.note ?? null,
+    };
+  }
+
+  private _deriveCrewCostPerHour(
+    duties: any[],
+    cspBreakdown: Record<string, any>,
+  ): number {
+    for (const duty of duties) {
+      const workMinutes = this._toFiniteNumber(duty?.work_time, 0);
+      const workCost = Number(duty?.work_cost);
+      if (workMinutes > 0 && Number.isFinite(workCost)) {
+        return workCost / (workMinutes / 60);
+      }
+    }
+
+    const totalWorkMinutes = duties.reduce(
+      (sum, duty) => sum + this._toFiniteNumber(duty?.work_time, 0),
+      0,
+    );
+    const totalWorkCost = Number(cspBreakdown.work_cost);
+
+    if (totalWorkMinutes > 0 && Number.isFinite(totalWorkCost)) {
+      return totalWorkCost / (totalWorkMinutes / 60);
+    }
+
+    return 0;
+  }
+
+  private _resolveWindowBlockId(
+    window: Record<string, any>,
+    candidateBlockIds: number[],
+    blocks: any[],
+  ): number | null {
+    const start = Number(window.start);
+    const end = Number(window.end);
+
+    if (candidateBlockIds.length === 1) return candidateBlockIds[0];
+
+    const candidates = (candidateBlockIds.length
+      ? blocks.filter((block) => candidateBlockIds.includes(Number(block?.block_id)))
+      : blocks
+    ).filter((block) => Number.isFinite(Number(block?.block_id)));
+
+    if (Number.isFinite(start) && Number.isFinite(end)) {
+      const containing = candidates.find((block) => {
+        const blockStart = Number(block?.start_time);
+        const blockEnd = Number(block?.end_time);
+        return (
+          Number.isFinite(blockStart) &&
+          Number.isFinite(blockEnd) &&
+          start >= blockStart &&
+          end <= blockEnd
+        );
+      });
+      if (containing) return Number(containing.block_id);
+    }
+
+    return candidates.length === 1 ? Number(candidates[0].block_id) : null;
+  }
+
+  private _normalizeDutyTaskWindows(duty: Record<string, any>, blocks: any[]): void {
+    const meta = this._asObject(duty.meta);
+    const windows = Array.isArray(meta.task_windows) ? meta.task_windows : [];
+    if (!windows.length) return;
+
+    const sourceBlockIds = Array.isArray(meta.source_block_ids)
+      ? meta.source_block_ids
+          .map((value: unknown) => Number(value))
+          .filter((value: number) => Number.isFinite(value))
+      : [];
+    const dutyBlockIds = Array.isArray(duty.blocks)
+      ? duty.blocks
+          .map((value: unknown) => Number(value))
+          .filter((value: number) => Number.isFinite(value))
+      : [];
+
+    meta.task_windows = windows.map((window: Record<string, any>, index: number) => {
+      const sourceMapped = sourceBlockIds[index];
+      if (Number.isFinite(sourceMapped)) {
+        return {
+          ...window,
+          block_id: sourceMapped,
+        };
+      }
+
+      const resolvedBlockId = this._resolveWindowBlockId(
+        window,
+        sourceBlockIds.length ? sourceBlockIds : dutyBlockIds,
+        blocks,
+      );
+
+      return resolvedBlockId == null
+        ? window
+        : {
+            ...window,
+            block_id: resolvedBlockId,
+          };
+    });
+
+    duty.meta = meta;
+  }
+
+  private _normalizeLegacyResultSummary(
+    summary: Record<string, any>,
+    params: Record<string, any>,
+  ): Record<string, any> {
+    if (!Object.keys(summary).length) return summary;
+
+    const meta = this._asObject(summary.meta);
+    const promotedFields = [
+      'cost_breakdown',
+      'solver_explanation',
+      'phase_summary',
+      'trip_group_audit',
+      'reproducibility',
+      'performance',
+      'hard_constraint_report',
+    ];
+
+    for (const field of promotedFields) {
+      if (summary[field] == null && meta[field] != null) {
+        summary[field] = this._cloneJson(meta[field]);
+      }
+    }
+
+    if (summary.optimizerDiagnostics == null) {
+      summary.optimizerDiagnostics =
+        summary.optimizer_diagnostics ??
+        meta.optimizerDiagnostics ??
+        meta.optimizer_diagnostics ??
+        null;
+    }
+
+    if (summary.diagnostics == null && meta.diagnostics != null) {
+      summary.diagnostics = this._cloneJson(meta.diagnostics);
+    }
+
+    if (summary.failureDiagnostics == null && summary.diagnostics != null) {
+      summary.failureDiagnostics = this._cloneJson(summary.diagnostics);
+    }
+
+    const breakdownSource = this._asObject(
+      summary.cost_breakdown ?? summary.costBreakdown,
+    );
+    const breakdown = Object.keys(breakdownSource).length
+      ? this._cloneJson(breakdownSource)
+      : {};
+    const cspBreakdown = this._asObject(breakdown.csp);
+    const duties = Array.isArray(summary.duties) ? summary.duties : [];
+    const breakdownDuties = Array.isArray(cspBreakdown.duties)
+      ? cspBreakdown.duties
+      : [];
+    const blocks = Array.isArray(summary.blocks) ? summary.blocks : [];
+
+    const resolvedParams = this._asObject(params.resolved);
+    const resolvedCct = this._asObject(resolvedParams.cct);
+    const maxWorkMinutes = this._toFiniteNumber(
+      resolvedCct.max_work_minutes ?? resolvedCct.maxWorkMinutes,
+      0,
+    );
+    const overtimeExtraPct = this._toFiniteNumber(
+      resolvedCct.overtime_extra_pct ?? resolvedCct.overtimeExtraPct,
+      0.5,
+    );
+    const crewCostPerHour = this._deriveCrewCostPerHour(duties, cspBreakdown);
+
+    let overtimeDeltaTotal = 0;
+    duties.forEach((duty: Record<string, any>) => {
+      this._normalizeDutyTaskWindows(duty, blocks);
+    });
+
+    if (maxWorkMinutes > 0 && crewCostPerHour > 0) {
+      duties.forEach((duty: Record<string, any>, index: number) => {
+        const spreadTime = this._toFiniteNumber(duty.spread_time, 0);
+        const nextOvertimeMinutes = Math.max(0, spreadTime - maxWorkMinutes);
+        const breakdownDuty = this._asObject(breakdownDuties[index]);
+        const previousOvertimeCost = this._roundCurrency(
+          duty.overtime_cost ?? breakdownDuty.overtime_cost,
+        );
+        const nextOvertimeCost = this._roundCurrency(
+          (nextOvertimeMinutes / 60) * crewCostPerHour * overtimeExtraPct,
+        );
+        const overtimeDelta = this._roundCurrency(
+          nextOvertimeCost - previousOvertimeCost,
+        );
+
+        duty.overtime_minutes = nextOvertimeMinutes;
+        duty.overtime_cost = nextOvertimeCost;
+
+        if (Number.isFinite(Number(duty.total_cost))) {
+          duty.total_cost = this._roundCurrency(
+            Number(duty.total_cost) + overtimeDelta,
+          );
+        }
+
+        if (Object.keys(breakdownDuty).length) {
+          breakdownDuty.overtime_cost = nextOvertimeCost;
+          if (Number.isFinite(Number(breakdownDuty.total))) {
+            breakdownDuty.total = this._roundCurrency(
+              Number(breakdownDuty.total) + overtimeDelta,
+            );
+          }
+          breakdownDuties[index] = breakdownDuty;
+        }
+
+        overtimeDeltaTotal = this._roundCurrency(
+          overtimeDeltaTotal + overtimeDelta,
+        );
+      });
+    }
+
+    if (Object.keys(cspBreakdown).length) {
+      if (breakdownDuties.length) cspBreakdown.duties = breakdownDuties;
+      if (Math.abs(overtimeDeltaTotal) >= 0.01) {
+        cspBreakdown.overtime_cost = this._roundCurrency(
+          this._toFiniteNumber(cspBreakdown.overtime_cost, 0) + overtimeDeltaTotal,
+        );
+        cspBreakdown.total = this._roundCurrency(
+          this._toFiniteNumber(cspBreakdown.total, 0) + overtimeDeltaTotal,
+        );
+      }
+      breakdown.csp = cspBreakdown;
+    }
+
+    if (Object.keys(breakdown).length) {
+      const baseTotal = this._toFiniteNumber(
+        breakdown.total ?? summary.total_cost ?? summary.totalCost,
+        0,
+      );
+      breakdown.total = this._roundCurrency(baseTotal + overtimeDeltaTotal);
+      summary.cost_breakdown = breakdown;
+      summary.costBreakdown = breakdown;
+      summary.total_cost = breakdown.total;
+      summary.totalCost = breakdown.total;
+    }
+
+    if (summary.solverExplanation == null && summary.solver_explanation != null) {
+      summary.solverExplanation = this._cloneJson(summary.solver_explanation);
+    }
+    if (summary.phaseSummary == null && summary.phase_summary != null) {
+      summary.phaseSummary = this._cloneJson(summary.phase_summary);
+    }
+    if (summary.tripGroupAudit == null && summary.trip_group_audit != null) {
+      summary.tripGroupAudit = this._cloneJson(summary.trip_group_audit);
+    }
+    if (summary.hardConstraintReport == null && summary.hard_constraint_report != null) {
+      summary.hardConstraintReport = this._cloneJson(summary.hard_constraint_report);
+    }
+
+    return summary;
+  }
+
+  private _normalizeRunReadModel(
+    run: OptimizationRunEntity,
+  ): OptimizationRunEntity {
+    const params = this._asObject(this._cloneJson(run.params));
+    const resultSummary = this._normalizeLegacyResultSummary(
+      this._asObject(this._cloneJson(run.resultSummary)),
+      params,
+    );
+    const normalizedTotalCost = this._toFiniteNumber(
+      resultSummary.total_cost ?? resultSummary.totalCost ?? run.totalCost,
+      this._toFiniteNumber(run.totalCost, 0),
+    );
+
+    return {
+      ...run,
+      params,
+      resultSummary,
+      totalCost: normalizedTotalCost,
+    };
+  }
+
+  private _pickBetterRun(
+    baseRun: OptimizationRunEntity,
+    otherRun: OptimizationRunEntity,
+    baseConstraints: Record<string, number>,
+    otherConstraints: Record<string, number>,
+  ): number | null {
+    const statusRank = (status?: OptimizationStatus): number => {
+      switch (status) {
+        case OptimizationStatus.COMPLETED:
+          return 0;
+        case OptimizationStatus.RUNNING:
+          return 1;
+        case OptimizationStatus.PENDING:
+          return 2;
+        case OptimizationStatus.CANCELLED:
+          return 3;
+        case OptimizationStatus.FAILED:
+        default:
+          return 4;
+      }
+    };
+
+    const baseVector = [
+      statusRank(baseRun.status),
+      this._toFiniteNumber(baseConstraints.hardIssues, 0),
+      this._toFiniteNumber(baseRun.cctViolations, 0),
+      this._toFiniteNumber(baseConstraints.softIssues, 0),
+      this._toFiniteNumber(baseRun.totalVehicles, 0),
+      this._toFiniteNumber(baseRun.totalCost, 0),
+    ];
+    const otherVector = [
+      statusRank(otherRun.status),
+      this._toFiniteNumber(otherConstraints.hardIssues, 0),
+      this._toFiniteNumber(otherRun.cctViolations, 0),
+      this._toFiniteNumber(otherConstraints.softIssues, 0),
+      this._toFiniteNumber(otherRun.totalVehicles, 0),
+      this._toFiniteNumber(otherRun.totalCost, 0),
+    ];
+
+    for (let index = 0; index < baseVector.length; index += 1) {
+      if (baseVector[index] < otherVector[index]) return baseRun.id;
+      if (otherVector[index] < baseVector[index]) return otherRun.id;
+    }
+
+    return null;
+  }
+
   async findAll(companyId?: number): Promise<OptimizationRunEntity[]> {
     const where: any = {};
     if (companyId) where.companyId = companyId;
-    return this.runRepo.find({
+    const runs = await this.runRepo.find({
       where,
       order: { createdAt: 'DESC' },
       take: 50,
     });
+
+    return runs.map((run) => this._normalizeRunReadModel(run));
   }
 
   async findOne(
@@ -1353,7 +2075,7 @@ export class OptimizationService {
       companyId != null ? { id, companyId } : { id };
     const run = await this.runRepo.findOne({ where });
     if (!run) throw new EntityNotFoundException('Execução de otimização', id);
-    return run;
+    return this._normalizeRunReadModel(run);
   }
 
   async cancel(id: number, companyId?: number): Promise<OptimizationRunEntity> {
@@ -1370,9 +2092,72 @@ export class OptimizationService {
   }
 
   async getRunAudit(id: number, companyId?: number): Promise<any> {
-    // FIXME: Restaurar a implementação do Run Audit do Turn 1
     const run = await this.findOne(id, companyId);
-    return run.resultSummary ?? {};
+    const params = this._asObject(run.params);
+    const resultSummary = this._asObject(run.resultSummary);
+    const meta = this._asObject(resultSummary.meta);
+    const warnings = Array.isArray(resultSummary.warnings)
+      ? resultSummary.warnings
+      : [];
+    const tripDetails = Array.isArray(resultSummary.trip_details)
+      ? resultSummary.trip_details
+      : Array.isArray(resultSummary.tripDetails)
+        ? resultSummary.tripDetails
+        : [];
+
+    return {
+      runId: run.id,
+      companyId: run.companyId,
+      status: run.status,
+      algorithm: run.algorithm,
+      lineId: run.lineId ?? null,
+      lineIds: run.lineIds ?? null,
+      createdAt: run.createdAt,
+      startedAt: run.startedAt,
+      finishedAt: run.finishedAt,
+      durationMs: run.durationMs,
+      requestedParams:
+        params.requested ?? (params.vsp || params.csp ? this._cloneJson(params) : null),
+      resolvedParams: params.resolved ?? null,
+      settingsSnapshot: params.settingsSnapshot ?? null,
+      versioning: params.versioning ?? resultSummary.versioning ?? null,
+      result: {
+        ...resultSummary,
+        total_cost: this._toFiniteNumber(
+          resultSummary.total_cost ?? resultSummary.totalCost ?? run.totalCost,
+          this._toFiniteNumber(run.totalCost, 0),
+        ),
+        totalCost: this._toFiniteNumber(
+          resultSummary.totalCost ?? resultSummary.total_cost ?? run.totalCost,
+          this._toFiniteNumber(run.totalCost, 0),
+        ),
+        costBreakdown:
+          resultSummary.costBreakdown ?? resultSummary.cost_breakdown ?? null,
+        solverExplanation:
+          resultSummary.solverExplanation ?? resultSummary.solver_explanation ?? null,
+        phaseSummary:
+          resultSummary.phaseSummary ?? resultSummary.phase_summary ?? null,
+        tripGroupAudit:
+          resultSummary.tripGroupAudit ?? resultSummary.trip_group_audit ?? null,
+        hardConstraintReport:
+          resultSummary.hardConstraintReport ??
+          resultSummary.hard_constraint_report ??
+          meta.hard_constraint_report ??
+          null,
+        warningsCount: warnings.length,
+        tripDetailsCount: tripDetails.length,
+        solverVersion: meta.solver_version ?? meta.solverVersion ?? null,
+        failureDiagnostics:
+          resultSummary.failureDiagnostics ?? resultSummary.diagnostics ?? null,
+        optimizerDiagnostics:
+          resultSummary.optimizerDiagnostics ??
+          resultSummary.optimizer_diagnostics ??
+          meta.optimizerDiagnostics ??
+          meta.optimizer_diagnostics ??
+          null,
+        performance: resultSummary.performance ?? meta.performance ?? null,
+      },
+    };
   }
 
   async compareRuns(
@@ -1380,10 +2165,194 @@ export class OptimizationService {
     otherId: number,
     companyId?: number,
   ): Promise<any> {
-    // FIXME: Restaurar a implementação comparativa removida do back-end
+    const [baseRun, otherRun] = await Promise.all([
+      this.findOne(id, companyId),
+      this.findOne(otherId, companyId),
+    ]);
+    const baseSummary = this._asObject(baseRun.resultSummary);
+    const otherSummary = this._asObject(otherRun.resultSummary);
+    const baseParams = this._asObject(baseRun.params);
+    const otherParams = this._asObject(otherRun.params);
+    const baseBreakdown = this._asObject(
+      baseSummary.cost_breakdown ?? baseSummary.costBreakdown,
+    );
+    const otherBreakdown = this._asObject(
+      otherSummary.cost_breakdown ?? otherSummary.costBreakdown,
+    );
+    const basePerformance = this._extractPerformanceSummary(baseSummary, baseRun);
+    const otherPerformance = this._extractPerformanceSummary(otherSummary, otherRun);
+    const baseReproducibility = this._extractReproducibilitySummary(baseSummary);
+    const otherReproducibility = this._extractReproducibilitySummary(otherSummary);
+    const baseConstraints = this._extractConstraintCounts(baseSummary);
+    const otherConstraints = this._extractConstraintCounts(otherSummary);
+    const betterRunId = this._pickBetterRun(
+      baseRun,
+      otherRun,
+      baseConstraints,
+      otherConstraints,
+    );
+
+    const metrics = {
+      vehicles: this._comparisonMetric(baseRun.totalVehicles, otherRun.totalVehicles),
+      crew: this._comparisonMetric(baseRun.totalCrew, otherRun.totalCrew),
+      totalTrips: this._comparisonMetric(baseRun.totalTrips, otherRun.totalTrips),
+      totalCost: this._comparisonMetric(baseRun.totalCost, otherRun.totalCost),
+      cctViolations: this._comparisonMetric(
+        baseRun.cctViolations,
+        otherRun.cctViolations,
+      ),
+      hardIssues: this._comparisonMetric(
+        baseConstraints.hardIssues,
+        otherConstraints.hardIssues,
+      ),
+      softIssues: this._comparisonMetric(
+        baseConstraints.softIssues,
+        otherConstraints.softIssues,
+      ),
+      unassignedTrips: this._comparisonMetric(
+        baseConstraints.unassignedTrips,
+        otherConstraints.unassignedTrips,
+      ),
+      uncoveredBlocks: this._comparisonMetric(
+        baseConstraints.uncoveredBlocks,
+        otherConstraints.uncoveredBlocks,
+      ),
+    };
+
+    const costBreakdown: Record<
+      string,
+      { base: number; other: number; delta: number; pctDelta: number }
+    > = {};
+    const flattenBreakdownBucket = (
+      bucketName: string,
+      baseBucket: Record<string, any>,
+      otherBucket: Record<string, any>,
+    ) => {
+      const keys = new Set([
+        ...Object.keys(baseBucket),
+        ...Object.keys(otherBucket),
+      ]);
+
+      for (const key of keys) {
+        const baseValue = baseBucket[key];
+        const otherValue = otherBucket[key];
+        if (
+          !Number.isFinite(Number(baseValue)) &&
+          !Number.isFinite(Number(otherValue))
+        ) {
+          continue;
+        }
+        costBreakdown[`${bucketName}_${key}`] = this._comparisonMetric(
+          baseValue,
+          otherValue,
+        );
+      }
+    };
+
+    if (
+      Number.isFinite(Number(baseBreakdown.total)) ||
+      Number.isFinite(Number(otherBreakdown.total))
+    ) {
+      costBreakdown.total = this._comparisonMetric(
+        baseBreakdown.total,
+        otherBreakdown.total,
+      );
+    }
+
+    flattenBreakdownBucket(
+      'vsp',
+      this._asObject(baseBreakdown.vsp),
+      this._asObject(otherBreakdown.vsp),
+    );
+    flattenBreakdownBucket(
+      'csp',
+      this._asObject(baseBreakdown.csp),
+      this._asObject(otherBreakdown.csp),
+    );
+
+    const performancePhaseTimings: Record<
+      string,
+      { base: number; other: number; delta: number; pctDelta: number }
+    > = {};
+    const phaseTimingKeys = new Set([
+      ...Object.keys(basePerformance.phaseTimings),
+      ...Object.keys(otherPerformance.phaseTimings),
+    ]);
+    for (const key of phaseTimingKeys) {
+      performancePhaseTimings[key] = this._comparisonMetric(
+        basePerformance.phaseTimings[key],
+        otherPerformance.phaseTimings[key],
+      );
+    }
+
     return {
       baseRunId: id,
       otherRunId: otherId,
+      summary: {
+        betterRunId,
+        headline:
+          betterRunId == null
+            ? 'As duas execuções ficaram equivalentes pelos critérios atuais.'
+            : `Execução #${betterRunId} ficou melhor ao considerar restrições, frota e custo total.`,
+      },
+      algorithms: {
+        base: baseRun.algorithm,
+        other: otherRun.algorithm,
+      },
+      metrics,
+      costBreakdown,
+      paramsDiff: this._diffObjects(
+        baseParams.resolved ?? baseParams,
+        otherParams.resolved ?? otherParams,
+        'resolved',
+      ),
+      settingsDiff: this._diffObjects(
+        baseParams.settingsSnapshot,
+        otherParams.settingsSnapshot,
+        'settingsSnapshot',
+      ),
+      versioning: {
+        base: baseParams.versioning ?? null,
+        other: otherParams.versioning ?? null,
+      },
+      performance: {
+        totalElapsedMs: this._comparisonMetric(
+          basePerformance.totalElapsedMs,
+          otherPerformance.totalElapsedMs,
+        ),
+        tripCount: this._comparisonMetric(
+          basePerformance.tripCount,
+          otherPerformance.tripCount,
+        ),
+        vehicleTypeCount: this._comparisonMetric(
+          basePerformance.vehicleTypeCount,
+          otherPerformance.vehicleTypeCount,
+        ),
+        phaseTimings: performancePhaseTimings,
+      },
+      reproducibility: {
+        base: baseReproducibility,
+        other: otherReproducibility,
+        sameInputHash:
+          baseReproducibility.inputHash != null &&
+          otherReproducibility.inputHash != null
+            ? baseReproducibility.inputHash === otherReproducibility.inputHash
+            : null,
+        sameParamsHash:
+          baseReproducibility.paramsHash != null &&
+          otherReproducibility.paramsHash != null
+            ? baseReproducibility.paramsHash === otherReproducibility.paramsHash
+            : null,
+        sameTimeBudget:
+          baseReproducibility.timeBudgetS != null &&
+          otherReproducibility.timeBudgetS != null
+            ? baseReproducibility.timeBudgetS === otherReproducibility.timeBudgetS
+            : null,
+      },
+      constraints: {
+        base: baseConstraints,
+        other: otherConstraints,
+      },
     };
   }
 
@@ -1393,19 +2362,28 @@ export class OptimizationService {
   }
 
   async getDashboardStats(companyId: number): Promise<any> {
-    const runs = await this.runRepo.find({
-      where: { companyId, status: OptimizationStatus.COMPLETED },
-      order: { createdAt: 'DESC' },
-      take: 10,
-    });
+    const [runs, totalRuns, completedRuns, totalLines, totalTerminals, totalVehicleTypes] = await Promise.all([
+      this.runRepo.find({
+        where: { companyId, status: OptimizationStatus.COMPLETED },
+        order: { createdAt: 'DESC' },
+        take: 10,
+      }),
+      this.runRepo.count({ where: { companyId } }),
+      this.runRepo.count({ where: { companyId, status: OptimizationStatus.COMPLETED } }),
+      this.linesService['lineRepo'].count({ where: { companyId } }),
+      this.terminalsService['terminalRepo'].count({ where: { companyId } }),
+      this.vehicleTypesService['vehicleTypeRepo'].count({ where: { companyId } }),
+    ]);
 
     const lastRun = runs[0];
 
     return {
-      totalRuns: await this.runRepo.count({ where: { companyId } }),
-      completedRuns: await this.runRepo.count({
-        where: { companyId, status: OptimizationStatus.COMPLETED },
-      }),
+      totalRuns,
+      completedRuns,
+      totalLines,
+      totalTerminals,
+      totalVehicleTypes,
+      totalOptimizationRuns: totalRuns,
       lastOptimization: lastRun
         ? {
             id: lastRun.id,
@@ -1426,6 +2404,9 @@ export class OptimizationService {
         duration: r.durationMs,
         createdAt: r.createdAt,
       })),
+      // Campos extras para garantir compatibilidade com cockpit
+      total_lines: totalLines,
+      total_terminals: totalTerminals,
     };
   }
 }
