@@ -27,11 +27,21 @@ Branch: feat/extreme-optimizer-refactor
   - Componente visual com badges de erro/aviso no cabecalho do Gantt.
   - 8 testes unitarios de deteccao de conflitos (8/8 passing).
   - Integrado no TabGantt.tsx sem poluir o grid.
+- **Refinamentos tipograficos enterprise completados**:
+  - Escalas centralizadas em typography-scales.ts
+  - Labels com melhor hierarchia visual (sectionLabel, sectionSubtitle, metadata, etc.)
+  - Aplicado a titles, timestamps, contadores do Gantt.
+- **Modal expandido de conflitos com rastreabilidade**:
+  - Visualizacao detalhada de conflitos operacionais
+  - Filtro por tipo de conflito
+  - Tabela com blocos afetados, severidade, mensagens
+  - Recomendacoes de acao para o operador
+  - Clicavel no indicador para abrir modal
 
 ## Fazendo agora
-- Finalizacao e consolidacao completa do ciclo de melhorias UX/stress testing.
+- Finalizacao da iteracao atual.
 
 ## Proximo
-- Melhorias visuais de alto nível: escalas de fonte, spacing refinado.
-- Expandir indicadores de conflitos para mostrar rastreabilidade de blocos afetados.
-- Performance profiling em cenarios extremos (500+ blocos).
+- Performance profiling em cenarios extremos (500+ blocos)
+- Integracao com export de relatorio de conflitos (PDF/CSV)
+- Dashboard resumitivo de KPIs com visualizacoes historicas
