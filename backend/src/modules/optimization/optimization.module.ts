@@ -1,5 +1,6 @@
 import { Module, OnModuleInit, Logger } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { HttpModule } from '@nestjs/axios';
 import { OptimizationService } from './optimization.service';
 import { OptimizationController } from './optimization.controller';
 import { OptimizationRunEntity } from './entities/optimization-run.entity';
@@ -12,6 +13,7 @@ import { VehicleTypesModule } from '../vehicle-types/vehicle-types.module';
 @Module({
   imports: [
     TypeOrmModule.forFeature([OptimizationRunEntity]),
+    HttpModule,
     TripsModule,
     OptimizationSettingsModule,
     LinesModule,

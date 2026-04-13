@@ -33,4 +33,7 @@ export class TerminalEntity extends BaseCompanyEntity {
 
   @Column({ name: 'is_active', default: true })
   isActive: boolean;
+
+  @Column({ name: 'capacity', type: 'int', default: 9999 })
+  capacity: number;
 }

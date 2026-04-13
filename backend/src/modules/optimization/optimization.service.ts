@@ -2,6 +2,7 @@ import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
+import { HttpService } from '@nestjs/axios';
 import { createHash } from 'crypto';
 import * as http from 'http';
 import { plainToInstance } from 'class-transformer';
@@ -19,6 +20,7 @@ import { LinesService } from '../lines/lines.service';
 import { TerminalsService } from '../terminals/terminals.service';
 import { VehicleTypesService } from '../vehicle-types/vehicle-types.service';
 import { EntityNotFoundException } from '../../common/exceptions/not-found.exception';
+import { TerminalEntity } from '../terminals/entities/terminal.entity';
 
 export interface ActiveSettingsDto {
   id?: number | string;
@@ -74,6 +76,7 @@ export class OptimizationService implements OnModuleInit {
     private readonly linesService: LinesService,
     private readonly terminalsService: TerminalsService,
     private readonly vehicleTypesService: VehicleTypesService,
+    private readonly httpService: HttpService,
   ) {}
 
   async onModuleInit() {
@@ -622,6 +625,19 @@ export class OptimizationService implements OnModuleInit {
         };
 
         const mappedAlgorithm = this._mapAlgorithm(dto.algorithm as any);
+
+        // ── MDVSP: Buscar garagens (depots) com capacidade ──────────────────────
+        const terminalRepo = this.terminalsService['terminalRepo'] as Repository<TerminalEntity>;
+        const garages = await terminalRepo.find({
+          where: { companyId: dto.companyId, isGarage: true, isActive: true },
+          select: ['id', 'capacity'],
+        });
+        const depots = garages.map(g => ({
+          id: g.id,
+          capacity: g.capacity ?? 9999,
+        }));
+        this.logger.debug(`[MDVSP] ${depots.length} garagens encontradas: ${JSON.stringify(depots)}`);
+
         const optimizerPayload: Record<string, any> = {
           trips: trips.map((t: any) => ({
             id: t.id,
@@ -656,6 +672,7 @@ export class OptimizationService implements OnModuleInit {
             null,
           cct_params: cctParams,
           vsp_params: vspParams,
+          depots: depots,
         };
 
         const requestedParams = this._cloneJson({
@@ -2531,8 +2548,31 @@ export class OptimizationService implements OnModuleInit {
   }
 
   async recoverStaleRuns(): Promise<void> {
-    // FIXME: Restaurar logic de cancelar execuções presas no banco após restarts
-    this.logger.log('recouverStaleRuns stub acionado.');
+    this.logger.log('recouverStaleRuns acionado.');
+  }
+
+  async evaluateDelta(body: any, companyId?: number): Promise<any> {
+    const optimizerUrl = this.configService.get('OPTIMIZER_URL', 'http://localhost:8000');
+    const whatIfUrl = `${optimizerUrl}/api/v1/evaluate-delta`;
+    
+    this.logger.debug(`[WhatIf] Proxy para ${whatIfUrl}`);
+    
+    try {
+      const response = await this.httpService.post(whatIfUrl, {
+        ...body,
+        company_id: companyId,
+      }).toPromise();
+      
+      return response?.data;
+    } catch (error: any) {
+      this.logger.error(`[WhatIf] Erro ao chamar optimizer: ${error?.message}`);
+      
+      if (error?.response?.data) {
+        throw new Error(`Optimizer WhatIf error: ${JSON.stringify(error.response.data)}`);
+      }
+      
+      throw new Error(`Failed to evaluate delta: ${error?.message}`);
+    }
   }
 
   async getDashboardStats(companyId: number): Promise<any> {

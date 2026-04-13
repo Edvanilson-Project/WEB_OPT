@@ -128,6 +128,8 @@ export const optimizationApi = {
   cancel: (id: ID) => apiClient.patch(`/optimization/${id}/cancel`, {}).then((r) => r.data),
   getDashboard: (companyId: ID) =>
     apiClient.get(`/optimization/dashboard/${companyId}`).then((r) => r.data),
+  evaluateDelta: (data: object) =>
+    apiClient.post('/optimization/evaluate-delta', data).then((r) => r.data),
 };
 
 // ─── Reports ─────────────────────────────────────────────────────────────────

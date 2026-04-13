@@ -1,8 +1,8 @@
 'use client';
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import {
   Box, Typography, Stack, Paper, Tooltip, Button, Drawer, Divider,
-  IconButton,
+  IconButton, Alert, Snackbar,
   alpha, useTheme,
 } from '@mui/material';
 import { List, type RowComponentProps } from 'react-window';
@@ -18,6 +18,7 @@ import {
 } from '../_helpers/formatters';
 import { getLinePalette, getGanttColors } from '../../_tokens/design-tokens';
 import { OperationalConflictIndicator } from './OperationalConflictIndicator';
+import { optimizationApi } from '@/lib/api';
 
 function isSameTerminal(previousTrip: TripDetail, nextTrip: TripDetail): boolean {
   const previousTerminal = previousTrip.destination_terminal_id ?? previousTrip.destination_id;
@@ -66,6 +67,11 @@ export function TabGantt({
   const isDark = theme.palette.mode === 'dark';
   const [zoom, setZoom] = useState(1);
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [isEvaluating, setIsEvaluating] = useState(false);
+  const [deltaResult, setDeltaResult] = useState<any>(null);
+  const [deltaError, setDeltaError] = useState<string | null>(null);
+  const [snackbar, setSnackbar] = useState<{ open: boolean; message: string; severity: 'success' | 'error' | 'info' }>({ open: false, message: '', severity: 'info' });
+  
   const { blocks = [], duties = [] } = res;
   const ganttColors = useMemo(() => getGanttColors(theme), [theme]);
 
@@ -280,6 +286,82 @@ export function TabGantt({
     if (t >= startScale && t <= endScale) {
        if (zoom > 1.5 || h % 2 === 0) ticks.push(t);
     }
+  }
+
+  // ─── What-If Delta Evaluation ───────────────────────────────────────────────
+  const handleWhatIfDrop = useCallback(async (tripId: number, sourceBlockId: number, targetBlockId: number, targetIndex: number) => {
+    setIsEvaluating(true);
+    setDeltaError(null);
+    
+    try {
+      const blocksPayload = res.blocks.map((b: any) => ({
+        id: b.id,
+        trips: (b.trips || []).map((t: any) => {
+          const trip = typeof t === 'object' ? t : {};
+          return {
+            id: typeof t === 'number' ? t : t.id,
+            line_id: trip.line_id,
+            start_time: trip.start_time,
+            end_time: trip.end_time,
+            origin_id: trip.origin_id ?? trip.origin_terminal_id,
+            destination_id: trip.destination_id ?? trip.destination_terminal_id,
+            distance_km: trip.distance_km,
+            deadhead_times: trip.deadhead_times || {},
+          };
+        }),
+        vehicle_type_id: b.vehicle_type_id,
+      }));
+      
+      const payload = {
+        blocks: blocksPayload,
+        trip_id: tripId,
+        source_block_id: sourceBlockId,
+        target_block_id: targetBlockId,
+        target_index: targetIndex,
+        company_id: res.company_id,
+      };
+      
+      const result = await optimizationApi.evaluateDelta(payload);
+      setDeltaResult(result);
+      
+      const prevCost = res.cost_breakdown?.total || 0;
+      const newCost = result.cost_breakdown?.total || 0;
+      const costDiff = newCost - prevCost;
+      
+      if (costDiff > 0) {
+        setSnackbar({
+          open: true,
+          message: `Custo erhöht: +${costDiff.toFixed(2)} (${prevCost.toFixed(2)} → ${newCost.toFixed(2)})`,
+          severity: 'warning',
+        });
+      } else if (costDiff < 0) {
+        setSnackbar({
+          open: true,
+          message: `Custo reduzido: ${costDiff.toFixed(2)} (${prevCost.toFixed(2)} → ${newCost.toFixed(2)})`,
+          severity: 'success',
+        });
+      } else {
+        setSnackbar({
+          open: true,
+          message: 'Sem alteração de custo',
+          severity: 'info',
+        });
+      }
+    } catch (err: any) {
+      setDeltaError(err?.message || 'Erro ao avaliar delta');
+      setSnackbar({
+        open: true,
+        message: `Erro What-If: ${err?.message || 'Erro desconhecido'}`,
+        severity: 'error',
+      });
+    } finally {
+      setIsEvaluating(false);
+    }
+  }, [res]);
+
+  // Expor função de drop via window (para integração com drag handlers)
+  if (typeof window !== 'undefined') {
+    (window as any).__otimizWhatIf = handleWhatIfDrop;
   }
 
   // Visual constants for precise alignment
@@ -682,6 +764,22 @@ export function TabGantt({
           100% { transform: scale(1); opacity: 0.8; }
         }
       `}</style>
+
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={4000}
+        onClose={() => setSnackbar(s => ({ ...s, open: false }))}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert
+          onClose={() => setSnackbar(s => ({ ...s, open: false }))}
+          severity={snackbar.severity}
+          variant="filled"
+          sx={{ width: '100%' }}
+        >
+          {snackbar.message}
+        </Alert>
+      </Snackbar>
     </Box>
   );
 }

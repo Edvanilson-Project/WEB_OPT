@@ -92,4 +92,12 @@ export class OptimizationController {
   cancel(@Param('id', ParseIntPipe) id: number, @Request() req: AuthRequest) {
     return this.optimizationService.cancel(id, req.user?.companyId);
   }
+
+  @Post('evaluate-delta')
+  @ApiOperation({ summary: 'Recálculo what-if após rearranjo de trips no Gantt' })
+  @Roles(UserRole.SUPER_ADMIN, UserRole.COMPANY_ADMIN, UserRole.ANALYST)
+  evaluateDelta(@Body() body: any, @Request() req: AuthRequest) {
+    const companyId = resolveScopedCompanyId(req.user?.companyId, body?.companyId, req.user?.role);
+    return this.optimizationService.evaluateDelta(body, companyId);
+  }
 }
