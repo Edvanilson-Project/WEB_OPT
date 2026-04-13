@@ -43,6 +43,13 @@ export class OptimizationRunEntity extends BaseCompanyEntity {
   @Column({ name: 'schedule_id', nullable: true })
   scheduleId: number;
 
+  @Index()
+  @Column({ name: 'profile_id', nullable: true })
+  profileId: number | null;
+
+  @Column({ name: 'profile_name', type: 'varchar', length: 255, nullable: true })
+  profileName: string | null;
+
   @Column({
     type: 'enum',
     enum: OptimizationStatus,

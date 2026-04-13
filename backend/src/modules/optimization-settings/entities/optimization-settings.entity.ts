@@ -74,6 +74,9 @@ export class OptimizationSettingsEntity extends BaseCompanyEntity {
   @Column({ name: 'allow_multi_line_block', default: true })
   allowMultiLineBlock: boolean;
 
+  @Column({ name: 'vsp_garage_return_policy', default: 'smart' })
+  vspGarageReturnPolicy: string; // smart, always, never
+
   // Relief Points (mid-route driver change)
   @Column({ name: 'allow_relief_points', default: false })
   allowReliefPoints: boolean;
@@ -316,6 +319,16 @@ export class OptimizationSettingsEntity extends BaseCompanyEntity {
   @Column({ name: 'operation_mode', default: 'urban', nullable: true })
   operationMode: string;
 
+  /** Multiplicador de timeout do backend (Somente Admin) */
+  @Column({
+    name: 'max_timeout_multiplier',
+    type: 'decimal',
+    precision: 4,
+    scale: 2,
+    default: 1.5,
+  })
+  maxTimeoutMultiplier: number;
+
   /** Máximo de sucessores candidatos por tarefa na geração de colunas */
   @Column({ name: 'max_candidate_successors_per_task', default: 5 })
   maxCandidateSuccessorsPerTask: number;
@@ -332,6 +345,84 @@ export class OptimizationSettingsEntity extends BaseCompanyEntity {
   @Column({ name: 'max_pricing_additions', default: 192 })
   maxPricingAdditions: number;
 
+  /** Meta de trabalho efetivo para equidade (minutos) */
+  @Column({ name: 'fairness_target_work_minutes', default: 420 })
+  fairnessTargetWorkMinutes: number;
+
+  /** Tolerância para equidade antes de penalizar (minutos) */
+  @Column({ name: 'fairness_tolerance_minutes', default: 30 })
+  fairnessToleranceMinutes: number;
+
+  /** Limite de ociosidade não remunerada por jornada */
+  @Column({ name: 'max_unpaid_break_minutes', default: 360 })
+  maxUnpaidBreakMinutes: number;
+
+  /** Tempo após o qual uma pausa longa é penalizada */
+  @Column({ name: 'long_unpaid_break_limit_minutes', default: 180 })
+  longUnpaidBreakLimitMinutes: number;
+
+  /** Peso da penalidade para pausas longas */
+  @Column({
+    name: 'long_unpaid_break_penalty_weight',
+    type: 'decimal',
+    precision: 6,
+    scale: 4,
+    default: 1.0,
+  })
+  longUnpaidBreakPenaltyWeight: number;
+
+  /** Razão de reuso máximo para conexões VSP */
+  @Column({
+    name: 'max_connection_cost_for_reuse_ratio',
+    type: 'decimal',
+    precision: 6,
+    scale: 4,
+    default: 2.5,
+  })
+  maxConnectionCostForReuseRatio: number;
+
+  /** Peso do objetivo: reduzir hora extra */
+  @Column({
+    name: 'goal_weight_overtime',
+    type: 'decimal',
+    precision: 6,
+    scale: 4,
+    default: 0.8,
+  })
+  goalWeightOvertime: number;
+
+  /** Peso do objetivo: reduzir spread */
+  @Column({
+    name: 'goal_weight_spread',
+    type: 'decimal',
+    precision: 6,
+    scale: 4,
+    default: 0.15,
+  })
+  goalWeightSpread: number;
+
+  /** Peso do objetivo: atingir garantia mínima */
+  @Column({
+    name: 'goal_weight_min_work',
+    type: 'decimal',
+    precision: 6,
+    scale: 4,
+    default: 0.2,
+  })
+  goalWeightMinWork: number;
+
+  /** Layover mínimo para o Terminal Central (ID 1) */
+  @Column({ name: 'terminal_central_min_layover', default: 12 })
+  terminalCentralMinLayover: number;
+
+  /** Gap mínimo para turno partido de veículo */
+  @Column({ name: 'split_shift_min_gap_minutes', default: 120 })
+  splitShiftMinGapMinutes: number;
+
+  /** Gap máximo para turno partido de veículo */
+  @Column({ name: 'split_shift_max_gap_minutes', default: 600 })
+  splitShiftMaxGapMinutes: number;
+
   @AfterLoad()
   convertDecimals() {
     const decimals = [
@@ -346,6 +437,12 @@ export class OptimizationSettingsEntity extends BaseCompanyEntity {
       'cctNocturnalExtraPct',
       'peakEnergyCostPerKwh',
       'offpeakEnergyCostPerKwh',
+      'maxTimeoutMultiplier',
+      'longUnpaidBreakPenaltyWeight',
+      'maxConnectionCostForReuseRatio',
+      'goalWeightOvertime',
+      'goalWeightSpread',
+      'goalWeightMinWork',
     ] as const;
     for (const key of decimals) {
       if (typeof (this as any)[key] === 'string') {

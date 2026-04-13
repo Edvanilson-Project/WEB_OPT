@@ -23,10 +23,11 @@ import {
   IconTruck,
   IconUsers,
 } from '@tabler/icons-react';
+import { getSessionUser } from '@/lib/api';
 import type { OptimizationSettings } from '../_types';
 import type { SettingsFormValues } from './settings/settings-constants';
 import { ALGORITHM_OPTIONS, FIELD_HELP } from './settings/settings-constants';
-import { NumberField, FieldLabel, SwitchField, SectionPanel } from './settings/settings-fields';
+import { NumberField, FieldLabel, SwitchField, SectionPanel, SelectField } from './settings/settings-fields';
 
 // Re-export everything consumers need from the barrel
 export type { SettingsFormValues } from './settings/settings-constants';
@@ -90,6 +91,8 @@ export function OptimizationSettingsEditor({
   isNew?: boolean;
 }) {
   const grid = dense ? 1.5 : 2;
+  const user = getSessionUser();
+  const isAdmin = user?.role === 'super_admin' || user?.role === 'company_admin';
 
   return (
     <Stack spacing={dense ? 1.5 : 2}>
@@ -135,7 +138,7 @@ export function OptimizationSettingsEditor({
               <Select
                 label="Algoritmo principal"
                 value={value.algorithmType}
-                onChange={(e) => onChange('algorithmType', e.target.value as any)}
+                onChange={(e) => onChange('algorithmType', e.target.value)}
               >
                 {ALGORITHM_OPTIONS.map((item) => (
                   <MenuItem key={item.value} value={item.value}>{item.label}</MenuItem>
@@ -158,6 +161,9 @@ export function OptimizationSettingsEditor({
           </Grid>
           <Grid item xs={12} md={4}>
             <NumberField label="Budget total" fieldKey="timeBudgetSeconds" value={value.timeBudgetSeconds} onChange={(next) => onChange('timeBudgetSeconds', next)} min={30} max={3600} unit="s" dense={dense} />
+          </Grid>
+          <Grid item xs={12} md={4}>
+            <NumberField label="Multiplicador Timeout (Admin)" fieldKey="maxTimeoutMultiplier" value={value.maxTimeoutMultiplier ?? 1.5} onChange={(next) => onChange('maxTimeoutMultiplier', next)} min={1.0} max={5.0} step={0.1} dense={dense} />
           </Grid>
           <Grid item xs={12} md={4}>
             <SwitchField fieldKey="applyCct" checked={value.applyCct} onChange={(checked) => onChange('applyCct', checked)} label="Aplicar CCT/CLT" />
@@ -213,9 +219,45 @@ export function OptimizationSettingsEditor({
           <Grid item xs={12} sm={6} md={3}><NumberField label="Refeicao" fieldKey="cctMealBreakMinutes" value={value.cctMealBreakMinutes ?? 60} onChange={(next) => onChange('cctMealBreakMinutes', next)} min={0} max={180} unit="min" dense={dense} /></Grid>
           <Grid item xs={12} sm={6} md={3}><NumberField label="Layover minimo" fieldKey="cctMinLayoverMinutes" value={value.cctMinLayoverMinutes} onChange={(next) => onChange('cctMinLayoverMinutes', next)} min={0} max={120} unit="min" dense={dense} /></Grid>
           <Grid item xs={12} sm={6} md={3}><NumberField label="Horas garantidas" fieldKey="cctMinGuaranteedWorkMinutes" value={value.cctMinGuaranteedWorkMinutes ?? 360} onChange={(next) => onChange('cctMinGuaranteedWorkMinutes', next)} min={0} max={900} unit="min" dense={dense} /></Grid>
-          <Grid item xs={12} sm={6} md={3}><NumberField label="Espera remunerada" fieldKey="cctWaitingTimePayPct" value={value.cctWaitingTimePayPct ?? 30} onChange={(next) => onChange('cctWaitingTimePayPct', next)} min={0} max={100} unit="%" dense={dense} /></Grid>
-          <Grid item xs={12} md={4}><SwitchField fieldKey="cctIdleTimeIsPaid" checked={value.cctIdleTimeIsPaid ?? true} onChange={(checked) => onChange('cctIdleTimeIsPaid', checked)} label="Tempo ocioso e pago" /></Grid>
+          <Grid item xs={12} md={4}>
+            <NumberField label="Espera remunerada" fieldKey="cctWaitingTimePayPct" value={value.cctWaitingTimePayPct ?? 30} onChange={(next) => onChange('cctWaitingTimePayPct', next)} min={0} max={100} unit="%" dense={dense} />
+          </Grid>
+          <Grid item xs={12} md={4}>
+            <NumberField label="Limite ociosidade total" fieldKey="maxUnpaidBreakMinutes" value={value.maxUnpaidBreakMinutes ?? 360} onChange={(next) => onChange('maxUnpaidBreakMinutes', next)} min={0} max={1440} unit="min" dense={dense} />
+          </Grid>
+          <Grid item xs={12} md={4}>
+            <NumberField label="Gatilho pausa longa" fieldKey="longUnpaidBreakLimitMinutes" value={value.longUnpaidBreakLimitMinutes ?? 180} onChange={(next) => onChange('longUnpaidBreakLimitMinutes', next)} min={0} max={720} unit="min" dense={dense} />
+          </Grid>
+          <Grid item xs={12} md={4}>
+            <NumberField label="Peso penalidade pausa" fieldKey="longUnpaidBreakPenaltyWeight" value={value.longUnpaidBreakPenaltyWeight ?? 1.0} onChange={(next) => onChange('longUnpaidBreakPenaltyWeight', next)} min={0} max={5} step={0.1} dense={dense} />
+          </Grid>
+          <Grid item xs={12} md={12}>
+            <SwitchField fieldKey="cctIdleTimeIsPaid" checked={value.cctIdleTimeIsPaid ?? true} onChange={(checked) => onChange('cctIdleTimeIsPaid', checked)} label="Tempo ocioso entre viagens é remunerado (CLT Urbano)" />
+          </Grid>
           <Grid item xs={12} sm={6} md={3}><NumberField label="Tolerancia de conexao" fieldKey="connectionToleranceMinutes" value={value.connectionToleranceMinutes ?? 0} onChange={(next) => onChange('connectionToleranceMinutes', next)} min={0} max={30} unit="min" dense={dense} helperText="Perdoa gaps pequenos entre viagens (ex: 2-5 min)" /></Grid>
+        </Grid>
+      </SectionPanel>
+
+      <SectionPanel title="Pesos e Equidade (Fairness)" icon={<IconUsers size={20} />} defaultExpanded={false}>
+        <Grid container spacing={grid}>
+          <Grid item xs={12} md={4}>
+            <NumberField label="Peso Equidade total" fieldKey="fairnessWeight" value={value.fairnessWeight ?? 0} onChange={(next) => onChange('fairnessWeight', next)} min={0} max={100} unit="%" dense={dense} />
+          </Grid>
+          <Grid item xs={12} md={4}>
+            <NumberField label="Meta de trabalho" fieldKey="fairnessTargetWorkMinutes" value={value.fairnessTargetWorkMinutes ?? 420} onChange={(next) => onChange('fairnessTargetWorkMinutes', next)} min={0} max={720} unit="min" dense={dense} />
+          </Grid>
+          <Grid item xs={12} md={4}>
+            <NumberField label="Tolerância meta" fieldKey="fairnessToleranceMinutes" value={value.fairnessToleranceMinutes ?? 30} onChange={(next) => onChange('fairnessToleranceMinutes', next)} min={0} max={120} unit="min" dense={dense} />
+          </Grid>
+          <Grid item xs={12} md={4}>
+            <NumberField label="Peso: Hora Extra" fieldKey="goalWeightOvertime" value={value.goalWeightOvertime ?? 0.8} onChange={(next) => onChange('goalWeightOvertime', next)} min={0} max={5} step={0.1} dense={dense} />
+          </Grid>
+          <Grid item xs={12} md={4}>
+            <NumberField label="Peso: Spread" fieldKey="goalWeightSpread" value={value.goalWeightSpread ?? 0.15} onChange={(next) => onChange('goalWeightSpread', next)} min={0} max={5} step={0.05} dense={dense} />
+          </Grid>
+          <Grid item xs={12} md={4}>
+            <NumberField label="Peso: Garante Mín." fieldKey="goalWeightMinWork" value={value.goalWeightMinWork ?? 0.2} onChange={(next) => onChange('goalWeightMinWork', next)} min={0} max={5} step={0.1} dense={dense} />
+          </Grid>
         </Grid>
       </SectionPanel>
 
@@ -250,7 +292,35 @@ export function OptimizationSettingsEditor({
           <Grid item xs={12} sm={6} md={3}><NumberField label="Turno max. do veiculo" fieldKey="maxVehicleShiftMinutes" value={value.maxVehicleShiftMinutes} onChange={(next) => onChange('maxVehicleShiftMinutes', next)} min={120} max={1440} unit="min" dense={dense} /></Grid>
           <Grid item xs={12} sm={6} md={3}><NumberField label="Custo fixo / veiculo" fieldKey="fixedVehicleActivationCost" value={value.fixedVehicleActivationCost ?? 800} onChange={(next) => onChange('fixedVehicleActivationCost', next)} min={0} max={50000} step={50} unit="R$" dense={dense} /></Grid>
           <Grid item xs={12} sm={6} md={3}><NumberField label="Custo deadhead / min" fieldKey="deadheadCostPerMinute" value={value.deadheadCostPerMinute ?? 0.85} onChange={(next) => onChange('deadheadCostPerMinute', next)} min={0} max={100} step={0.05} unit="R$/min" dense={dense} /></Grid>
-          <Grid item xs={12} sm={6} md={3}><NumberField label="Custo ociosidade / min" fieldKey="idleCostPerMinute" value={value.idleCostPerMinute ?? 0.5} onChange={(next) => onChange('idleCostPerMinute', next)} min={0} max={100} step={0.05} unit="R$/min" dense={dense} /></Grid>
+          <Grid item xs={12} md={12}>
+            <NumberField label="Custo ociosidade" fieldKey="idleCostPerMinute" value={value.idleCostPerMinute ?? 0.5} onChange={(next) => onChange('idleCostPerMinute', next)} min={0} max={100} step={0.05} unit="$/min" dense={dense} />
+          </Grid>
+          <Grid item xs={12} md={4}>
+            <NumberField label="Reuso de veículo (Ratio)" fieldKey="maxConnectionCostForReuseRatio" value={value.maxConnectionCostForReuseRatio ?? 2.5} onChange={(next) => onChange('maxConnectionCostForReuseRatio', next)} min={0} max={10} step={0.1} dense={dense} />
+          </Grid>
+          <Grid item xs={12} md={4}>
+            <NumberField label="Layover T.Central" fieldKey="terminalCentralMinLayover" value={value.terminalCentralMinLayover ?? 12} onChange={(next) => onChange('terminalCentralMinLayover', next)} min={1} max={60} unit="min" dense={dense} />
+          </Grid>
+          <Grid item xs={12} md={4}>
+            <NumberField label="Gap mín. Recolhimento" fieldKey="splitShiftMinGapMinutes" value={value.splitShiftMinGapMinutes ?? 120} onChange={(next) => onChange('splitShiftMinGapMinutes', next)} min={0} max={300} unit="min" dense={dense} />
+          </Grid>
+          <Grid item xs={12} md={4}>
+            <NumberField label="Gap máx. Recolhimento" fieldKey="splitShiftMaxGapMinutes" value={value.splitShiftMaxGapMinutes ?? 600} onChange={(next) => onChange('splitShiftMaxGapMinutes', next)} min={0} max={1440} unit="min" dense={dense} />
+          </Grid>
+          <Grid item xs={12} md={4}>
+            <SelectField 
+              label="Política de Recolhimento" 
+              fieldKey="vspGarageReturnPolicy" 
+              value={value.vspGarageReturnPolicy ?? 'smart'} 
+              onChange={(next) => onChange('vspGarageReturnPolicy', next as any)}
+              options={[
+                { value: 'smart', label: 'Inteligente (Menor Custo)' },
+                { value: 'always', label: 'Sempre Recolher' },
+                { value: 'never', label: 'Nunca Recolher (Ficar na Rua)' },
+              ]}
+              dense={dense}
+            />
+          </Grid>
           <Grid item xs={12} sm={6} md={3}><NumberField label="Pullout" fieldKey="pulloutMinutes" value={value.pulloutMinutes} onChange={(next) => onChange('pulloutMinutes', next)} min={0} max={60} unit="min" dense={dense} /></Grid>
           <Grid item xs={12} sm={6} md={3}><NumberField label="Pullback" fieldKey="pullbackMinutes" value={value.pullbackMinutes} onChange={(next) => onChange('pullbackMinutes', next)} min={0} max={60} unit="min" dense={dense} /></Grid>
           <Grid item xs={12} sm={6} md={3}><NumberField label="Carregadores simultaneos" fieldKey="maxSimultaneousChargers" value={value.maxSimultaneousChargers ?? 0} onChange={(next) => onChange('maxSimultaneousChargers', next)} min={0} max={200} dense={dense} /></Grid>

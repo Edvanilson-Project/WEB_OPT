@@ -154,7 +154,7 @@ describe('detectOperationalConflicts', () => {
         {
           block_id: 1,
           trips: [
-            { id: 1, start_time: undefined, end_time: undefined },
+            { id: 1, start_time: undefined as unknown as number, end_time: undefined as unknown as number },
             { id: 2, start_time: 480, end_time: 540 },
           ],
         },

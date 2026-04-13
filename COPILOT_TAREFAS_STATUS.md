@@ -59,11 +59,52 @@ Branch: feat/extreme-optimizer-refactor
   - Geração de relatório legível em texto
   - Suporta até 1000 blocos sem crash
   - Análise de escalabilidade (O(n) vs O(n²))
+- **Dashboard resumitivo de KPIs com visualizações históricas concluído**:
+  - Dashboard agora consome histórico normalizado em vez de depender de aliases inconsistentes do backend.
+  - KPIs históricos com tendências por janela (7d/30d/90d): sucesso, custo médio, tempo médio e execuções limpas.
+  - Snapshot da última otimização com sinais operacionais do período (CCT médio, alertas soft, aderência de grupos).
+  - Série histórica consolidada de veículos, tripulação e custo + mix de algoritmos no dashboard.
+- **Tela de relatórios alinhada ao contrato real do backend**:
+  - Histórico de relatórios passou a usar a mesma normalização compartilhada do dashboard.
+  - Correção de incompatibilidade entre campos `createdAt`/`totalVehicles`/`totalCost` do backend e o tipo antigo de `HistoryPoint` no frontend.
+  - Suite nova de helpers adicionada com 4 testes unitários cobrindo normalização e tendências.
+- **Sync ao vivo integrado via API existente + cache TanStack Query**:
+  - Camada compartilhada de live sync criada sobre a listagem de runs, com polling adaptativo: 5s quando há execução ativa e 30s em modo passivo.
+  - Dashboard e relatórios migrados de fetch manual para queries cacheadas com invalidação automática quando a lista de runs muda.
+  - Cockpit e notificações passaram a reutilizar a mesma fonte de verdade para status ativo/pendente e refresh.
+  - Estado `pending` agora aparece explicitamente no cockpit enquanto a execução aguarda slot do motor.
+  - Validação concluída com testes do helper histórico (4/4) e build de produção do frontend OK.
+- **Cache/refetch OTIMIZ otimizado para volume alto**:
+  - Dashboard e relatórios deixaram de fazer polling pesado em paralelo; agora dependem da invalidação disparada pela lista de runs.
+  - Queries de dashboard, KPIs e histórico ganharam `staleTime`/`gcTime` dedicados para reaproveitar melhor cache entre navegação e troca de período.
+  - Histórico e resumos usam `placeholderData` para preservar o snapshot anterior durante transições e reduzir flicker em recargas.
+  - Build de produção validado após a redução de fetch redundante.
+- **Comparativos históricos aprofundados entregues na tela de relatórios**:
+  - Benchmark por algoritmo adicionado com score operacional, custo médio, taxa de sucesso, limpeza operacional e CCT médio por janela.
+  - Bloco de líderes do período destaca melhor score, menor custo médio, menor duração média e maior aderência de grupos.
+  - Duelo entre duas execuções concluídas integrado na tela de relatórios usando o endpoint de comparação já existente.
+  - Comparação agora mostra headline do backend, deltas de métricas principais, integridade de replay e timings por fase.
+  - Helper histórico ganhou benchmark por algoritmo com teste unitário adicional (5/5) e build do frontend validado.
+- **Auditoria de custo/qualidade por algoritmo com baseline operacional entregue**:
+  - Relatórios agora expõem o baseline operacional do período selecionado com sucesso, custo, duração e qualidade média das execuções concluídas.
+  - Nova tabela de auditoria mostra por algoritmo os desvios contra o baseline em score operacional, custo, tempo, sucesso, execuções limpas, CCT e aderência de grupos.
+  - Algoritmos passam a ser classificados como acima do baseline, monitorar ou abaixo do baseline com heurística explícita baseada em score e penalidades.
+  - Helper histórico ganhou baseline operacional + auditoria por algoritmo, com suite atualizada para 6/6 testes passando.
+  - Build de produção do frontend validado após a nova seção analítica na tela de relatórios.
+- **Persistência explícita e visualização de Profile Id/Name concluída**:
+  - Colunas `profileId` (indexado) e `profileName` adicionadas à tabela e entidade `OptimizationRun`.
+  - Service injeta ativamente os nomes de perfil durante inicialização (`PENDING`) e execução.
+  - Helper do frontend com fallback legado normaliza IDs/Nomes sem crashes para dados antigos.
+  - Filtros ativos e botão "Limpar filtros" injetados via chips visuais na tela de relatórios.
+  - Relatório QA visual validado (via render response).
+- **Avanço para Infraestrutura de Produção e Limpeza Técnica Concluídos**:
+  - Limpeza profunda de mais de 50+ scripts de debug perdidos na raiz e pastas internas do `optimizer`.
+  - Configuração de deployment unificada via `docker-compose.yml` (Postgres, Redis, Optimizer, Backend e Frontend).
+  - Proxy reverso NGINX configurado (`nginx.conf`) para envelopar todo o stack simulando ambiente de produção.
+  - Implementação tática de endpoints de monitoramento de integridade`/health` estendida ao Backend NestJS (`AppController`) e no ambiente Next.js Frontend (`app/api/health/route.ts`).
 
 ## Fazendo agora
-- Finalização da iteração com export + performance profiler.
+- Revisão das execuções e lógica focada em melhorias do Algoritmo Genético do otimizador e logging avançado.
 
 ## Proximo
-- Dashboard resumitivo de KPIs com visualizações históricas
-- Integração com API para sync de dados em tempo real
-- Refatoração de cache para otimizar queries em grande volume
+- Otimizar o Genetic Algorithm e integrar logs de monitoramento no optimizer.

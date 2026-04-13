@@ -47,8 +47,11 @@ export function profileGanttRender(blockCount: number): PerformanceMetrics {
   };
 
   // Capturar memória se disponível
-  if ((performance as any).memory) {
-    const memInfo = (performance as any).memory;
+  interface PerformanceWithMemory extends Performance {
+    memory: { usedJSHeapSize: number; jsHeapSizeLimit: number };
+  }
+  if ('memory' in performance) {
+    const memInfo = (performance as PerformanceWithMemory).memory;
     metrics.memory = {
       used: Math.round(memInfo.usedJSHeapSize / 1024 / 1024),
       limit: Math.round(memInfo.jsHeapSizeLimit / 1024 / 1024),

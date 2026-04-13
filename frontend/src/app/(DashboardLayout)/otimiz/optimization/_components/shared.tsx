@@ -2,7 +2,7 @@
 import React from 'react';
 import {
   Box, Grid, Typography, Stack, Tooltip, Chip, Paper,
-  useTheme,
+  useTheme, alpha,
 } from '@mui/material';
 import {
   IconCurrencyDollar, IconBus, IconUsers, IconShieldCheck,
@@ -120,22 +120,91 @@ export function TripTimeline({ trips, start, end, totalDuration }: { trips: Trip
 
 // ─── KpiStrip ────────────────────────────────────────────────────────────────
 export function KpiStrip({ res, run }: { res: OptimizationResultSummary; run: OptimizationRun }) {
+  const theme = useTheme();
+  const isDark = theme.palette.mode === 'dark';
+
   const items = [
-    { label: 'Custo Total', value: fmtCurrency(run.totalCost ?? res.total_cost ?? res.totalCost), color: 'primary.main', icon: <IconCurrencyDollar size={20} /> },
-    { label: 'Veículos (VSP)', value: run.totalVehicles ?? res.vehicles ?? res.num_vehicles ?? '--', color: 'info.main', icon: <IconBus size={20} /> },
-    { label: 'Tripulantes (CSP)', value: run.totalCrew ?? res.crew ?? res.num_crew ?? '--', color: 'success.main', icon: <IconUsers size={20} /> },
-    { label: 'Violações CCT', value: run.cctViolations ?? res.cct_violations ?? res.cctViolations ?? 0, color: (run.cctViolations ?? res.cct_violations ?? res.cctViolations ?? 0) > 0 ? 'error.main' : 'success.main', icon: <IconShieldCheck size={20} /> },
+    { 
+      label: 'Custo Total', 
+      value: fmtCurrency(run.totalCost ?? res.total_cost ?? res.totalCost), 
+      color: theme.palette.primary.main, 
+      icon: <IconCurrencyDollar size={24} stroke={1.5} />,
+      bgColor: alpha(theme.palette.primary.main, 0.05)
+    },
+    { 
+      label: 'Veículos (VSP)', 
+      value: run.totalVehicles ?? res.vehicles ?? res.num_vehicles ?? '--', 
+      color: theme.palette.info.main, 
+      icon: <IconBus size={24} stroke={1.5} />,
+      bgColor: alpha(theme.palette.info.main, 0.05)
+    },
+    { 
+      label: 'Tripulantes (CSP)', 
+      value: run.totalCrew ?? res.crew ?? res.num_crew ?? '--', 
+      color: theme.palette.success.main, 
+      icon: <IconUsers size={24} stroke={1.5} />,
+      bgColor: alpha(theme.palette.success.main, 0.05)
+    },
+    { 
+      label: 'Violações CCT', 
+      value: run.cctViolations ?? res.cct_violations ?? res.cctViolations ?? 0, 
+      color: (run.cctViolations ?? res.cct_violations ?? res.cctViolations ?? 0) > 0 ? theme.palette.error.main : theme.palette.success.main, 
+      icon: <IconShieldCheck size={24} stroke={1.5} />,
+      bgColor: (run.cctViolations ?? res.cct_violations ?? res.cctViolations ?? 0) > 0 ? alpha(theme.palette.error.main, 0.05) : alpha(theme.palette.success.main, 0.05)
+    },
   ];
+
   return (
-    <Grid container spacing={2} mb={3}>
+    <Grid container spacing={2.5} mb={4}>
       {items.map((it) => (
-        <Grid item xs={6} sm={3} key={it.label}>
-          <Paper variant="outlined" sx={{ ...kpiCardSx, borderLeftColor: it.color }}>
-            <Stack direction="row" justifyContent="center" alignItems="center" gap={0.5} mb={0.5}>
-              <Box sx={{ color: it.color }}>{it.icon}</Box>
-              <Typography variant="caption" fontWeight={700} color="text.secondary">{it.label}</Typography>
+        <Grid item xs={12} sm={6} md={3} key={it.label}>
+          <Paper 
+            variant="outlined" 
+            sx={{ 
+              p: 2.5,
+              borderRadius: 4,
+              border: '1px solid',
+              borderColor: alpha(it.color, 0.2),
+              bgcolor: isDark ? alpha(it.color, 0.03) : '#fff',
+              boxShadow: '0 2px 10px rgba(0,0,0,0.02)',
+              position: 'relative',
+              overflow: 'hidden',
+              transition: 'transform 0.2s ease-in-out, box-shadow 0.2s',
+              '&:hover': {
+                transform: 'translateY(-2px)',
+                boxShadow: `0 8px 24px ${alpha(it.color, 0.12)}`,
+                borderColor: alpha(it.color, 0.5),
+              }
+            }}
+          >
+            {/* Background Accent */}
+            <Box sx={{ 
+              position: 'absolute', top: -20, right: -20, 
+              width: 80, height: 80, 
+              borderRadius: '50%', 
+              bgcolor: alpha(it.color, 0.05),
+              zIndex: 0
+            }} />
+
+            <Stack direction="row" alignItems="center" spacing={2} sx={{ position: 'relative', zIndex: 1 }}>
+              <Box sx={{ 
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                width: 48, height: 48, borderRadius: 3,
+                bgcolor: it.bgColor, color: it.color,
+                boxShadow: `0 4px 12px ${alpha(it.color, 0.1)}`
+              }}>
+                {it.icon}
+              </Box>
+              
+              <Box>
+                <Typography variant="overline" sx={{ fontWeight: 800, color: 'text.secondary', lineHeight: 1.2, display: 'block', mb: 0.5, letterSpacing: 0.5 }}>
+                  {it.label}
+                </Typography>
+                <Typography variant="h4" sx={{ fontWeight: 900, letterSpacing: -0.5, color: 'text.primary' }}>
+                  {it.value}
+                </Typography>
+              </Box>
             </Stack>
-            <Typography variant="h5" fontWeight={800}>{it.value}</Typography>
           </Paper>
         </Grid>
       ))}

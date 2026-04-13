@@ -81,12 +81,15 @@ export const SPACING_SCALES = {
  * Helper para aplicar tipografia com classe/sx
  */
 export function getTypographySx(scale: keyof typeof TYPOGRAPHY_SCALES) {
-  const s = TYPOGRAPHY_SCALES[scale];
+  const s = TYPOGRAPHY_SCALES[scale] as {
+    fontSize: string; fontWeight: number; lineHeight: number;
+    letterSpacing?: number; textTransform?: string; opacity?: number;
+  };
   return {
     fontSize: s.fontSize,
     fontWeight: s.fontWeight,
-    letterSpacing: (s as any).letterSpacing || 0,
-    textTransform: (s as any).textTransform || 'none',
+    letterSpacing: s.letterSpacing ?? 0,
+    textTransform: s.textTransform ?? 'none',
     lineHeight: s.lineHeight,
   };
 }

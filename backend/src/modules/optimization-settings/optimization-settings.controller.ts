@@ -62,6 +62,7 @@ export class OptimizationSettingsController {
     return this.service.create(
       resolveScopedCompanyId(req.user?.companyId, companyId, req.user?.role),
       dto,
+      req.user?.role,
     );
   }
 
@@ -76,6 +77,7 @@ export class OptimizationSettingsController {
       id,
       resolveScopedCompanyId(req.user?.companyId, companyId, req.user?.role),
       dto,
+      req.user?.role,
     );
   }
 

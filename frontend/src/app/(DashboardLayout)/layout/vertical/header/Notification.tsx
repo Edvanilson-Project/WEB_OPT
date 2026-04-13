@@ -1,5 +1,5 @@
 'use client';
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   IconButton,
   Box,
@@ -15,7 +15,8 @@ import Scrollbar from '@/app/components/custom-scroll/Scrollbar';
 import { IconBellRinging, IconCheck, IconX, IconLoader, IconBrain } from '@tabler/icons-react';
 import { Stack } from '@mui/system';
 import Link from 'next/link';
-import { optimizationApi, getSessionUser } from '@/lib/api';
+import { getSessionUser } from '@/lib/api';
+import { useOptimizationLiveSync } from '@/lib/query-hooks';
 
 interface RunNotif {
   id: number;
@@ -34,27 +35,24 @@ const STATUS_CONFIG: Record<string, { color: string; icon: React.ReactNode }> = 
 
 const Notifications = () => {
   const [anchorEl2, setAnchorEl2] = useState(null);
-  const [runs, setRuns] = useState<RunNotif[]>([]);
-
-  const loadRuns = useCallback(async () => {
-    try {
-      const data = await optimizationApi.getAll({ companyId: getSessionUser()?.companyId ?? 1 });
-      const arr = Array.isArray(data) ? data : (data as any)?.data ?? [];
-      setRuns(arr.slice(0, 5).map((r: any) => ({
-        id: r.id,
-        status: r.status,
-        vehicles: r.resultSummary?.vehicles ?? r.totalVehicles,
-        crew: r.resultSummary?.crew ?? r.totalCrew,
-        createdAt: r.createdAt,
-      })));
-    } catch { /* ignore */ }
-  }, []);
-
-  useEffect(() => { loadRuns(); }, [loadRuns]);
+  const companyId = getSessionUser()?.companyId;
+  const { runs: rawRuns, refetch } = useOptimizationLiveSync(companyId, {
+    idleIntervalMs: 30_000,
+    liveIntervalMs: 5_000,
+  });
+  const runs = useMemo<RunNotif[]>(() => {
+    return (rawRuns as Array<Record<string, any>>).slice(0, 5).map((run) => ({
+      id: Number(run.id),
+      status: String(run.status ?? 'pending'),
+      vehicles: run.resultSummary?.vehicles ?? run.totalVehicles,
+      crew: run.resultSummary?.crew ?? run.totalCrew,
+      createdAt: String(run.createdAt ?? ''),
+    }));
+  }, [rawRuns]);
 
   const handleClick2 = (event: any) => {
     setAnchorEl2(event.currentTarget);
-    loadRuns();
+    void refetch();
   };
   const handleClose2 = () => { setAnchorEl2(null); };
 

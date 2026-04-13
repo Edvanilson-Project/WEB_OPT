@@ -1,5 +1,11 @@
 import type { OptimizationResultSummary } from '../../_types';
 
+interface TripWithTimes {
+  start_time: number;
+  end_time: number;
+  destination_terminal_id?: number | null;
+}
+
 export interface OperationalConflict {
   type: 'overlap' | 'time-violation' | 'no-return' | 'break-violation' | 'unrealistic';
   severity: 'error' | 'warning';
@@ -18,17 +24,17 @@ export function detectOperationalConflicts(res: OptimizationResultSummary): Oper
 
   // Check each block for conflicts
   blocks.forEach((block) => {
-    const trips = (block.trips || [])
-      .map(t => (typeof t === 'object' ? t : { id: t }))
-      .filter(t => t && typeof t === 'object' && 'start_time' in t && 'end_time' in t)
-      .sort((a, b) => ((a as any).start_time ?? 0) - ((b as any).start_time ?? 0));
+    const trips: TripWithTimes[] = (block.trips || [])
+      .filter(t => typeof t === 'object' && t != null && 'start_time' in t && 'end_time' in t)
+      .map(t => t as unknown as TripWithTimes)
+      .sort((a, b) => a.start_time - b.start_time);
 
     // Detect overlapping trips (impossible state)
     for (let i = 0; i < trips.length - 1; i++) {
-      const current = trips[i] as any;
-      const next = trips[i + 1] as any;
-      
-      if ((current.end_time ?? 0) > (next.start_time ?? 0)) {
+      const current = trips[i];
+      const next = trips[i + 1];
+
+      if (current.end_time > next.start_time) {
         conflicts.push({
           type: 'overlap',
           severity: 'error',
@@ -40,7 +46,7 @@ export function detectOperationalConflicts(res: OptimizationResultSummary): Oper
       }
 
       // Detect unrealistic gaps (< 2 minutes between trips)
-      const gap = (next.start_time ?? 0) - (current.end_time ?? 0);
+      const gap = next.start_time - current.end_time;
       if (gap < 2 && gap >= 0) {
         conflicts.push({
           type: 'unrealistic',
@@ -55,14 +61,14 @@ export function detectOperationalConflicts(res: OptimizationResultSummary): Oper
 
     // Detect break violations (no break > 15 min in 6-hour window)
     if (trips.length >= 2) {
-      const blockStart = (trips[0] as any).start_time ?? 0;
-      const blockEnd = (trips[trips.length - 1] as any).end_time ?? 0;
+      const blockStart = trips[0].start_time;
+      const blockEnd = trips[trips.length - 1].end_time;
       const blockDuration = blockEnd - blockStart;
 
       if (blockDuration >= 360) { // 6 hours
         let maxGap = 0;
         for (let i = 0; i < trips.length - 1; i++) {
-          const gap = ((trips[i + 1] as any).start_time ?? 0) - ((trips[i] as any).end_time ?? 0);
+          const gap = trips[i + 1].start_time - trips[i].end_time;
           maxGap = Math.max(maxGap, gap);
         }
 
@@ -79,7 +85,7 @@ export function detectOperationalConflicts(res: OptimizationResultSummary): Oper
     }
 
     // Detect missing return to depot (last trip not ending at depot)
-    const lastTrip = trips[trips.length - 1] as any;
+    const lastTrip = trips[trips.length - 1];
     if (lastTrip && lastTrip.destination_terminal_id && lastTrip.destination_terminal_id !== 1) {
       // Assuming terminal_id 1 is depot/garagem
       conflicts.push({

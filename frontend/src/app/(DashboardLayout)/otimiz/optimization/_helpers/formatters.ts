@@ -200,15 +200,17 @@ export function getDutyDisplayWindow(duty: OptimizationDuty): { start: number | 
 }
 
 export function getBlockDisplayWindow(block: OptimizationBlock | Record<string, any>): { start: number | null; end: number | null } {
-  const meta = asRecord((block as any).meta);
+  const b = block as Record<string, unknown>;
+  const meta = asRecord(b.meta as Record<string, unknown> | undefined);
   return {
-    start: toMinuteValue(meta?.operational_start_minutes) ?? toMinuteValue((block as any).start_time),
-    end: toMinuteValue(meta?.operational_end_minutes) ?? toMinuteValue((block as any).end_time),
+    start: toMinuteValue(meta?.operational_start_minutes) ?? toMinuteValue(b.start_time as number | undefined),
+    end: toMinuteValue(meta?.operational_end_minutes) ?? toMinuteValue(b.end_time as number | undefined),
   };
 }
 
 export function getTripPublicId(trip: Partial<TripDetail> | Record<string, any>): number | null {
-  const value = (trip as any).trip_id ?? (trip as any).id;
+  const t = trip as Partial<TripDetail>;
+  const value = t.trip_id ?? t.id;
   return Number.isFinite(Number(value)) ? Number(value) : null;
 }
 
