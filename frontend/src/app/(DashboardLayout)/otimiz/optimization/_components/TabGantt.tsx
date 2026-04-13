@@ -70,7 +70,7 @@ export function TabGantt({
   const [isEvaluating, setIsEvaluating] = useState(false);
   const [deltaResult, setDeltaResult] = useState<any>(null);
   const [deltaError, setDeltaError] = useState<string | null>(null);
-  const [snackbar, setSnackbar] = useState<{ open: boolean; message: string; severity: 'success' | 'error' | 'info' }>({ open: false, message: '', severity: 'info' });
+  const [snackbar, setSnackbar] = useState<{ open: boolean; message: string; severity: 'success' | 'error' | 'info' | 'warning' }>({ open: false, message: '', severity: 'info' });
   
   const { blocks = [], duties = [] } = res;
   const ganttColors = useMemo(() => getGanttColors(theme), [theme]);
@@ -294,7 +294,7 @@ export function TabGantt({
     setDeltaError(null);
     
     try {
-      const blocksPayload = res.blocks.map((b: any) => ({
+      const blocksPayload = (res.blocks || []).map((b: any) => ({
         id: b.id,
         trips: (b.trips || []).map((t: any) => {
           const trip = typeof t === 'object' ? t : {};
@@ -318,32 +318,31 @@ export function TabGantt({
         source_block_id: sourceBlockId,
         target_block_id: targetBlockId,
         target_index: targetIndex,
-        company_id: res.company_id,
       };
       
       const result = await optimizationApi.evaluateDelta(payload);
       setDeltaResult(result);
       
-      const prevCost = res.cost_breakdown?.total || 0;
-      const newCost = result.cost_breakdown?.total || 0;
+      const prevCost = res.costBreakdown?.total || 0;
+      const newCost = result.cost_breakdown?.total || result.costBreakdown?.total || 0;
       const costDiff = newCost - prevCost;
       
       if (costDiff > 0) {
         setSnackbar({
           open: true,
-          message: `Custo erhöht: +${costDiff.toFixed(2)} (${prevCost.toFixed(2)} → ${newCost.toFixed(2)})`,
+          message: `Custo aumentou: +${costDiff.toFixed(2)} (${prevCost.toFixed(2)} -> ${newCost.toFixed(2)})`,
           severity: 'warning',
         });
       } else if (costDiff < 0) {
         setSnackbar({
           open: true,
-          message: `Custo reduzido: ${costDiff.toFixed(2)} (${prevCost.toFixed(2)} → ${newCost.toFixed(2)})`,
+          message: `Custo reduzido: ${costDiff.toFixed(2)} (${prevCost.toFixed(2)} -> ${newCost.toFixed(2)})`,
           severity: 'success',
         });
       } else {
         setSnackbar({
           open: true,
-          message: 'Sem alteração de custo',
+          message: 'Sem alteracao de custo',
           severity: 'info',
         });
       }
@@ -359,7 +358,7 @@ export function TabGantt({
     }
   }, [res]);
 
-  // Expor função de drop via window (para integração com drag handlers)
+  // Expor funcao de drop via window (para integracao com drag handlers)
   if (typeof window !== 'undefined') {
     (window as any).__otimizWhatIf = handleWhatIfDrop;
   }

@@ -35,6 +35,7 @@ describe('OptimizationService audit and compare', () => {
     {} as any, // linesService
     {} as any, // terminalsService
     {} as any, // vehicleTypesService
+    { post: jest.fn(), get: jest.fn() } as any, // httpService
   );
 
   beforeEach(() => {
