@@ -11,9 +11,10 @@ interface Props {
   color: string;
   trend?: number;   // Percentual de variação (positivo/negativo)
   loading?: boolean;
+  trendLabel?: string;
 }
 
-export default function KpiCard({ title, value, subtitle, icon, color, trend, loading }: Props) {
+export default function KpiCard({ title, value, subtitle, icon, color, trend, loading, trendLabel = 'vs. mês anterior' }: Props) {
   const trendPositive = trend !== undefined && trend > 0;
   const trendNeutral  = trend === undefined || trend === 0;
 
@@ -61,7 +62,7 @@ export default function KpiCard({ title, value, subtitle, icon, color, trend, lo
                   </Typography>
                 </Box>
                 <Typography variant="caption" color="text.secondary">
-                  vs. mês anterior
+                  {trendLabel}
                 </Typography>
               </Stack>
             )}

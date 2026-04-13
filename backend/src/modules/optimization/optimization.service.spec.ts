@@ -8,8 +8,10 @@ import {
 
 describe('OptimizationService audit and compare', () => {
   const runRepo = {
+    create: jest.fn(),
     find: jest.fn(),
     findOne: jest.fn(),
+    save: jest.fn(),
     update: jest.fn(),
   };
 
@@ -37,10 +39,77 @@ describe('OptimizationService audit and compare', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    runRepo.create.mockImplementation((payload: unknown) => payload);
     runRepo.find.mockResolvedValue([]);
+    runRepo.save.mockImplementation(async (payload: Record<string, unknown>) => ({
+      id: 999,
+      ...payload,
+    }));
     runRepo.update.mockResolvedValue(undefined);
     settingsService.findActive.mockResolvedValue(null);
     configService.get.mockReturnValue('http://localhost:8000');
+  });
+
+  it('persists profile metadata on pending runs before background execution starts', async () => {
+    settingsService.findActive.mockResolvedValue({
+      id: 12,
+      name: 'Perfil Pico Semana',
+      timeBudgetSeconds: 180,
+    });
+    const executeSpy = jest
+      .spyOn(service as any, '_executeOptimization')
+      .mockResolvedValue(undefined);
+
+    const saved = await service.startOptimization(
+      {
+        companyId: 1,
+        lineId: 16,
+        scheduleId: 3,
+        algorithm: OptimizationAlgorithm.HYBRID_PIPELINE,
+        name: 'Teste pendente',
+      } as any,
+      44,
+    );
+
+    expect(runRepo.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        lineId: 16,
+        lineIds: null,
+        scheduleId: 3,
+        profileId: 12,
+        profileName: 'Perfil Pico Semana',
+        status: OptimizationStatus.PENDING,
+        triggeredByUserId: 44,
+        params: expect.objectContaining({
+          settingsSnapshot: expect.objectContaining({
+            id: 12,
+            name: 'Perfil Pico Semana',
+          }),
+        }),
+      }),
+    );
+    expect(runRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        profileId: 12,
+        profileName: 'Perfil Pico Semana',
+      }),
+    );
+    expect(executeSpy).toHaveBeenCalledWith(
+      999,
+      expect.objectContaining({
+        companyId: 1,
+        lineId: 16,
+        scheduleId: 3,
+      }),
+      expect.objectContaining({
+        id: 12,
+        name: 'Perfil Pico Semana',
+      }),
+    );
+    expect(saved.profileId).toBe(12);
+    expect(saved.profileName).toBe('Perfil Pico Semana');
+
+    executeSpy.mockRestore();
   });
 
   it('respects persisted operational and validation flags from active settings in optimizer payload', async () => {
@@ -57,6 +126,7 @@ describe('OptimizationService audit and compare', () => {
     ]);
     settingsService.findActive.mockResolvedValue({
       id: 99,
+      name: 'Perfil Operacional Rígido',
       allowReliefPoints: true,
       operatorChangeTerminalsOnly: true,
       operatorSingleVehicleOnly: false,
@@ -88,6 +158,19 @@ describe('OptimizationService audit and compare', () => {
         }),
         vsp_params: expect.objectContaining({
           strict_hard_validation: false,
+        }),
+      }),
+    );
+    expect(runRepo.update).toHaveBeenCalledWith(
+      501,
+      expect.objectContaining({
+        profileId: 99,
+        profileName: 'Perfil Operacional Rígido',
+        params: expect.objectContaining({
+          settingsSnapshot: expect.objectContaining({
+            id: 99,
+            name: 'Perfil Operacional Rígido',
+          }),
         }),
       }),
     );
@@ -237,6 +320,8 @@ describe('OptimizationService audit and compare', () => {
 
     const audit = await service.getRunAudit(10);
 
+    expect(audit.profileId).toBe(5);
+    expect(audit.profileName).toBeNull();
     expect(audit.versioning.ruleHash).toBe('abc123');
     expect(audit.result.costBreakdown.total).toBe(45210);
     expect(audit.result.costBreakdown.vsp.idle_cost).toBe(1200);
@@ -524,6 +609,10 @@ describe('OptimizationService audit and compare', () => {
         totalCost: 1850,
         durationMs: 6400,
         params: {
+          settingsSnapshot: {
+            id: 18,
+            name: 'Perfil Histórico A',
+          },
           versioning: {
             inputHash: 'hist-input',
             ruleHash: 'hist-rule',
@@ -559,6 +648,8 @@ describe('OptimizationService audit and compare', () => {
     );
     expect(runs).toHaveLength(1);
     expect(runs[0].totalCost).toBe(1850);
+    expect((runs[0] as any).profileId).toBe(18);
+    expect((runs[0] as any).profileName).toBe('Perfil Histórico A');
     expect((runs[0].resultSummary as any).reproducibility.input_hash).toBe(
       'hist-input',
     );
@@ -620,6 +711,8 @@ describe('OptimizationService audit and compare', () => {
     expect(runRepo.update).toHaveBeenCalledWith(
       77,
       expect.objectContaining({
+        profileId: null,
+        profileName: null,
         params: expect.objectContaining({
           requested: expect.objectContaining({
             lineId: 16,

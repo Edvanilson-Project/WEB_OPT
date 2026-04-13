@@ -6,6 +6,7 @@ import {
   Box,
   FormControlLabel,
   InputAdornment,
+  MenuItem,
   Stack,
   Switch,
   TextField,
@@ -162,5 +163,40 @@ export function SectionPanel({
         {children}
       </AccordionDetails>
     </Accordion>
+  );
+}
+
+export function SelectField({
+  label,
+  fieldKey,
+  value,
+  onChange,
+  options,
+  dense = false,
+}: {
+  label: string;
+  fieldKey: HelpFieldKey;
+  value: string;
+  onChange: (value: string) => void;
+  options: { value: string; label: string }[];
+  dense?: boolean;
+}) {
+  const meta = FIELD_HELP[fieldKey];
+  return (
+    <TextField
+      select
+      fullWidth
+      size="small"
+      label={<FieldLabel text={label} meta={meta} />}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      sx={dense ? { '& .MuiInputBase-input': { py: '8px' } } : undefined}
+    >
+      {options.map((opt) => (
+        <MenuItem key={opt.value} value={opt.value}>
+          {opt.label}
+        </MenuItem>
+      ))}
+    </TextField>
   );
 }

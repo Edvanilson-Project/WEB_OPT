@@ -62,6 +62,14 @@ class MCNFVSP(BaseAlgorithm, IVSPAlgorithm):
         max_shift = int(self._p("max_vehicle_shift_minutes", 960))
         allow_multi = bool(self._p("allow_multi_line_block", True))
         connection_tolerance = int(self._p("connection_tolerance_minutes", 0))
+        pullout_m = int(self._p("pullout_minutes", 10))
+        pullback_m = int(self._p("pullback_minutes", 10))
+        garage_return_cost = (pullout_m + pullback_m) * deadhead_cost
+        
+        # Split Shift window (igual ao greedy)
+        allow_split = bool(self._p("allow_vehicle_split_shifts", True))
+        split_min = int(self._p("split_shift_min_gap_minutes", 120))
+        split_max = int(self._p("split_shift_max_gap_minutes", 600))
         
         # Custo Infinito para matriz de penalização
         INF = 1e9
@@ -100,6 +108,16 @@ class MCNFVSP(BaseAlgorithm, IVSPAlgorithm):
                 # Calcula o Custo (Deadhead + Horas Ociosas)
                 idle = gap - dh
                 cost = (dh * deadhead_cost) + (idle * idle_cost)
+                
+                # Se for uma janela de Split Shift, aplicamos a política de recolhimento
+                if allow_split and split_min <= gap <= split_max:
+                    garage_policy = self._p("vsp_garage_return_policy", "smart")
+                    if garage_policy == "always":
+                        cost = garage_return_cost
+                    elif garage_policy == "never":
+                        pass # idle_cost (calculado acima)
+                    else: # smart
+                        cost = min(cost, garage_return_cost)
                 
                 # Bonus para emparelhamento perfeito (Trips idênticos / voltas de linha)
                 if trips_sorted[i].destination_id == trips_sorted[j].origin_id:

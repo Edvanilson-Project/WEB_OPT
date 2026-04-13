@@ -24,6 +24,7 @@ VERSÃO: Optibus Performance Edition
 from __future__ import annotations
 
 import logging
+import random
 import time
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Set, Generator
 from collections import defaultdict
@@ -105,6 +106,7 @@ class SetPartitioningOptimizedCSP(BaseAlgorithm, ICSPAlgorithm):
         self._max_columns_base = max(8, int(self.vsp_params.get("max_generated_columns", 6000)))
         self.max_pricing_iterations = max(0, int(self.vsp_params.get("max_pricing_iterations", 1 if self.pricing_enabled else 0)))
         self.max_pricing_additions = max(1, int(self.vsp_params.get("max_pricing_additions", 512)))
+        self.enable_exploration_noise = bool(self.vsp_params.get("enable_exploration_noise", True))
 
         # Caches para memoização (reduzem recálculos em 40-60%)
         self._can_extend_cache: Dict[Tuple[int, int], Tuple[bool, str, Dict]] = {}
@@ -376,6 +378,8 @@ class SetPartitioningOptimizedCSP(BaseAlgorithm, ICSPAlgorithm):
                 # SCORE: Combinação de gap e transferência passiva
                 # Quanto menor o score, melhor a conexão
                 score = float(data.get("gap", 0)) + float(data.get("passive_transfer", 0)) * 5.0
+                if self.enable_exploration_noise:
+                    score += random.uniform(0.0, 3.0)
                 feasible.append((score, nxt))
 
             # Ordena pelo melhor score e limita ao máximo de sucessores
@@ -758,7 +762,7 @@ class SetPartitioningOptimizedCSP(BaseAlgorithm, ICSPAlgorithm):
         ))
 
         # Custo Penalizador para variáveis Elásticas/Slack
-        BIG_M = 100000.0
+        BIG_M = 1000000.0
 
         for iteration in range(pricing_rounds):
             _log.debug(f"Pricing iteração {iteration + 1}/{pricing_rounds}")
@@ -850,10 +854,12 @@ class SetPartitioningOptimizedCSP(BaseAlgorithm, ICSPAlgorithm):
             msg=0, 
             keepFiles=False,
             # Parâmetros de Robustez para Fechar o Gap Optibus-Like
-            gapRel=0.01,         # Fecha ao atingir 1% de distância do limiar ótimo
+            gapRel=0.001,        # Fecha ao atingir 0.1% de distância do limiar ótimo
             cuts=True,           # Libera Gomory / MIR Cuts
             presolve=True,       # Consolida matriz antes de iniciar Solver Nodes
-            warmStart=True
+            warmStart=True,
+            strong=5,
+            options=["-heuristicsOnOff", "on"],
         ))
         
         self._phase_times["ilp_solve"] = time.time() - start_ilp

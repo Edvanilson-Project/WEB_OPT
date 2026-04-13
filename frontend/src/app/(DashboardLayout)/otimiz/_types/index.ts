@@ -118,6 +118,9 @@ export interface OptimizationRun {
   id: number;
   lineId?: number | null;
   lineIds?: number[] | null;
+  scheduleId?: number | null;
+  profileId?: number | null;
+  profileName?: string | null;
   line?: Line;
   companyId: number;
   algorithm: OptimizationAlgorithm;
@@ -313,6 +316,8 @@ export interface OptimizationResultSummary {
   reproducibility?: OptimizationReproducibility | null;
   performance?: OptimizationPerformance | null;
   hardConstraintReport?: Record<string, unknown> | null;
+  metadata?: Record<string, unknown> | null;
+  meta?: Record<string, unknown> | null;
 }
 
 export interface OptimizationRunComparisonPerformance {
@@ -346,8 +351,8 @@ export interface OptimizationBlock {
   trips: number[] | TripDetail[];
   trip_details?: TripDetail[];
   num_trips?: number;
-  start_time: number;
-  end_time: number;
+  start_time?: number;
+  end_time?: number;
   spread_minutes?: number;
   idle_minutes?: number;
   total_cost?: number;
@@ -403,16 +408,17 @@ export interface TripDetail {
   segment_count?: number;
   start_time: number;
   end_time: number;
-  origin_id: number | string;
-  destination_id: number | string;
+  origin_id?: number | string;
+  destination_id?: number | string;
   origin_name?: string;
   destination_name?: string;
-  duration: number;
+  duration?: number;
   line_id?: number | null;
   is_pull_out?: boolean;
   is_pull_back?: boolean;
   is_paired?: boolean;
   direction?: 'outbound' | 'inbound';
+  destination_terminal_id?: number | null;
 }
 
 export interface OptimizationRunAudit {
@@ -422,6 +428,8 @@ export interface OptimizationRunAudit {
   algorithm: OptimizationAlgorithm;
   lineId?: number | null;
   lineIds?: number[] | null;
+  profileId?: number | null;
+  profileName?: string | null;
   createdAt?: string;
   startedAt?: string;
   finishedAt?: string;
@@ -467,25 +475,48 @@ export interface OptimizationRunComparison {
 }
 
 export interface DashboardStats {
-  totalLines: number;
-  totalTerminals: number;
-  totalVehicleTypes: number;
-  totalOptimizationRuns: number;
+  totalRuns?: number;
+  completedRuns?: number;
+  totalLines?: number;
+  totalTerminals?: number;
+  totalVehicleTypes?: number;
+  totalOptimizationRuns?: number;
   lastRunAt?: string;
   lastRunVehicles?: number;
   lastRunCrew?: number;
   lastRunCost?: number;
-  recentRuns: OptimizationRun[];
+  lastOptimization?: {
+    id?: number;
+    date?: string;
+    vehicles?: number;
+    crew?: number;
+    cost?: number;
+    cctViolations?: number;
+  } | null;
+  recentRuns?: Array<OptimizationRun | Record<string, unknown>>;
+  total_lines?: number;
+  total_terminals?: number;
 }
 
 export interface KpiData {
   totalRuns: number;
   completedRuns: number;
+  failedRuns?: number;
   avgVehicles: number;
   avgCrew: number;
   avgCost: number;
   avgDurationMs: number;
-  successRate: number;
+  successRate: number | string;
+  totalTrips?: number;
+  totalLines?: number;
+  lastOptimization?: {
+    id?: number;
+    date?: string;
+    vehicles?: number;
+    crew?: number;
+    cost?: number;
+    cctViolations?: number;
+  } | null;
 }
 
 export interface HistoryPoint {
@@ -755,6 +786,20 @@ export interface OptimizationSettings {
   maxPricingAdditions?: number;
   connectionToleranceMinutes?: number;
   operationMode?: 'urban' | 'charter';
+  maxTimeoutMultiplier?: number;
+  fairnessTargetWorkMinutes?: number;
+  fairnessToleranceMinutes?: number;
+  maxUnpaidBreakMinutes?: number;
+  longUnpaidBreakLimitMinutes?: number;
+  longUnpaidBreakPenaltyWeight?: number;
+  maxConnectionCostForReuseRatio?: number;
+  goalWeightOvertime?: number;
+  goalWeightSpread?: number;
+  goalWeightMinWork?: number;
+  terminalCentralMinLayover?: number;
+  splitShiftMinGapMinutes?: number;
+  splitShiftMaxGapMinutes?: number;
+  vspGarageReturnPolicy?: 'smart' | 'always' | 'never';
   isActive: boolean;
   createdAt: string;
   updatedAt: string;

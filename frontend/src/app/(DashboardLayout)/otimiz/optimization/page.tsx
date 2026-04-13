@@ -16,7 +16,7 @@ import PageContainer from '@/app/components/container/PageContainer';
 import { OtimizPanel, OtimizToolbar } from '../_components/OtimizUI';
 import { NotifyProvider, useNotify } from '../_components/Notify';
 import { optimizationApi, getSessionUser } from '@/lib/api';
-import { useLines, useTerminals, useOptimizationRuns, useActiveSettings, useInvalidate, queryKeys } from '@/lib/query-hooks';
+import { useLines, useTerminals, useActiveSettings, useInvalidate, queryKeys, useOptimizationLiveSync } from '@/lib/query-hooks';
 import type {
   Line, OptimizationRun, Terminal,
   OptimizationAlgorithm,
@@ -38,12 +38,21 @@ function OptimizationInner() {
   const companyId = sessionUser?.companyId;
 
   // ── TanStack Query data ──
-  const { data: runsRaw, refetch: refetchRuns } = useOptimizationRuns({ refetchInterval: 5000 });
+  const {
+    activeRun: liveRun,
+    runs: syncedRuns,
+    refetch: refetchRuns,
+    syncIntervalMs,
+  } = useOptimizationLiveSync<OptimizationRun>(companyId, {
+    invalidateRelated: true,
+    idleIntervalMs: 30_000,
+    liveIntervalMs: 5_000,
+  });
   const { data: linesRaw } = useLines();
   const { data: terminalsRaw } = useTerminals();
   const { data: activeSettings } = useActiveSettings(companyId);
 
-  const runs: OptimizationRun[] = useMemo(() => runsRaw ? extractArray(runsRaw) : [], [runsRaw]);
+  const runs: OptimizationRun[] = useMemo(() => syncedRuns as OptimizationRun[], [syncedRuns]);
   const lines: Line[] = useMemo(() => linesRaw ? extractArray(linesRaw) : [], [linesRaw]);
   const terminals: Terminal[] = useMemo(() => terminalsRaw ? extractArray(terminalsRaw) : [], [terminalsRaw]);
 
@@ -58,7 +67,23 @@ function OptimizationInner() {
   const [historySearch, setHistorySearch] = useState('');
   const debouncedHistorySearch = useDebounce(historySearch, 300);
 
-  const loadAll = () => invalidate(queryKeys.runs, queryKeys.lines, queryKeys.terminals, queryKeys.settingsActive);
+  const blockingRun = useMemo(
+    () => (liveRun as OptimizationRun | null) ?? null,
+    [liveRun],
+  );
+
+  const loadAll = () => {
+    invalidate(
+      queryKeys.runs(companyId),
+      queryKeys.lines,
+      queryKeys.terminals,
+      [...queryKeys.settingsActive, companyId] as const,
+      queryKeys.optimizationDashboard(companyId),
+      queryKeys.optimizationKpis(companyId),
+      queryKeys.optimizationHistoryGroup(companyId),
+    );
+    void refetchRuns();
+  };
 
   const handleLaunch = async () => {
     if (!selectedLineIds.length) return notify.warning('Selecione ao menos uma linha.');
@@ -81,15 +106,31 @@ function OptimizationInner() {
       setSelectedLineIds([]);
       setRunName('');
       setOpenLaunchModal(false);
-      refetchRuns();
+      invalidate(
+        queryKeys.runs(companyId),
+        queryKeys.optimizationDashboard(companyId),
+        queryKeys.optimizationKpis(companyId),
+        queryKeys.optimizationHistoryGroup(companyId),
+      );
+      void refetchRuns();
     } catch { notify.error('Erro ao iniciar otimização.'); }
     finally { setLaunching(false); }
   };
 
-  const activeRun = runs.find(r => r.status === 'running');
-  const historyRuns = runs.filter(r => r.status !== 'running' && r.status !== 'failed');
+  const handleCancel = async (id: number) => {
+    if (!confirm(`Deseja realmente abortar a execução #${id}?`)) return;
+    try {
+      await optimizationApi.cancel(id);
+      notify.success('Execução cancelada com sucesso.');
+      loadAll();
+    } catch { notify.error('Erro ao cancelar execução.'); }
+  };
+
+  const runningRun = runs.find((run) => run.status === 'running') ?? null;
+  const historyRuns = runs.filter((run) => run.status !== 'running' && run.status !== 'pending' && run.status !== 'failed');
   const failedRuns = runs.filter(r => r.status === 'failed');
-  const viewRun = activeRun || selectedRun;
+  // Se houver uma selecionada manualmente, ela tem prioridade. Senão, mostra a ativa.
+  const viewRun = selectedRun || blockingRun;
 
   const [showFailed, setShowFailed] = useState(false);
 
@@ -98,13 +139,23 @@ function OptimizationInner() {
       <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" alignItems={{ xs: 'flex-start', md: 'center' }} mb={3} gap={2}>
         <Box>
           <Typography variant="h4" fontWeight={800} sx={{ letterSpacing: -0.5 }}>Cockpit de Otimização</Typography>
-          <Typography variant="body2" color="text.secondary" mt={0.5}>Gerencie e analise as execuções do motor VSP+CSP</Typography>
+          <Typography variant="body2" color="text.secondary" mt={0.75}>
+            Visão operacional clean para execução, análise e auditoria do motor VSP+CSP.
+          </Typography>
         </Box>
         <Stack direction="row" spacing={1.5} alignItems="center">
           <Chip label={activeSettings?.name ? `Perfil: ${activeSettings.name}` : 'Sem perfil'} color="secondary" variant="outlined" size="small" />
+          <Chip
+            label={blockingRun?.id != null
+              ? `${blockingRun.status === 'pending' ? 'Fila ativa' : 'Sync ao vivo'} · #${blockingRun.id} · ${Math.round(syncIntervalMs / 1000)}s`
+              : `Sync passivo · ${Math.round(syncIntervalMs / 1000)}s`}
+            color={blockingRun ? 'warning' : 'default'}
+            variant="outlined"
+            size="small"
+          />
           <Tooltip title="Recarregar"><IconButton onClick={loadAll} size="small" sx={{ border: '1px solid', borderColor: 'divider', bgcolor: 'background.paper' }}><IconRefresh size={16} /></IconButton></Tooltip>
-          <Button variant="contained" startIcon={<IconPlayerPlay size={16} />} onClick={() => setOpenLaunchModal(true)} disabled={activeRun != null} sx={{ borderRadius: 2.5 }}>
-            Nova otimização
+          <Button variant="contained" startIcon={<IconPlayerPlay size={16} />} onClick={() => setOpenLaunchModal(true)} sx={{ borderRadius: 2.5 }}>
+            Otimizar
           </Button>
         </Stack>
       </Stack>
@@ -139,7 +190,7 @@ function OptimizationInner() {
                   </TableHead>
                   <TableBody>
                     {historyRuns
-                      .filter(r => !debouncedHistorySearch || String(r.id).includes(debouncedHistorySearch) || (r as any).name?.toLowerCase().includes(debouncedHistorySearch.toLowerCase()))
+                      .filter(r => !debouncedHistorySearch || String(r.id).includes(debouncedHistorySearch) || r.name?.toLowerCase().includes(debouncedHistorySearch.toLowerCase()))
                       .slice(0, 15).map((r) => (
                       <TableRow
                         key={r.id}
@@ -148,7 +199,7 @@ function OptimizationInner() {
                         sx={{ cursor: 'pointer', bgcolor: selectedRun?.id === r.id ? alpha(theme.palette.primary.main, 0.12) : 'inherit' }}
                       >
                         <TableCell sx={{ py: 1 }}>
-                          <Typography variant="caption" fontWeight={700}>#{r.id}{(r as any).name ? ` - ${(r as any).name}` : ''}</Typography>
+                          <Typography variant="caption" fontWeight={700}>#{r.id}{r.name ? ` - ${r.name}` : ''}</Typography>
                           <Typography variant="caption" color="text.secondary" display="block">{new Date(r.createdAt || '').toLocaleString('pt-BR')}</Typography>
                           <RunHistorySummary run={r} />
                         </TableCell>
@@ -197,17 +248,39 @@ function OptimizationInner() {
         </Grid>
 
         <Grid item xs={12} md={9}>
-          <OtimizPanel sx={{ minHeight: 400 }}>
+          <OtimizPanel sx={{ minHeight: 420 }}>
             {viewRun ? (
               <>
-                <Stack direction="row" justifyContent="space-between" alignItems="center" mb={2}>
+                <Stack direction="row" justifyContent="space-between" alignItems="center" mb={2.5}>
                   <Typography variant="h6" fontWeight={700}>
-                    {activeRun ? `⏳ Execução #${activeRun.id} em Andamento` : `Resultados — Execução #${selectedRun!.id}`}
+                    {viewRun
+                      ? viewRun.status === 'pending'
+                        ? `Execução #${viewRun.id} na fila`
+                        : viewRun.status === 'running'
+                        ? `Execução #${viewRun.id} em andamento`
+                        : `Resultados — Execução #${viewRun.id}`
+                      : `Resultados — Execução #${selectedRun!.id}`}
                   </Typography>
-                  {selectedRun && !activeRun && (
-                    <IconButton size="small" onClick={() => setSelectedRun(null)}><IconX size={18} /></IconButton>
-                  )}
+                  <Stack direction="row" spacing={1} alignItems="center">
+                    {viewRun?.id != null && (viewRun.status === 'running' || viewRun.status === 'pending') && (
+                      <Button 
+                        size="small" 
+                        color="error" 
+                        variant="outlined" 
+                        onClick={() => handleCancel(viewRun.id as number)}
+                        sx={{ height: 28, fontSize: '0.75rem', px: 1.5, borderRadius: 1.5 }}
+                      >
+                        Abortar
+                      </Button>
+                    )}
+                    {selectedRun && (
+                      <IconButton size="small" onClick={() => setSelectedRun(null)}><IconX size={18} /></IconButton>
+                    )}
+                  </Stack>
                 </Stack>
+                <Typography variant="caption" color="text.secondary" display="block" mb={1.5}>
+                  Detalhes não críticos ficam em tooltips e no painel lateral da aba Gantt para reduzir ruído visual.
+                </Typography>
                 <RunVisuals run={viewRun} lines={lines} terminals={terminals} allRuns={runs} activeSettings={activeSettings ?? null} />
               </>
             ) : (

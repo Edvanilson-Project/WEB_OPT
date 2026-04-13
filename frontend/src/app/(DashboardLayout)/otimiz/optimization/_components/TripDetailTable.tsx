@@ -207,8 +207,8 @@ export function TripDetailTable({
                 <TableCell sx={tdCompactSx}>{minToHHMM(t.end_time)}</TableCell>
                 <TableCell sx={tdCompactSx}>
                   <Typography variant="caption" display="block">{getTerminalDisplayName(t.origin_id, t.origin_name, terminalsMap)}</Typography>
-                  {(t as any).line_id && <Chip size="small" label={linesMap[(t as any).line_id] || (t as any).line_id} sx={{ height: 16, fontSize: 9 }} />}
-                  {(t as any).direction && <Typography variant="caption" color="text.secondary" ml={0.5}>{directionLabel((t as any).direction)}</Typography>}
+                  {t.line_id && <Chip size="small" label={linesMap[t.line_id] || String(t.line_id)} sx={{ height: 16, fontSize: 9 }} />}
+                  {t.direction && <Typography variant="caption" color="text.secondary" ml={0.5}>{directionLabel(t.direction)}</Typography>}
                 </TableCell>
                 <TableCell sx={tdCompactSx}>
                   <Typography variant="caption" display="block">{getTerminalDisplayName(t.destination_id, t.destination_name, terminalsMap)}</Typography>

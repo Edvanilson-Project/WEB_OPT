@@ -9,11 +9,22 @@ export function resolveScopedCompanyId(
 
   if (requestedCompanyId != null && requestedCompanyId !== '') {
     const parsedCompanyId = Number(requestedCompanyId);
-    if (!Number.isInteger(parsedCompanyId) || parsedCompanyId <= 0) {
+    if (!Number.isFinite(parsedCompanyId) || parsedCompanyId <= 0) {
       throw new BadRequestException('companyId inválido.');
     }
-    if (!isSuperAdmin && parsedCompanyId !== Number(userCompanyId)) {
-      throw new ForbiddenException('Acesso negado à empresa solicitada.');
+    
+    const userCid = userCompanyId != null ? Number(userCompanyId) : null;
+    
+    // Security Guard: Non-SuperAdmins MUST strictly match their own companyId
+    if (userRole !== 'super_admin') {
+      if (userCid == null) {
+        throw new ForbiddenException('Usuário sem empresa vinculada.');
+      }
+      if (parsedCompanyId !== userCid) {
+        // We FORCE the user's company ID instead of just throwing, 
+        // OR we throw to be safe. Throwing is more 'enterprise security'.
+        throw new ForbiddenException(`Acesso negado: Empresa ${parsedCompanyId} não pertence ao seu escopo.`);
+      }
     }
     return parsedCompanyId;
   }

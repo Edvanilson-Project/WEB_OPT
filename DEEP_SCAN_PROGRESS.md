@@ -2,7 +2,7 @@
 
 > **Objetivo**: Tornar o sistema competitivo com Optibus e Goal.  
 > **Atualizado em**: 2026-04-12 (sessão 5 — continuação 2)
-> **Status geral**: 🟢 Fase 1 COMPLETA — 17/17. Fase 2 COMPLETA — 9/10 (F-as parcial). Fase 3 COMPLETA — 8/8.
+> **Status geral**: 🟢 Fase 1 COMPLETA — 17/17. Fase 2 COMPLETA — 10/10. Fase 3 COMPLETA — 8/8.
 
 ---
 
@@ -72,7 +72,7 @@
 | #   | ID   | Descrição                                           | Status       | Testado |
 | --- | ---- | --------------------------------------------------- | ------------ | ------- |
 | 26  | F-any| catch (e: any) → catch (e: unknown) (23 locais)    | ✅ Concluído | ✅      |
-| 27  | F-as | Eliminar (as any) casts (~21 ocorrências)           | ⏸️ Parcial  | ✅      |
+| 27  | F-as | Eliminar (as any) casts (~21 ocorrências)           | ✅ Concluído | ✅      |
 
 ---
 

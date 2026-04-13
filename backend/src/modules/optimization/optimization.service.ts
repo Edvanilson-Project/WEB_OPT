@@ -1,9 +1,12 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
 import { createHash } from 'crypto';
 import * as http from 'http';
+import { plainToInstance } from 'class-transformer';
+import { validateOrReject } from 'class-validator';
+import { OptimizerPayloadDto } from './dto/optimizer-payload.dto';
 import {
   OptimizationRunEntity,
   OptimizationStatus,
@@ -58,8 +61,9 @@ export interface OptimizationResultPayload {
 }
 
 @Injectable()
-export class OptimizationService {
+export class OptimizationService implements OnModuleInit {
   private readonly logger = new Logger(OptimizationService.name);
+  private isProcessingQueue = false;
 
   constructor(
     @InjectRepository(OptimizationRunEntity)
@@ -71,6 +75,76 @@ export class OptimizationService {
     private readonly terminalsService: TerminalsService,
     private readonly vehicleTypesService: VehicleTypesService,
   ) {}
+
+  async onModuleInit() {
+    await this._cleanupZombieRuns();
+    // Inicia o processamento da fila caso existam itens PENDING
+    this._processNextInQueue();
+  }
+
+  private async _cleanupZombieRuns() {
+    this.logger.log('Limpando execuções de otimização travadas (zumbis)...');
+    const zombies = await this.runRepo.find({
+      where: [
+        { status: OptimizationStatus.RUNNING },
+        { status: OptimizationStatus.PENDING },
+      ],
+    });
+
+    if (zombies.length > 0) {
+      for (const run of zombies) {
+        run.status = OptimizationStatus.FAILED;
+        run.finishedAt = new Date();
+        run.errorMessage =
+          'Execução interrompida devido à reinicialização do sistema ou falha crítica.';
+        await this.runRepo.save(run);
+      }
+      this.logger.log(`${zombies.length} execuções marcadas como falhas.`);
+    }
+  }
+
+  private async _processNextInQueue() {
+    // Verifica se já existe algo rodando no banco (trava global)
+    const currentRunning = await this.runRepo.findOne({
+      where: { status: OptimizationStatus.RUNNING },
+    });
+    if (currentRunning) {
+      // Stale-run detection: run em execução há mais de 30 min é considerado zumbi
+      const STALE_THRESHOLD_MS = 30 * 60 * 1000;
+      const age = Date.now() - new Date(currentRunning.createdAt).getTime();
+      if (age > STALE_THRESHOLD_MS) {
+        this.logger.warn(`Run#${currentRunning.id} está em execução há ${Math.round(age / 60000)} min — marcando como FAILED (zumbi).`);
+        currentRunning.status = OptimizationStatus.FAILED;
+        currentRunning.finishedAt = new Date();
+        currentRunning.errorMessage = 'Execução encerrada automaticamente por timeout de fila (>30 min em RUNNING).';
+        await this.runRepo.save(currentRunning);
+        this.isProcessingQueue = false;
+        // Continua para processar o próximo pendente abaixo
+      } else {
+        this.logger.debug(`Fila aguardando: run#${currentRunning.id} ainda em execução.`);
+        return;
+      }
+    }
+
+    const nextPending = await this.runRepo.findOne({
+      where: { status: OptimizationStatus.PENDING },
+      order: { createdAt: 'ASC' },
+    });
+
+    if (nextPending) {
+      this.logger.log(`Iniciando próxima otimização na fila: run#${nextPending.id}`);
+      // Busca DTO e configurações para re-execução
+      // Como os params já estão salvos em nextPending.params.requested, podemos usá-los.
+      const params = nextPending.params as any;
+      const dto = params.requested as RunOptimizationDto;
+      const settings = params.settingsSnapshot as ActiveSettingsDto;
+
+      // Executa sem await para não travar o loop de verificação (embora o flag isProcessingQueue já proteja)
+      this._executeOptimization(nextPending.id, dto, settings).catch((err) => {
+        this.logger.error(`Erro na fila ao processar run#${nextPending.id}: ${err.message}`);
+      });
+    }
+  }
 
   /**
    * Inicia uma nova execução de otimização assíncrona.
@@ -91,16 +165,27 @@ export class OptimizationService {
     const algEnum = Object.values(OptimizationAlgorithm).includes(algStr)
       ? (algStr as OptimizationAlgorithm)
       : OptimizationAlgorithm.HYBRID_PIPELINE;
+    const activeSettings = await this.settingsService
+      .findActive(dto.companyId)
+      .catch(() => null);
+    const settingsSnapshot = activeSettings
+      ? this._cloneJson(activeSettings)
+      : null;
+    const { profileId, profileName } = this._extractProfileMetadata(
+      activeSettings,
+    );
 
     const run = this.runRepo.create({
       lineId: effectiveLineId,
       lineIds: effectiveLineIds,
       companyId: dto.companyId,
       scheduleId: dto.scheduleId,
+      profileId,
+      profileName,
       algorithm: algEnum,
       name: dto.name,
       status: OptimizationStatus.PENDING,
-      params: { vsp: dto.vspParams, csp: dto.cspParams },
+      params: { vsp: dto.vspParams, csp: dto.cspParams, settingsSnapshot, requested: dto },
       triggeredByUserId: userId,
     });
 
@@ -110,9 +195,9 @@ export class OptimizationService {
       : `linha ${effectiveLineId}`;
     this.logger.log(`Otimização iniciada: run#${saved.id} para ${lineDesc}`);
 
-    // Execução assíncrona – não aguardar
-    this._executeOptimization(saved.id, dto).catch((err) => {
-      this.logger.error(`Falha na otimização run#${saved.id}: ${err.message}`);
+    // Execução assíncrona – tenta processar se a fila estiver livre
+    this._processNextInQueue().catch((err) => {
+      this.logger.error(`Falha ao disparar processamento de fila: ${err.message}`);
     });
 
     return saved;
@@ -121,14 +206,28 @@ export class OptimizationService {
   private async _executeOptimization(
     runId: number,
     dto: RunOptimizationDto,
+    preloadedSettings?: ActiveSettingsDto | null,
   ): Promise<void> {
+    this.isProcessingQueue = true;
+    this.logger.log(`[EXECUTOR] Processando run#${runId}...`);
+    
     await this.runRepo.update(runId, {
       status: OptimizationStatus.RUNNING,
       startedAt: new Date(),
     });
-    let activeSettings: any = null;
+    let activeSettings: ActiveSettingsDto | null = preloadedSettings ?? null;
+    let activeProfileId: number | null = null;
+    let activeProfileName: string | null = null;
 
     try {
+      if (!activeSettings) {
+        activeSettings = await this.settingsService
+          .findActive(dto.companyId)
+          .catch(() => null);
+      }
+      ({ profileId: activeProfileId, profileName: activeProfileName } =
+        this._extractProfileMetadata(activeSettings));
+
       // Busca viagens para todas as linhas solicitadas
       const lineIdsToFetch: number[] = dto.lineIds?.length
         ? dto.lineIds
@@ -148,6 +247,8 @@ export class OptimizationService {
       const trips = tripsArrays.flat();
       const totalTripsCount = trips.length;
 
+      this.logger.debug(`[EXECUTOR] run#${runId}: Carregadas ${totalTripsCount} viagens de ${lineIdsToFetch.length} linhas.`);
+
       if (!totalTripsCount) {
         const desc =
           lineIdsToFetch.length > 1
@@ -161,9 +262,6 @@ export class OptimizationService {
         'OPTIMIZER_URL',
         'http://localhost:8000',
       );
-      activeSettings = await this.settingsService
-        .findActive(dto.companyId)
-        .catch(() => null);
 
       let result: any;
       try {
@@ -171,8 +269,7 @@ export class OptimizationService {
         const normalizeWeight = (value: any, fallback: number) => {
           const parsed = Number(value);
           if (!Number.isFinite(parsed)) return fallback;
-          if (parsed <= 0) return 0;
-          return parsed > 1 ? parsed / 100 : parsed;
+          return Math.max(0, Math.min(1, (parsed > 1 ? parsed / 100 : parsed))); // Clamp 0-1
         };
         const configuredFairness = normalizeWeight(
           activeSettings?.fairnessWeight,
@@ -229,10 +326,14 @@ export class OptimizationService {
           enforce_single_line_duty:
             activeSettings?.enforceSingleLineDuty ?? false,
           fairness_weight: fairnessWeight,
-          fairness_target_work_minutes: 420,
-          fairness_tolerance_minutes: 30,
-          long_unpaid_break_limit_minutes: 180,
-          long_unpaid_break_penalty_weight: 1.0,
+          fairness_target_work_minutes:
+            activeSettings?.fairnessTargetWorkMinutes ?? 420,
+          fairness_tolerance_minutes:
+            activeSettings?.fairnessToleranceMinutes ?? 30,
+          long_unpaid_break_limit_minutes:
+            activeSettings?.longUnpaidBreakLimitMinutes ?? 180,
+          long_unpaid_break_penalty_weight:
+            activeSettings?.longUnpaidBreakPenaltyWeight ?? 1.0,
           operator_change_terminals_only:
             activeSettings?.operatorChangeTerminalsOnly ?? true,
           operator_single_vehicle_only:
@@ -247,9 +348,9 @@ export class OptimizationService {
           holiday_extra_pct: activeSettings?.holidayExtraPct ?? 1.0,
           goal_weights: {
             fairness: fairnessWeight,
-            overtime: 0.8,
-            spread: 0.15,
-            min_work: 0.2,
+            overtime: activeSettings?.goalWeightOvertime ?? 0.8,
+            spread: activeSettings?.goalWeightSpread ?? 0.15,
+            min_work: activeSettings?.goalWeightMinWork ?? 0.2,
           },
           nocturnal_start_hour: activeSettings?.cctNocturnalStartHour ?? 22,
           nocturnal_end_hour: activeSettings?.cctNocturnalEndHour ?? 5,
@@ -282,7 +383,11 @@ export class OptimizationService {
                 max_unpaid_break_minutes: (cctOverride as any)
                   .maxUnpaidBreakMinutes,
               }
-            : { max_unpaid_break_minutes: opMode === 'charter' ? 600 : 360 }),
+            : {
+                max_unpaid_break_minutes:
+                  activeSettings?.maxUnpaidBreakMinutes ??
+                  (opMode === 'charter' ? 600 : 360),
+              }),
           ...(cctOverride.minShiftMinutes !== undefined && {
             min_shift_minutes: cctOverride.minShiftMinutes,
           }),
@@ -351,9 +456,21 @@ export class OptimizationService {
           ...(cctParams.goal_weights ?? {}),
         };
         cctParams.goal_weights = {
-          overtime: Number((mergedGoalWeights as any).overtime ?? 0.8),
-          spread: Number((mergedGoalWeights as any).spread ?? 0.15),
-          min_work: Number((mergedGoalWeights as any).min_work ?? 0.2),
+          overtime: Number(
+            (mergedGoalWeights as any).overtime ??
+              activeSettings?.goalWeightOvertime ??
+              0.8,
+          ),
+          spread: Number(
+            (mergedGoalWeights as any).spread ??
+              activeSettings?.goalWeightSpread ??
+              0.15,
+          ),
+          min_work: Number(
+            (mergedGoalWeights as any).min_work ??
+              activeSettings?.goalWeightMinWork ??
+              0.2,
+          ),
           fairness: fairnessOverride,
         };
 
@@ -372,9 +489,16 @@ export class OptimizationService {
           allow_multi_line_block: activeSettings?.allowMultiLineBlock ?? true,
           allow_vehicle_split_shifts:
             activeSettings?.allowVehicleSplitShifts ?? true,
-          split_shift_min_gap_minutes: 120,
-          split_shift_max_gap_minutes: 600,
-          max_connection_cost_for_reuse_ratio: 2.5,
+          split_shift_min_gap_minutes:
+            activeSettings?.splitShiftMinGapMinutes ?? 120,
+          split_shift_max_gap_minutes:
+            activeSettings?.splitShiftMaxGapMinutes ?? 600,
+          pullout_minutes: activeSettings?.pulloutMinutes ?? 10,
+          pullback_minutes: activeSettings?.pullbackMinutes ?? 10,
+          vsp_garage_return_policy:
+            activeSettings?.vspGarageReturnPolicy ?? 'smart',
+          max_connection_cost_for_reuse_ratio:
+            activeSettings?.maxConnectionCostForReuseRatio ?? 2.5,
           max_simultaneous_chargers:
             activeSettings?.maxSimultaneousChargers ?? 0,
           peak_energy_cost_per_kwh: activeSettings?.peakEnergyCostPerKwh ?? 0,
@@ -476,7 +600,8 @@ export class OptimizationService {
 
         // Gerar deadhead_times por viagem (do destination desta viagem para cada terminal)
         const minLayover = vspParams.min_layover_minutes ?? 10;
-        const terminalCentralMinLayover = 12; // Terminal Central (id=1): 12 min entre ida/volta
+        const terminalCentralMinLayover =
+          activeSettings?.terminalCentralMinLayover ?? 12; // Terminal Central (id=1)
 
         const buildDeadheadTimes = (
           destTerminal: number,
@@ -574,6 +699,8 @@ export class OptimizationService {
         };
 
         await this.runRepo.update(runId, {
+          profileId: activeProfileId,
+          profileName: activeProfileName,
           params: {
             requested: requestedParams,
             resolved: resolvedParams,
@@ -582,18 +709,26 @@ export class OptimizationService {
           } as any,
         });
 
+        // ── VALIDAÇÃO BLINDADA DO PAYLOAD (DEFENSIVA) ANTES DO ENVIO ── //
         try {
-          if (this.configService.get('DEBUG_DUMP_PAYLOAD', '') === 'true') {
-            try {
-              require('fs').writeFileSync(
-                '/tmp/optimizer_payload.json',
-                JSON.stringify(optimizerPayload, null, 2),
-              );
-            } catch { /* ignore dump errors */ }
-          }
+          const typedPayload = plainToInstance(OptimizerPayloadDto, optimizerPayload);
+          await validateOrReject(typedPayload);
+          this.logger.debug(`[EXECUTOR] run#${runId}: Payload validado com sucesso. Enviando para solver.`);
+        } catch (validationErrors) {
+          const errStr = JSON.stringify(validationErrors);
+          this.logger.error(`[EXECUTOR] run#${runId}: Tentativa de envio de parâmetros inválidos para o Optimizer. Payload: ${errStr}`);
+          throw new Error('Falha de Segurança/Validação (Enterprise Guard): Parâmetros mal formatados ou viagens corrompidas detectadas antes do envio.');
+        }
+
+        const budgetS = optimizerPayload.time_budget_s || 300;
+        const multiplier = activeSettings?.maxTimeoutMultiplier ?? 1.5;
+        const timeoutMs = Math.max(360000, budgetS * multiplier * 1000 + 60000);
+
+        try {
           result = await this._callOptimizerService(
             optimizerUrl,
             optimizerPayload,
+            timeoutMs,
           );
         } catch (optimizerRunErr) {
           const msg = (optimizerRunErr as Error).message ?? '';
@@ -617,6 +752,7 @@ export class OptimizationService {
             result = await this._callOptimizerService(
               optimizerUrl,
               relaxedPayload,
+              timeoutMs,
             );
             result.meta = {
               ...(result.meta ?? {}),
@@ -649,19 +785,23 @@ export class OptimizationService {
 
       await this._saveResults(runId, result, totalTripsCount);
     } catch (err) {
-      const diagnostics = this._buildFailureDiagnostics(
-        (err as Error).message,
-        dto,
-        activeSettings,
-      );
+      const diagnostics = dto
+        ? this._buildFailureDiagnostics((err as Error).message, dto, activeSettings)
+        : { userMessage: (err as Error).message ?? 'Erro interno ao iniciar execução.', currentSettings: {}, code: 'INTERNAL_ERROR', summary: '', hints: [] };
       await this.runRepo.update(runId, {
         status: OptimizationStatus.FAILED,
         finishedAt: new Date(),
+        profileId: activeProfileId,
+        profileName: activeProfileName,
         errorMessage: diagnostics.userMessage,
         resultSummary: {
           diagnostics,
         } as any,
       });
+    } finally {
+      this.isProcessingQueue = false;
+      // Tenta processar o próximo item após liberar a fila
+      this._processNextInQueue();
     }
   }
 
@@ -669,6 +809,7 @@ export class OptimizationService {
   private _callOptimizerService(
     baseUrl: string,
     payload: Record<string, any>,
+    timeoutMs: number = 360000,
   ): Promise<any> {
     return new Promise((resolve, reject) => {
       const body = JSON.stringify(payload);
@@ -702,7 +843,7 @@ export class OptimizationService {
       });
 
       req.on('error', reject);
-      req.setTimeout(360000, () => {
+      req.setTimeout(timeoutMs, () => {
         req.destroy();
         reject(new Error('Optimizer request timed out'));
       });
@@ -1508,6 +1649,21 @@ export class OptimizationService {
     return Number.isFinite(num) ? num : fallback;
   }
 
+  private _extractProfileMetadata(
+    activeSettings?: ActiveSettingsDto | null,
+  ): { profileId: number | null; profileName: string | null } {
+    const profileIdNumber = Number(activeSettings?.id);
+    const profileId = Number.isFinite(profileIdNumber)
+      ? profileIdNumber
+      : null;
+    const profileName =
+      typeof activeSettings?.name === 'string' && activeSettings.name.trim().length > 0
+        ? activeSettings.name.trim()
+        : null;
+
+    return { profileId, profileName };
+  }
+
   private _roundCurrency(value: unknown): number {
     return Math.round((this._toFiniteNumber(value, 0) + Number.EPSILON) * 100) / 100;
   }
@@ -1991,6 +2147,7 @@ export class OptimizationService {
     run: OptimizationRunEntity,
   ): OptimizationRunEntity {
     const params = this._asObject(this._cloneJson(run.params));
+    const settingsSnapshot = this._asObject(params.settingsSnapshot);
     const resultSummary = this._normalizeLegacyResultSummary(
       this._asObject(this._cloneJson(run.resultSummary)),
       params,
@@ -1999,9 +2156,24 @@ export class OptimizationService {
       resultSummary.total_cost ?? resultSummary.totalCost ?? run.totalCost,
       this._toFiniteNumber(run.totalCost, 0),
     );
+    const fallbackProfileId = run.profileId ?? settingsSnapshot.id;
+    const fallbackProfileIdNumber = Number(fallbackProfileId);
+    const normalizedProfileId = Number.isFinite(fallbackProfileIdNumber)
+      ? fallbackProfileIdNumber
+      : null;
+    const fallbackProfileName =
+      (typeof run.profileName === 'string' && run.profileName.trim().length > 0
+        ? run.profileName
+        : settingsSnapshot.name) ?? null;
+    const normalizedProfileName =
+      typeof fallbackProfileName === 'string' && fallbackProfileName.trim().length > 0
+        ? fallbackProfileName.trim()
+        : null;
 
     return {
       ...run,
+      profileId: normalizedProfileId,
+      profileName: normalizedProfileName,
       params,
       resultSummary,
       totalCost: normalizedTotalCost,
@@ -2112,6 +2284,8 @@ export class OptimizationService {
       algorithm: run.algorithm,
       lineId: run.lineId ?? null,
       lineIds: run.lineIds ?? null,
+      profileId: run.profileId ?? null,
+      profileName: run.profileName ?? null,
       createdAt: run.createdAt,
       startedAt: run.startedAt,
       finishedAt: run.finishedAt,
@@ -2372,7 +2546,7 @@ export class OptimizationService {
       this.runRepo.count({ where: { companyId, status: OptimizationStatus.COMPLETED } }),
       this.linesService['lineRepo'].count({ where: { companyId } }),
       this.terminalsService['terminalRepo'].count({ where: { companyId } }),
-      this.vehicleTypesService['vehicleTypeRepo'].count({ where: { companyId } }),
+      this.vehicleTypesService['repo'].count({ where: { companyId } }),
     ]);
 
     const lastRun = runs[0];

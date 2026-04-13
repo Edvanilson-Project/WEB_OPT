@@ -637,11 +637,10 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
         if new_spread > self.max_shift:
             return False, "spread_exceeded", {"new_spread": new_spread}
 
-        block_drive = self._block_drive(block)
-        new_work = duty.work_time + block_drive
-        overtime_minutes = self._regular_overtime_minutes(new_work)
+        projected_work = duty.work_time + self._block_drive(block)
+        overtime_minutes = self._regular_overtime_minutes(projected_work)
         if overtime_minutes > self.overtime_limit:
-            return False, "overtime_hard", {"new_spread": new_spread, "new_work": new_work, "overtime_minutes": overtime_minutes}
+            return False, "overtime_hard", {"new_spread": new_spread, "new_work": projected_work, "overtime_minutes": overtime_minutes}
 
         start_depot = duty.meta.get("start_depot_id")
         candidate_end_depot = block.trips[-1].depot_id
@@ -650,6 +649,7 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
 
         had_break, break_state, break_adjustment = self._break_resets(duty.meta.get("break_state", {}), gap)
         current_cont = int(duty.meta.get("continuous_drive", 0))
+        block_drive = self._block_drive(block)
         new_cont = block_drive if had_break else current_cont + block_drive
         if new_cont > self.max_driving or new_cont > self.mandatory_break_after:
             return False, "continuous_drive_exceeded", {"continuous_drive": new_cont}
@@ -673,7 +673,7 @@ class GreedyCSP(BaseAlgorithm, ICSPAlgorithm):
             "service_day_transition": block_service_day != last_service_day,
             "had_break": had_break,
             "new_spread": new_spread,
-            "new_work": new_work,
+            "new_work": projected_work,
             "new_cont": new_cont,
             "daily_drive": daily_drive,
             "extended_days_used": extended_days_used + (1 if daily_drive > self.daily_driving_limit else 0),

@@ -1,3 +1,4 @@
+import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import {
   IsString,
@@ -412,4 +413,87 @@ export class CreateOptimizationSettingsDto {
   @IsEnum(['urban', 'charter'])
   @IsOptional()
   operationMode?: 'urban' | 'charter';
+
+  @IsNumber()
+  @IsOptional()
+  @Min(1.0)
+  @Max(5.0)
+  maxTimeoutMultiplier?: number;
+
+  @IsNumber()
+  @IsOptional()
+  @Min(0)
+  @Max(720)
+  fairnessTargetWorkMinutes?: number;
+
+  @IsNumber()
+  @IsOptional()
+  @Min(0)
+  @Max(120)
+  fairnessToleranceMinutes?: number;
+
+  @IsNumber()
+  @IsOptional()
+  @Min(0)
+  @Max(1440)
+  maxUnpaidBreakMinutes?: number;
+
+  @IsNumber()
+  @IsOptional()
+  @Min(0)
+  @Max(720)
+  longUnpaidBreakLimitMinutes?: number;
+
+  @IsNumber()
+  @IsOptional()
+  @Min(0)
+  @Max(5)
+  longUnpaidBreakPenaltyWeight?: number;
+
+  @IsNumber()
+  @IsOptional()
+  @Min(0)
+  @Max(10)
+  maxConnectionCostForReuseRatio?: number;
+
+  @IsNumber()
+  @IsOptional()
+  @Min(0)
+  @Max(5)
+  goalWeightOvertime?: number;
+
+  @IsNumber()
+  @IsOptional()
+  @Min(0)
+  @Max(5)
+  goalWeightSpread?: number;
+
+  @IsNumber()
+  @IsOptional()
+  @Min(0)
+  @Max(5)
+  goalWeightMinWork?: number;
+
+  @IsNumber()
+  @IsOptional()
+  @Min(1)
+  @Max(60)
+  terminalCentralMinLayover?: number;
+
+  @IsNumber()
+  @IsOptional()
+  @Min(0)
+  @Max(300)
+  splitShiftMinGapMinutes?: number;
+
+  @IsNumber()
+  @IsOptional()
+  @Min(0)
+  @Max(1440)
+  splitShiftMaxGapMinutes?: number;
+
+  @ApiPropertyOptional({ enum: ['smart', 'always', 'never'] })
+  @IsOptional()
+  @IsEnum(['smart', 'always', 'never'])
+  vspGarageReturnPolicy?: string;
 }

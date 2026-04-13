@@ -242,6 +242,10 @@ class GreedyVSP(BaseAlgorithm, IVSPAlgorithm):
         reuse_ratio = float(self._p("max_connection_cost_for_reuse_ratio", 1.2))
         max_vehicles = int(self._p("max_vehicles", self._p("maxVehicles", 0)) or 0)
         connection_tolerance = int(self._p("connection_tolerance_minutes", 0))
+        pullout_m = int(self._p("pullout_minutes", 10))
+        pullback_m = int(self._p("pullback_minutes", 10))
+        garage_return_cost = (pullout_m + pullback_m) * deadhead_cost
+        garage_policy = self._p("vsp_garage_return_policy", "smart")
         if connection_tolerance > 0:
             _log.info("GreedyVSP: Using connection_tolerance_minutes=%d", connection_tolerance)
 
@@ -380,8 +384,17 @@ class GreedyVSP(BaseAlgorithm, IVSPAlgorithm):
                     allow_vehicle_split_shifts
                     and split_shift_min_gap <= gap <= split_shift_max_gap
                 ),
+                "garage_return_cost": garage_return_cost,
             }
-            return (marginal_cost, target_blk, data)
+            if data["is_split_shift_window"]:
+                if garage_policy == "always":
+                    data["marginal_cost"] = garage_return_cost + pairing_delta
+                elif garage_policy == "never":
+                    pass # stays as calculated (idle)
+                else: # smart
+                    data["marginal_cost"] = min(data["marginal_cost"], garage_return_cost + pairing_delta)
+
+            return (data["marginal_cost"], target_blk, data)
 
         def _best_candidate(trip: Trip) -> Optional[Tuple[float, Block, Dict[str, Any]]]:
             best: Optional[Tuple[float, Block, tuple]] = None
@@ -467,8 +480,19 @@ class GreedyVSP(BaseAlgorithm, IVSPAlgorithm):
                 "pairing_delta": pairing_delta,
                 "pairing_state": pairing_state,
                 "is_split_shift_window": bool(allow_vehicle_split_shifts and split_shift_min_gap <= gap <= split_shift_max_gap),
+                "garage_return_cost": garage_return_cost,
             }
-            return (marginal_cost, b_blk, data)
+            if data["is_split_shift_window"]:
+                if garage_policy == "always":
+                    data["marginal_cost"] = garage_return_cost + pairing_delta
+                elif garage_policy == "never":
+                    pass # stays as calculated (idle)
+                else: # smart
+                    data["marginal_cost"] = min(data["marginal_cost"], garage_return_cost + pairing_delta)
+                
+                data["ranking_key"] = data["marginal_cost"]
+
+            return (data["marginal_cost"], b_blk, data)
 
         def _forced_preferred_pair_candidate(trip: Trip) -> Optional[Tuple[float, Block, Dict[str, Any]]]:
             pair_trip_id = preferred_pairs.get(trip.id)
@@ -526,8 +550,17 @@ class GreedyVSP(BaseAlgorithm, IVSPAlgorithm):
                     allow_vehicle_split_shifts
                     and split_shift_min_gap <= gap <= split_shift_max_gap
                 ),
+                "garage_return_cost": garage_return_cost,
             }
-            return (marginal_cost, blk, data)
+            if data["is_split_shift_window"]:
+                if garage_policy == "always":
+                    data["marginal_cost"] = garage_return_cost + pairing_delta
+                elif garage_policy == "never":
+                    pass # stays as calculated (idle)
+                else: # smart
+                    data["marginal_cost"] = min(data["marginal_cost"], garage_return_cost + pairing_delta)
+
+            return (data["marginal_cost"], blk, data)
 
         for trip in sorted_trips:
             candidate = _forced_trip_group_candidate(trip) or _forced_preferred_pair_candidate(trip) or _best_candidate(trip)

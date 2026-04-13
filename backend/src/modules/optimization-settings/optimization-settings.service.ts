@@ -4,6 +4,7 @@ import { Repository } from 'typeorm';
 import { OptimizationSettingsEntity } from './entities/optimization-settings.entity';
 import { CreateOptimizationSettingsDto } from './dto/create-optimization-settings.dto';
 import { UpdateOptimizationSettingsDto } from './dto/update-optimization-settings.dto';
+import { UserRole } from '../users/entities/user.entity';
 
 @Injectable()
 export class OptimizationSettingsService {
@@ -35,7 +36,13 @@ export class OptimizationSettingsService {
   async create(
     companyId: number,
     dto: CreateOptimizationSettingsDto,
+    userRole?: string,
   ): Promise<OptimizationSettingsEntity> {
+    const isAdmin =
+      userRole === UserRole.SUPER_ADMIN || userRole === UserRole.COMPANY_ADMIN;
+    if (!isAdmin && dto.maxTimeoutMultiplier !== undefined) {
+      delete dto.maxTimeoutMultiplier;
+    }
     return this.repo.manager.transaction(async (em) => {
       if ((dto as any).isActive !== false) {
         await em.update(
@@ -57,7 +64,13 @@ export class OptimizationSettingsService {
     id: number,
     companyId: number,
     dto: UpdateOptimizationSettingsDto,
+    userRole?: string,
   ): Promise<OptimizationSettingsEntity> {
+    const isAdmin =
+      userRole === UserRole.SUPER_ADMIN || userRole === UserRole.COMPANY_ADMIN;
+    if (!isAdmin && dto.maxTimeoutMultiplier !== undefined) {
+      delete dto.maxTimeoutMultiplier;
+    }
     return this.repo.manager.transaction(async (em) => {
       const entity = await em.findOne(OptimizationSettingsEntity, {
         where: { id, companyId },

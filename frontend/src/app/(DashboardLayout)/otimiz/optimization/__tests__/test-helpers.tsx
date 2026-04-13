@@ -11,7 +11,7 @@
 import React, { useState } from 'react';
 import {
   Box, Table, TableHead, TableBody, TableRow, TableCell,
-  TableContainer, Paper, Typography, Tooltip,
+  TableContainer, Paper, Typography, Tooltip, Button, Drawer,
 } from '@mui/material';
 import type { TripDetail } from '../../_types';
 
@@ -131,6 +131,54 @@ export function TripTimeline({
           </Tooltip>
         );
       })}
+    </Box>
+  );
+}
+
+// ─── Harness: Interações do Gantt Enterprise ─────────────────────────────────
+
+export function EnterpriseGanttHarness({
+  hasCycle = true,
+  idleWindows = 1,
+  lineLabels = ['L10'],
+}: {
+  hasCycle?: boolean;
+  idleWindows?: number;
+  lineLabels?: string[];
+}) {
+  const [showLines, setShowLines] = useState(false);
+  const [openGuide, setOpenGuide] = useState(false);
+
+  return (
+    <Box>
+      <Box sx={{ display: 'flex', gap: 1, mb: 1 }}>
+        <Button size="small" onClick={() => setShowLines((p) => !p)}>
+          {showLines ? 'Ocultar linhas' : 'Mostrar linhas'}
+        </Button>
+        <Button size="small" aria-label="abrir-guia-gantt" onClick={() => setOpenGuide(true)}>
+          Abrir guia
+        </Button>
+      </Box>
+
+      <Typography>Produtivo</Typography>
+      <Typography>Improdutivo</Typography>
+
+      {Array.from({ length: idleWindows }).map((_, idx) => (
+        <Box key={`idle-${idx}`} data-testid="gantt-idle-window" />
+      ))}
+
+      {hasCycle && <Box data-testid="gantt-cycle-group" />}
+
+      {showLines && lineLabels.map((label) => (
+        <Typography key={label}>{label}</Typography>
+      ))}
+
+      <Drawer anchor="right" open={openGuide} onClose={() => setOpenGuide(false)}>
+        <Box sx={{ p: 2, width: 280 }}>
+          <Typography>Guia visual do Gantt</Typography>
+          <Typography>Informacoes de detalhe foram movidas para este painel.</Typography>
+        </Box>
+      </Drawer>
     </Box>
   );
 }

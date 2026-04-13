@@ -5,7 +5,8 @@
  */
 export function getErrorMessage(error: unknown, fallback = 'Erro inesperado.'): string {
   if (error && typeof error === 'object') {
-    const axiosMsg = (error as any)?.response?.data?.message;
+    const errorObj = error as { response?: { data?: { message?: unknown } } };
+    const axiosMsg = errorObj.response?.data?.message;
     if (typeof axiosMsg === 'string') return axiosMsg;
     if (error instanceof Error) return error.message;
   }
