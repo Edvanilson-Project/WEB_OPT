@@ -82,6 +82,9 @@ class HybridPipeline(BaseAlgorithm):
         strict_hard = bool(self.vsp_params.get("strict_hard_validation", self.cct_params.get("strict_hard_validation", False)))
         logger.info(f"[PIPELINE] mcnf baseline: {best_vehicles} veículos, cost={best_cost:.0f}, issues={best_issues}")
 
+        elapsed = time.perf_counter() - self._start_time
+        remaining_budget = max(1.0, budget - elapsed)
+
         def _is_better(sol, cost, issues):
             """Compara por: 1) menos hard issues, 2) menos veículos, 3) menor custo."""
             nonlocal best_issues, best_vehicles, best_cost
@@ -98,7 +101,7 @@ class HybridPipeline(BaseAlgorithm):
             return False
 
         sa = SimulatedAnnealingVSP(vsp_params=self.vsp_params)
-        sa_budget = budget * 0.35
+        sa_budget = remaining_budget * 0.35
         sa.time_budget_s = sa_budget
         t_phase = time.perf_counter()
         sa_sol = sa.solve(trips, vehicle_types, depot_id)
@@ -119,8 +122,9 @@ class HybridPipeline(BaseAlgorithm):
         if self._check_timeout():
             return self._finalize(best_vsp, trips, vehicle_types)
 
+        remaining_budget = max(1.0, budget - (time.perf_counter() - self._start_time))
         ts = TabuSearchVSP(vsp_params=self.vsp_params)
-        ts_budget = budget * 0.35 + sa_saved  # Realocar tempo não usado pelo SA
+        ts_budget = remaining_budget * 0.35 + sa_saved  # Realocar tempo não usado pelo SA
         ts.time_budget_s = ts_budget
         t_phase = time.perf_counter()
         ts_sol = ts.solve(trips, vehicle_types, depot_id)
@@ -140,9 +144,10 @@ class HybridPipeline(BaseAlgorithm):
         if self._check_timeout():
             return self._finalize(best_vsp, trips, vehicle_types)
 
+        remaining_budget = max(1.0, budget - (time.perf_counter() - self._start_time))
         if n > 50:
             ga = GeneticVSP(vsp_params=self.vsp_params)
-            ga.time_budget_s = budget * 0.20 + ts_saved  # Realocar tempo não usado pelo TS
+            ga.time_budget_s = remaining_budget * 0.20 + ts_saved  # Realocar tempo não usado pelo TS
             t_phase = time.perf_counter()
             ga_sol = ga.solve(trips, vehicle_types, depot_id)
             phase_timings_ms["vsp_genetic_ms"] = round((time.perf_counter() - t_phase) * 1000, 2)
