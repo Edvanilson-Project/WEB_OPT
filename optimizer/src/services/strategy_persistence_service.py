@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 import os
-import threading
+from filelock import FileLock
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -13,18 +13,24 @@ class StrategyPersistenceService:
     def __init__(self, base_dir: str) -> None:
         self.base_path = Path(base_dir)
         self.base_path.mkdir(parents=True, exist_ok=True)
-        self._lock = threading.Lock()
-
+        # Arquivos de persistência
         self._scenarios_file = self.base_path / "scenarios.json"
         self._feeds_file = self.base_path / "feeds.json"
         self._reports_file = self.base_path / "reconciliation_reports.json"
 
+        # Garante arquivos existentes antes de criar locks
         self._ensure_file(self._scenarios_file)
         self._ensure_file(self._feeds_file)
         self._ensure_file(self._reports_file)
 
+        # Locks a nível de sistema operativo (Multi-Process Safe)
+        # Adiciona timeout de segurança para evitar bloqueio infinito caso um processo morra
+        self._scenarios_lock = FileLock(str(self._scenarios_file) + ".lock", timeout=10)
+        self._feeds_lock = FileLock(str(self._feeds_file) + ".lock", timeout=10)
+        self._reports_lock = FileLock(str(self._reports_file) + ".lock", timeout=10)
+
     def save_scenario(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        with self._lock:
+        with self._scenarios_lock:
             data = self._read_json(self._scenarios_file)
             items = data.get("items", [])
             scenario_id = int(data.get("last_id", 0)) + 1
@@ -48,27 +54,30 @@ class StrategyPersistenceService:
             return item
 
     def list_scenarios(self, limit: int = 20) -> List[Dict[str, Any]]:
-        with self._lock:
-            items = self._read_json(self._scenarios_file).get("items", [])
+        with self._scenarios_lock:
+            data = self._read_json(self._scenarios_file)
+            items = data.get("items", [])
             return list(reversed(items[-max(1, limit):]))
 
     def get_scenario(self, scenario_id: int) -> Optional[Dict[str, Any]]:
-        with self._lock:
-            items = self._read_json(self._scenarios_file).get("items", [])
+        with self._scenarios_lock:
+            data = self._read_json(self._scenarios_file)
+            items = data.get("items", [])
             for item in items:
                 if int(item.get("id", 0)) == int(scenario_id):
                     return item
         return None
 
     def get_latest_scenario(self) -> Optional[Dict[str, Any]]:
-        with self._lock:
-            items = self._read_json(self._scenarios_file).get("items", [])
+        with self._scenarios_lock:
+            data = self._read_json(self._scenarios_file)
+            items = data.get("items", [])
             if not items:
                 return None
             return items[-1]
 
     def ingest_feed(self, entries: List[Dict[str, Any]]) -> Dict[str, Any]:
-        with self._lock:
+        with self._feeds_lock:
             data = self._read_json(self._feeds_file)
             snapshots = data.get("snapshots", [])
             snapshot_id = int(data.get("last_id", 0)) + 1
@@ -110,22 +119,23 @@ class StrategyPersistenceService:
             }
 
     def get_latest_feed_records(self) -> List[Dict[str, Any]]:
-        with self._lock:
-            snapshots = self._read_json(self._feeds_file).get("snapshots", [])
+        with self._feeds_lock:
+            data = self._read_json(self._feeds_file)
+            snapshots = data.get("snapshots", [])
             if not snapshots:
                 return []
             latest = snapshots[-1]
             return list(latest.get("records", []))
 
     def get_latest_feed_snapshot(self) -> Optional[Dict[str, Any]]:
-        with self._lock:
+        with self._feeds_lock:
             snapshots = self._read_json(self._feeds_file).get("snapshots", [])
             if not snapshots:
                 return None
             return dict(snapshots[-1])
 
     def save_reconciliation_report(self, report: Dict[str, Any]) -> Dict[str, Any]:
-        with self._lock:
+        with self._reports_lock:
             data = self._read_json(self._reports_file)
             items = data.get("items", [])
             report_id = int(data.get("last_id", 0)) + 1
@@ -148,7 +158,7 @@ class StrategyPersistenceService:
             return item
 
     def list_reconciliation_reports(self, limit: int = 20) -> List[Dict[str, Any]]:
-        with self._lock:
+        with self._reports_lock:
             items = self._read_json(self._reports_file).get("items", [])
             return list(reversed(items[-max(1, limit):]))
 
@@ -159,58 +169,61 @@ class StrategyPersistenceService:
         max_reports: int,
         max_age_days: int,
     ) -> Dict[str, int]:
-        with self._lock:
-            scenarios_data = self._read_json(self._scenarios_file)
-            feeds_data = self._read_json(self._feeds_file)
-            reports_data = self._read_json(self._reports_file)
+        # Acquire locks in a fixed order to avoid deadlocks across processes
+        with self._scenarios_lock:
+            with self._feeds_lock:
+                with self._reports_lock:
+                    scenarios_data = self._read_json(self._scenarios_file)
+                    feeds_data = self._read_json(self._feeds_file)
+                    reports_data = self._read_json(self._reports_file)
 
-            scenarios = scenarios_data.get("items", [])
-            snapshots = feeds_data.get("snapshots", [])
-            reports = reports_data.get("items", [])
+                    scenarios = scenarios_data.get("items", [])
+                    snapshots = feeds_data.get("snapshots", [])
+                    reports = reports_data.get("items", [])
 
-            new_scenarios = self._apply_retention(
-                scenarios,
-                max_items=max_scenarios,
-                max_age_days=max_age_days,
-            )
-            new_snapshots = self._apply_retention(
-                snapshots,
-                max_items=max_feed_snapshots,
-                max_age_days=max_age_days,
-            )
-            new_reports = self._apply_retention(
-                reports,
-                max_items=max_reports,
-                max_age_days=max_age_days,
-            )
+                    new_scenarios = self._apply_retention(
+                        scenarios,
+                        max_items=max_scenarios,
+                        max_age_days=max_age_days,
+                    )
+                    new_snapshots = self._apply_retention(
+                        snapshots,
+                        max_items=max_feed_snapshots,
+                        max_age_days=max_age_days,
+                    )
+                    new_reports = self._apply_retention(
+                        reports,
+                        max_items=max_reports,
+                        max_age_days=max_age_days,
+                    )
 
-            self._write_json(
-                self._scenarios_file,
-                {
-                    "last_id": self._compute_last_id(new_scenarios),
-                    "items": new_scenarios,
-                },
-            )
-            self._write_json(
-                self._feeds_file,
-                {
-                    "last_id": self._compute_last_id(new_snapshots),
-                    "snapshots": new_snapshots,
-                },
-            )
-            self._write_json(
-                self._reports_file,
-                {
-                    "last_id": self._compute_last_id(new_reports),
-                    "items": new_reports,
-                },
-            )
+                    self._write_json(
+                        self._scenarios_file,
+                        {
+                            "last_id": self._compute_last_id(new_scenarios),
+                            "items": new_scenarios,
+                        },
+                    )
+                    self._write_json(
+                        self._feeds_file,
+                        {
+                            "last_id": self._compute_last_id(new_snapshots),
+                            "snapshots": new_snapshots,
+                        },
+                    )
+                    self._write_json(
+                        self._reports_file,
+                        {
+                            "last_id": self._compute_last_id(new_reports),
+                            "items": new_reports,
+                        },
+                    )
 
-            return {
-                "scenarios_removed": max(0, len(scenarios) - len(new_scenarios)),
-                "feed_snapshots_removed": max(0, len(snapshots) - len(new_snapshots)),
-                "reports_removed": max(0, len(reports) - len(new_reports)),
-            }
+                    return {
+                        "scenarios_removed": max(0, len(scenarios) - len(new_scenarios)),
+                        "feed_snapshots_removed": max(0, len(snapshots) - len(new_snapshots)),
+                        "reports_removed": max(0, len(reports) - len(new_reports)),
+                    }
 
     @staticmethod
     def _utc_now_iso() -> str:

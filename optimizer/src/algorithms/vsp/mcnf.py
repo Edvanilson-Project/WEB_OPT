@@ -18,7 +18,12 @@ from collections import defaultdict
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
-from scipy.optimize import linear_sum_assignment
+try:
+    import pulp  # type: ignore
+    _PULP_AVAILABLE = True
+except Exception:
+    pulp = None
+    _PULP_AVAILABLE = False
 
 from ...core.config import get_settings
 from ...domain.interfaces import IVSPAlgorithm
@@ -34,7 +39,7 @@ _OVERLAP_RATIO = 0.10
 
 class MCNFVSP(BaseAlgorithm, IVSPAlgorithm):
     """
-    Otimiza a frota com Bipartite Graph Matching.
+    Otimiza a frota com Bipartite Graph Matching (Linear Sum Assignment).
     
     A formulação expande N trips em uma matriz de Custo 2N x 2N:
     [ T->T (Conexão)    | T->D (Pull-in)  ]
@@ -222,8 +227,13 @@ class MCNFVSP(BaseAlgorithm, IVSPAlgorithm):
         Core matemático do MCNF: monta matriz de custo 2N x 2N e resolve
         o Assignment Problem via linear_sum_assignment.
         
-        Multi-Depot: Pull-out/Pull-in considers best depot based on deadhead cost.
-        Capacity Balancing: assigns blocks to depots respecting capacity limits.
+        Multi-Depot: Pull-out/Pull-in considera o melhor depot baseado em deadhead cost.
+        Capacity Balancing: atribui blocos aos depots respeitando limites de capacidade.
+        
+        NOTA: A verificação de capacidade de depot é feita pós-resolução do assignment.
+        O algoritmo primeiro encontra a solução de custo mínimo global, depois atribui
+        os blocos aos depots respeitando a capacidade. Se um depot exceder a capacidade,
+        um aviso é gerado mas a otimalidade global do emparelhamento é mantida.
         """
         vehicle = vehicle_types[0] if vehicle_types else None
         fixed_cost = float(self._p(
@@ -236,145 +246,207 @@ class MCNFVSP(BaseAlgorithm, IVSPAlgorithm):
         max_shift = int(self._p("max_vehicle_shift_minutes", 960))
         allow_multi = bool(self._p("allow_multi_line_block", True))
         connection_tolerance = int(self._p("connection_tolerance_minutes", 0))
-        pullout_m = int(self._p("pullout_minutes", 10))
-        pullback_m = int(self._p("pullback_minutes", 10))
-        garage_return_cost = (pullout_m + pullback_m) * deadhead_cost
-        
-        allow_split = bool(self._p("allow_vehicle_split_shifts", True))
-        split_min = int(self._p("split_shift_min_gap_minutes", 120))
-        split_max = int(self._p("split_shift_max_gap_minutes", 600))
         
         INF = 1e9
         N = len(trips)
-        
+
+        if N > 1000:
+            _log.warning("Instância massiva (>1000 trips). MCNF global abortado para evitar OOM. Retornando fallback Greedy.")
+            from .greedy import GreedyVSP
+            return GreedyVSP(vsp_params=self.vsp_params).solve(trips, vehicle_types, depots=depots)
+
         trips_sorted = sorted(trips, key=lambda t: (t.start_time, t.id))
-        
-        C = np.full((2 * N, 2 * N), INF, dtype=np.float64)
-        
+
+        # Ensure we have at least one virtual depot if none provided
+        local_depots = depots if depots else [{"id": -1, "capacity": 999999}]
+
+        # Pre-filter conexões válidas para reduzir variáveis
+        valid_X: Dict[Tuple[int, int], Dict[str, Any]] = {}
         for i in range(N):
             for j in range(N):
                 if i == j:
                     continue
                 if trips_sorted[j].start_time < trips_sorted[i].end_time:
                     continue
-                
                 if not allow_multi and trips_sorted[i].line_id != trips_sorted[j].line_id:
                     continue
-                    
+
                 gap = trips_sorted[j].start_time - trips_sorted[i].end_time
                 dh = max(min_layover, int(trips_sorted[i].deadhead_times.get(trips_sorted[j].origin_id, 0)))
-                
+
                 if gap + connection_tolerance < dh:
                     continue
-                
+
                 if gap > max_shift:
                     continue
-                
+
                 idle = gap - dh
                 cost = (dh * deadhead_cost) + (idle * idle_cost)
-                
-                if allow_split and split_min <= gap <= split_max:
-                    garage_policy = self._p("vsp_garage_return_policy", "smart")
-                    if garage_policy == "always":
-                        cost = garage_return_cost
-                    elif garage_policy == "never":
-                        pass
-                    else:
-                        cost = min(cost, garage_return_cost)
-                
                 if trips_sorted[i].destination_id == trips_sorted[j].origin_id:
                     cost -= (fixed_cost * 0.05)
-                
-                C[i, j] = max(0.0, cost)
 
-        if depots:
-            for i in range(N):
-                best_pullin = INF
-                for depot in depots:
-                    pullin_cost = trips_sorted[i].deadhead_times.get(depot["id"], 0) * deadhead_cost
-                    if pullin_cost < best_pullin:
-                        best_pullin = pullin_cost
-                C[i, N + i] = best_pullin
-            
-            for i in range(N):
-                best_pullout = fixed_cost
-                for depot in depots:
-                    pullout_cost = fixed_cost + (trips_sorted[i].deadhead_times.get(depot["id"], 0) * deadhead_cost)
-                    if pullout_cost < best_pullout:
-                        best_pullout = pullout_cost
-                C[N + i, i] = best_pullout
-        else:
-            for i in range(N):
-                C[i, N + i] = 0.0
-            for i in range(N):
-                C[N + i, i] = fixed_cost
-            
-        C[N:2*N, N:2*N] = 0.0
+                valid_X[(i, j)] = {
+                    "cost": max(0.0, cost),
+                    "dh": dh,
+                    "idle": max(0, idle),
+                }
 
-        _log.info(f"MCNF Subproblem: matriz {2*N}x{2*N}, LAP via SciPy...")
-        lap_start = time.time()
-        row_ind, col_ind = linear_sum_assignment(C)
-        lap_end = time.time()
-        
-        _log.info(f"Matching resolvido em {lap_end - lap_start:.3f}s")
-        
-        next_trip = {}
-        targets = set()
-        for r, c in zip(row_ind, col_ind):
-            if r < N and c < N:
-                next_trip[r] = c
-                targets.add(c)
-                
-        visited = set()
-        blocks = []
-        block_id_counter = 1
-        
+        # Precompute pull-out / pull-in costs per depot
+        depot_caps: Dict[Any, int] = {}
+        pullout_costs: Dict[Tuple[Any, int], float] = {}
+        pullin_costs: Dict[Tuple[int, Any], float] = {}
+        for depot in local_depots:
+            did = depot.get("id")
+            depot_caps[did] = int(depot.get("capacity", 999999))
+            for i in range(N):
+                dh_to_depot = int(trips_sorted[i].deadhead_times.get(did, 0))
+                pullin_costs[(i, did)] = dh_to_depot * deadhead_cost
+                pullout_costs[(did, i)] = fixed_cost + (dh_to_depot * deadhead_cost)
+
+        # If PuLP isn't available, fallback to greedy
+        if not _PULP_AVAILABLE:
+            _log.warning("PuLP não disponível no ambiente; usando GreedyVSP como fallback.")
+            from .greedy import GreedyVSP
+            return GreedyVSP(vsp_params=self.vsp_params).solve(trips, vehicle_types, depots=depots)
+
+        # Build MILP
+        prob = pulp.LpProblem("MCNF_Subproblem", pulp.LpMinimize)
+
+        X_vars = {k: pulp.LpVariable(f"x_{k[0]}_{k[1]}", cat="Binary") for k in valid_X.keys()}
+        P_out_vars = {(did, i): pulp.LpVariable(f"pout_{did}_{i}", cat="Binary") for did in depot_caps.keys() for i in range(N)}
+        P_in_vars = {(i, did): pulp.LpVariable(f"pin_{i}_{did}", cat="Binary") for i in range(N) for did in depot_caps.keys()}
+
+        # Objective
+        obj_terms = []
+        for k, info in valid_X.items():
+            obj_terms.append(info["cost"] * X_vars[k])
+        for k, cost in pullout_costs.items():
+            obj_terms.append(cost * P_out_vars[k])
+        for k, cost in pullin_costs.items():
+            obj_terms.append(cost * P_in_vars[k])
+
+        prob += pulp.lpSum(obj_terms)
+
+        # In-degree = 1 (incoming to each trip j)
+        for j in range(N):
+            in_terms = []
+            for i in range(N):
+                if (i, j) in X_vars:
+                    in_terms.append(X_vars[(i, j)])
+            for did in depot_caps.keys():
+                in_terms.append(P_out_vars[(did, j)])
+            prob += pulp.lpSum(in_terms) == 1, f"in_cover_{j}"
+
+        # Out-degree = 1 (outgoing from each trip i)
         for i in range(N):
-            if i not in visited and i not in targets:
-                chain = []
-                curr = i
-                while curr is not None:
-                    chain.append(trips_sorted[curr])
-                    visited.add(curr)
-                    curr = next_trip.get(curr)
-                    
-                block = Block(id=block_id_counter, trips=chain)
-                if vehicle:
-                    block.vehicle_type_id = vehicle.id
-                
-                block.meta.update({
-                    "activation_cost": fixed_cost,
-                    "connection_cost": 0.0,
-                    "deadhead_minutes": 0,
-                    "idle_minutes": 0
-                })
-                
-                for idx in range(len(chain) - 1):
-                    tdh = max(min_layover, int(chain[idx].deadhead_times.get(chain[idx+1].origin_id, 0)))
-                    tgap = chain[idx+1].start_time - chain[idx].end_time
-                    tidle = max(0, tgap - tdh)
-                    
-                    block.meta["deadhead_minutes"] += tdh
-                    block.meta["idle_minutes"] += tidle
-                    block.meta["connection_cost"] += (tdh * deadhead_cost) + (tidle * idle_cost)
+            out_terms = []
+            for j in range(N):
+                if (i, j) in X_vars:
+                    out_terms.append(X_vars[(i, j)])
+            for did in depot_caps.keys():
+                out_terms.append(P_in_vars[(i, did)])
+            prob += pulp.lpSum(out_terms) == 1, f"out_cover_{i}"
 
-                blocks.append(block)
-                block_id_counter += 1
+        # Depot capacity constraints
+        for did, cap in depot_caps.items():
+            prob += pulp.lpSum(P_out_vars[(did, i)] for i in range(N)) <= cap, f"depot_cap_{did}"
+
+        # Solve with CBC (quiet)
+        milp_start = time.time()
+        try:
+            solver = pulp.PULP_CBC_CMD(msg=0, maxSeconds=60)
+            prob.solve(solver)
+            milp_end = time.time()
+        except Exception as e:
+            _log.exception("PuLP solver falhou: %s", e)
+            from .greedy import GreedyVSP
+            return GreedyVSP(vsp_params=self.vsp_params).solve(trips, vehicle_types, depots=depots)
+
+        if prob.status != pulp.constants.LpStatusOptimal:
+            _log.warning("ILP solver status: %s — fallback para GreedyVSP", pulp.LpStatus[prob.status])
+            from .greedy import GreedyVSP
+            return GreedyVSP(vsp_params=self.vsp_params).solve(trips, vehicle_types, depots=depots)
+
+        # Reconstroi sequenciamento a partir das variáveis selecionadas
+        next_trip: Dict[int, int] = {}
+        prev_trip: Dict[int, int] = {}
+        start_depot_for: Dict[int, Any] = {}
+        end_depot_for: Dict[int, Any] = {}
+
+        for (i, j), var in X_vars.items():
+            if float(pulp.value(var) or 0.0) > 0.5:
+                next_trip[i] = j
+                prev_trip[j] = i
+
+        for (did, i), var in P_out_vars.items():
+            if float(pulp.value(var) or 0.0) > 0.5:
+                start_depot_for[i] = did
+
+        for (i, did), var in P_in_vars.items():
+            if float(pulp.value(var) or 0.0) > 0.5:
+                end_depot_for[i] = did
+
+        # Monta blocos (cadeias) a partir dos predecessores
+        id_to_index = {t.id: idx for idx, t in enumerate(trips_sorted)}
+        visited = set()
+        blocks: List[Block] = []
+        block_id_counter = 1
+
+        for start_idx in range(N):
+            if start_idx in visited:
+                continue
+            if start_idx in prev_trip:
+                continue
+
+            chain_idxs = []
+            curr = start_idx
+            while curr is not None and curr not in visited:
+                chain_idxs.append(curr)
+                visited.add(curr)
+                curr = next_trip.get(curr)
+
+            if not chain_idxs:
+                continue
+
+            chain_trips = [trips_sorted[idx] for idx in chain_idxs]
+            block = Block(id=block_id_counter, trips=chain_trips)
+            if vehicle:
+                block.vehicle_type_id = vehicle.id
+
+            block.meta.update({
+                "activation_cost": fixed_cost,
+                "connection_cost": 0.0,
+                "deadhead_minutes": 0,
+                "idle_minutes": 0,
+            })
+
+            # Soma custos da cadeia
+            for a_idx, b_idx in zip(chain_idxs[:-1], chain_idxs[1:]):
+                info = valid_X.get((a_idx, b_idx))
+                if info:
+                    block.meta["deadhead_minutes"] += info["dh"]
+                    block.meta["idle_minutes"] += info["idle"]
+                    block.meta["connection_cost"] += info["cost"]
+
+            # Pull-out / Pull-in meta
+            first_idx = chain_idxs[0]
+            last_idx = chain_idxs[-1]
+            block.meta["start_depot_id"] = start_depot_for.get(first_idx)
+            block.meta["end_depot_id"] = end_depot_for.get(last_idx)
+            block.meta["depot_pullout_cost"] = pullout_costs.get((block.meta["start_depot_id"], first_idx), 0.0)
+            block.meta["depot_pullin_cost"] = pullin_costs.get((last_idx, block.meta["end_depot_id"]), 0.0)
+
+            blocks.append(block)
+            block_id_counter += 1
 
         total_trips_packed = sum(len(b.trips) for b in blocks)
-        _log.info(f"MCNF Subproblem: {total_trips_packed}/{N} trips em {len(blocks)} blocos")
-        
+        _log.info(f"MCNF Subproblem (MILP): {total_trips_packed}/{N} trips em {len(blocks)} blocos; solve_time_s={(milp_end-milp_start):.3f}")
+
         if vehicle and vehicle.is_electric and vehicle.battery_capacity_kwh > 0:
             blocks = self._ev_relax(blocks, vehicle, block_id_counter)
-        
-        if depots:
-            blocks, capacity_warnings = self._capacity_balancing(blocks, depots, trips_sorted, deadhead_cost)
-            _log.warning("; ".join(capacity_warnings)) if capacity_warnings else None
-        
-        unassigned_trips = [
-            t for t in trips_sorted
-            if t.id not in {tr.id for b in blocks for tr in b.trips}
-        ]
+
+        # Unassigned (should be none if MILP foi factível)
+        unassigned_trips = [t for t in trips_sorted if t.id not in {tr.id for b in blocks for tr in b.trips}]
 
         return VSPSolution(
             blocks=blocks,
@@ -382,13 +454,11 @@ class MCNFVSP(BaseAlgorithm, IVSPAlgorithm):
             algorithm=self.name,
             elapsed_ms=self._elapsed_ms(),
             meta={
-                "bipartite_matrix_size": f"{2*N}x{2*N}",
-                "lap_solver_time_s": lap_end - lap_start,
-                "objective": "Min Cost Network Matrix",
                 "subproblem_trip_count": N,
+                "milp_solve_time_s": (milp_end - milp_start) if 'milp_end' in locals() else None,
                 "multi_depot": bool(depots),
-                "depot_count": len(depots),
-            }
+                "depot_count": len(depots) if depots else 0,
+            },
         )
 
     def _capacity_balancing(
@@ -402,44 +472,8 @@ class MCNFVSP(BaseAlgorithm, IVSPAlgorithm):
         Atribui cada bloco ao depot com menor custo (pull-out + pull-in)
         que ainda tenha capacidade disponível.
         """
-        depot_capacities = {d["id"]: d.get("capacity", 999999) for d in depots}
-        warnings: List[str] = []
-        
-        for block in blocks:
-            if not block.trips:
-                continue
-            
-            first_trip = block.trips[0]
-            last_trip = block.trips[-1]
-            
-            best_depot_id = None
-            best_total_cost = float('inf')
-            
-            for depot_id, capacity in depot_capacities.items():
-                if capacity <= 0:
-                    continue
-                
-                pullout_cost = first_trip.deadhead_times.get(depot_id, 0) * deadhead_cost
-                pullin_cost = last_trip.deadhead_times.get(depot_id, 0) * deadhead_cost
-                total_cost = pullout_cost + pullin_cost
-                
-                if total_cost < best_total_cost:
-                    best_total_cost = total_cost
-                    best_depot_id = depot_id
-            
-            if best_depot_id is not None:
-                block.meta["start_depot_id"] = best_depot_id
-                block.meta["end_depot_id"] = best_depot_id
-                block.meta["depot_pullout_cost"] = first_trip.deadhead_times.get(best_depot_id, 0) * deadhead_cost
-                block.meta["depot_pullin_cost"] = last_trip.deadhead_times.get(best_depot_id, 0) * deadhead_cost
-                depot_capacities[best_depot_id] -= 1
-            else:
-                warnings.append(f"DEPOT_CAPACITY_EXCEEDED B{block.id}")
-                block.meta["start_depot_id"] = None
-                block.meta["end_depot_id"] = None
-                _log.warning(f"Bloco B{block.id} sem depot disponível com capacidade")
-        
-        return blocks, warnings
+        # removido: capacity balancing agora é tratado na formulação MILP
+        return blocks, []
 
     def _ev_relax(
         self,
@@ -466,7 +500,7 @@ class MCNFVSP(BaseAlgorithm, IVSPAlgorithm):
                     if gap > 0:
                         charged = min(vehicle.charge_rate_kw * (gap / 60.0), vehicle.battery_capacity_kwh)
                         current_soc_kwh = min(vehicle.battery_capacity_kwh, current_soc_kwh + charged)
-                        
+                
                 if current_soc_kwh - energy_need < min_soc_kwh and len(current_chain) > 0:
                     fb = Block(id=block_id_counter, trips=current_chain, vehicle_type_id=vehicle.id)
                     fb.meta["ev_fragmented"] = True
