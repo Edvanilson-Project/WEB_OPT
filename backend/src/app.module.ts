@@ -23,6 +23,7 @@ import { ScheduleGroupsModule } from './modules/schedule-groups/schedule-groups.
 import { TripTimeConfigsModule } from './modules/trip-time-configs/trip-time-configs.module';
 import { PassengerConfigsModule } from './modules/passenger-configs/passenger-configs.module';
 import { TimetablesModule } from './modules/timetables/timetables.module';
+import { RosteringModule } from './modules/rostering/rostering.module';
 import appConfig from './config/app.config';
 import databaseConfig from './config/database.config';
 
@@ -54,6 +55,7 @@ import databaseConfig from './config/database.config';
     TripTimeConfigsModule,
     PassengerConfigsModule,
     TimetablesModule,
+    RosteringModule,
   ],
   controllers: [AppController],
   providers: [AppService],

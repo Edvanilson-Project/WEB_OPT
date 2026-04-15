@@ -14,7 +14,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from prometheus_fastapi_instrumentator import Instrumentator
 
-from src.api.routes import health, optimize, strategy, whatif
+from src.api.routes import health, optimize, strategy, whatif, rostering
 from src.core.config import get_settings
 from src.core.logging import configure_logging
 from src.domain.models import Trip
@@ -263,6 +263,7 @@ Instrumentator(excluded_handlers=["/health", "/metrics"]).instrument(app).expose
 app.include_router(health.router, prefix="/health", tags=["Health"])
 app.include_router(optimize.router, prefix="/optimize", tags=["Optimize"])
 app.include_router(strategy.router, prefix="/strategy", tags=["Strategy"])
+app.include_router(rostering.router, prefix="/optimize/rostering", tags=["Rostering"])
 app.include_router(whatif.router, prefix="/api/v1", tags=["What-If"])
 
 

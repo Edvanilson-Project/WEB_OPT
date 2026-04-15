@@ -69,14 +69,11 @@ class TripInput(BaseModel):
 
 
 class OperatorProfileInput(BaseModel):
-    id: int
+    id: str
     name: str
-    seniority_rank: Optional[int] = None
-    seniority_score: Optional[float] = None
-    mandatory_shift_types: List[str] = Field(default_factory=list)
-    mandatory_line_ids: List[int] = Field(default_factory=list)
-    preferred_shift_types: List[str] = Field(default_factory=list)
-    preferred_line_ids: List[int] = Field(default_factory=list)
+    cp: str
+    last_shift_end: int = 0
+    metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
 class VehicleTypeInput(BaseModel):
@@ -472,3 +469,34 @@ class RunRetentionCleanupResponse(BaseModel):
 class WorkerStatusResponse(BaseModel):
     status: str = "ok"
     worker: Dict[str, Any] = Field(default_factory=dict)
+
+
+class RosteringRuleInput(BaseModel):
+    rule_id: str
+    type: str  # "HARD" | "SOFT"
+    weight: float = 0.0
+    meta: Dict[str, Any] = Field(default_factory=dict)
+
+
+class NominalRosteringRequest(BaseModel):
+    duties: List[DutyOutput]
+    operators: List[OperatorProfileInput]
+    rules: List[RosteringRuleInput]
+    inter_shift_rest_minutes: int = 660
+
+
+class AssignmentOutput(BaseModel):
+    operator_id: str
+    operator_name: str
+    duty_id: int
+    score: float
+    explanations: List[str]
+
+
+class NominalRosteringResponse(BaseModel):
+    status: str = "ok"
+    assignments: List[AssignmentOutput]
+    unassigned_duties: List[int]
+    total_utility: float
+    elapsed_ms: float
+    logs: List[str]

@@ -439,3 +439,43 @@ class OptimizationResult:
                 for d in self.csp.duties
             ],
         }
+
+
+class RuleType(str, Enum):
+    HARD = "HARD"
+    SOFT = "SOFT"
+
+
+@dataclass
+class RosteringRule:
+    rule_id: str
+    type: RuleType
+    weight: float = 0.0
+    meta: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class OperatorProfile:
+    id: str
+    name: str
+    cp: str
+    last_shift_end: int = 0  # Timestamp em minutos desde meia-noite (D-1 ou D)
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class NominalAssignment:
+    operator_id: str
+    duty_id: int
+    score: float = 0.0
+    explanations: List[str] = field(default_factory=list)
+
+
+@dataclass
+class NominalRosteringSolution:
+    assignments: List[NominalAssignment] = field(default_factory=list)
+    unassigned_duties: List[int] = field(default_factory=list)
+    total_utility: float = 0.0
+    elapsed_ms: float = 0.0
+    logs: List[str] = field(default_factory=list)
+    algorithm: str = "nominal_assignment_pulp"
