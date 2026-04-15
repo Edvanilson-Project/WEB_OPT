@@ -151,6 +151,15 @@ class CctParamsInput(BaseModel):
     operator_profiles: List[OperatorProfileInput] = Field(default_factory=list)
     natural_language_rules: List[str] = Field(default_factory=list)
     apply_cct: Optional[bool] = None
+    dynamic_rules: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description=(
+            "Regras dinâmicas de custo no formato JSON Logic. "
+            "Aplicadas como modificadores APÓS o cálculo base do CostEvaluator. "
+            "Ex: {\"condition\": {\"field\": \"is_holiday\", \"op\": \"==\", \"value\": true}, "
+            "\"action\": {\"target\": \"overtime_cost\", \"type\": \"multiply\", \"value\": 1.5}}"
+        ),
+    )
 
 
 class VspParamsInput(BaseModel):
@@ -283,6 +292,20 @@ class ErrorResponse(BaseModel):
     code: str
     message: str
     diagnostics: Dict[str, Any] = Field(default_factory=dict)
+
+
+class TaskSubmittedResponse(BaseModel):
+    """Resposta imediata do POST /optimize/ após enfileirar no Celery."""
+    status: str = "processing"
+    task_id: str
+
+
+class TaskStatusResponse(BaseModel):
+    """Resposta do polling GET /optimize/status/{task_id}."""
+    status: str  # "processing" | "completed" | "failed"
+    task_id: str
+    result: Optional[OptimizeResponse] = None
+    error: Optional[Dict[str, Any]] = None
 
 
 class MacroEstimateRequest(BaseModel):

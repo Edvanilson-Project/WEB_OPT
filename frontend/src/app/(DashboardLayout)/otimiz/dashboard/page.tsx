@@ -55,6 +55,14 @@ import StatusChip from '../_components/StatusChip';
 import { NotifyProvider } from '../_components/Notify';
 import { getSessionUser } from '@/lib/api';
 import {
+  fmtCurrency as fmtCurrencyBase,
+  fmtDateTimeShort,
+  fmtDayMonth,
+  fmtDurationMs,
+  fmtNumber as fmtNumberBase,
+  fmtPercent as fmtPercentBase,
+} from '@/lib/format';
+import {
   useOptimizationDashboard,
   useOptimizationHistory,
   useOptimizationKpis,
@@ -76,45 +84,17 @@ const Chart = dynamic(() => import('react-apexcharts'), { ssr: false });
 
 type Period = 7 | 30 | 90;
 
-function fmtDuration(ms?: number | null): string {
-  if (ms == null || !Number.isFinite(Number(ms)) || Number(ms) <= 0) return '–';
-  const value = Number(ms);
-  if (value < 1000) return `${Math.round(value)}ms`;
-  if (value < 60000) return `${(value / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}s`;
-  return `${Math.floor(value / 60000)}m ${Math.floor((value % 60000) / 1000)}s`;
-}
-
-function fmtDate(iso: string): string {
-  return new Date(iso).toLocaleString('pt-BR', {
-    day: '2-digit',
-    month: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-}
-
-function fmtShortDate(iso: string): string {
-  return new Date(iso).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
-}
-
-function fmtCurrency(value?: number | null): string {
-  if (value == null || !Number.isFinite(Number(value))) return '–';
-  return Number(value).toLocaleString('pt-BR', {
-    style: 'currency',
-    currency: 'BRL',
-    maximumFractionDigits: 0,
-  });
-}
-
-function fmtPercent(value?: number | null, digits = 0): string {
-  if (value == null || !Number.isFinite(Number(value))) return '–';
-  return `${Number(value).toLocaleString('pt-BR', { maximumFractionDigits: digits, minimumFractionDigits: digits })}%`;
-}
-
-function fmtNumber(value?: number | null, digits = 1): string {
-  if (value == null || !Number.isFinite(Number(value))) return '–';
-  return Number(value).toLocaleString('pt-BR', { maximumFractionDigits: digits, minimumFractionDigits: digits });
-}
+// Thin wrappers locais: preservam a preferência visual do dashboard
+// (moeda sem decimais, números com 1 casa) reutilizando a fonte única
+// de verdade em @/lib/format. Nenhuma lógica de formatação nasce aqui.
+const fmtDuration = fmtDurationMs;
+const fmtDate = fmtDateTimeShort;
+const fmtShortDate = fmtDayMonth;
+const fmtCurrency = (value?: number | null) =>
+  fmtCurrencyBase(value, { maxFractionDigits: 0 });
+const fmtPercent = (value?: number | null, digits = 0) => fmtPercentBase(value, digits);
+const fmtNumber = (value?: number | null, digits = 1) =>
+  fmtNumberBase(value, { maxFractionDigits: digits, minFractionDigits: digits });
 
 const ALGO_LABEL: Record<string, string> = {
   full_pipeline: 'Pipeline Completo',

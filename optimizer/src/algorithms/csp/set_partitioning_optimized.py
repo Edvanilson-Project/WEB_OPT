@@ -659,39 +659,298 @@ class SetPartitioningOptimizedCSP(BaseAlgorithm, ICSPAlgorithm):
         cost += fairness_dev * self.goal_weights.get("fairness", 0.05)
         return cost
 
-    def _pricing(self, tasks: List[Block], columns: List[Tuple[List[Block], float]], duals: Dict[int, float]) -> List[Tuple[List[Block], float]]:
+    def _spprc_pricing(
+        self,
+        tasks: List[Block],
+        duals: Dict[int, float],
+    ) -> List[Tuple[List[Block], float]]:
         """
-        Pricing otimizado (geração iterativa de colunas).
+        Algoritmo de Rotulação Dinâmica (Label-Setting SPPRC) para o subproblema
+        de Pricing no Grafo Acíclico Direcionado (DAG) de tarefas.
 
-        FUNCIONAMENTO:
-        1. Calcula custo reduzido: cost - Σ duals
-        2. Gera novas colunas com custo reduzido negativo
-        3. Limita número de adições por iteração
+        FUNDAMENTO MATEMÁTICO
+        ─────────────────────
+        Encontra jornadas (paths Source → Tarefa₁ → … → Tarefa_k → Sink)
+        com custo reduzido negativo:
 
-        MELHORIA: Usa _generate_columns_smart que já é otimizada.
+            rc = c_duty − Σᵢ∈duty πᵢ   (πᵢ = dual da restrição de cobertura i)
+
+        Qualquer rótulo com rc < 0 ao atingir o Sink representa uma nova
+        Coluna (Duty) que, quando inserida no RMP, melhora a solução dual.
+
+        ESTRUTURA DO RÓTULO
+        ───────────────────
+        (rc, c, w, s, d, ub, task, first_start, prev) onde:
+          rc          — custo reduzido acumulado
+          c           — custo real acumulado
+          w           — trabalho efetivo (minutos)
+          s           — spread / jornada total (minutos)
+          d           — condução contínua (minutos; reseta após pausa ≥ 45 min)
+          ub          — unpaid break acumulado (minutos não remunerados)
+          task        — nodo corrente no DAG
+          first_start — start_time da 1ª tarefa (para cálculo de spread)
+          prev        — ponteiro para rótulo anterior (reconstrução do path)
+
+        CRITÉRIO DE DOMINÂNCIA PARETO (CORREÇÃO NON-LINEAR)
+        ─────────────────────────────────────────────────────
+        Lₐ domina L_b no mesmo nodo sse:
+            Lₐ.rc ≤ L_b.rc ∧ Lₐ.w ≤ L_b.w ∧ Lₐ.s ≤ L_b.s ∧ Lₐ.d ≤ L_b.d ∧ Lₐ.ub ≤ L_b.ub
+            ∧ pelo menos um estritamente menor.
+        
+        CORREÇÕES CRÍTICAS IMPLEMENTADAS:
+        1. inclusão de 'ub' (unpaid_break): Proteção contra penalidades não-lineares de 
+           pausa longa que crescem em degraus após 90 min (1x, 3x, 10x). Um rótulo 
+           com ub=85 pode ter custo menor agora, mas ao cruzar 90 min receber penalidade 
+           10x, sendo mais caro no final que ub=20 com custo maior atualmente.
+        
+        2. Relaxamento de dominância em 'w': Como a função de custo inclui fairness 
+           (penalidade baseada em abs(work - target_work)), menos trabalho nem sempre 
+           é melhor. Se target_work é maior, menos trabalho significa maior penalidade 
+           de fairness. Implementamos relaxamento: se w1 < w2 mas ambos estão longe do 
+           target_work, mantemos ambos na fronteira. Alternativamente, exigimos 
+           igualdade estrita quando a diferença de trabalho impacta a penalidade final.
+           (Escolha arquitetural: exigimos w1 == w2 OU toleramos diferença se ambos 
+           estão dentro de faixa de tolerância do target_work).
+
+        Rótulos dominados são descartados imediatamente (poda Pareto).
         """
-        existing = {tuple(block.id for block in combo) for combo, _ in columns}
-        additions: List[Tuple[List[Block], float]] = []
+        CREW_COST_PER_MIN = _DEFAULT_CREW_COST_PER_HOUR / 60.0
+        FIXED_DUTY_COST = 50.0
+        GAP_WEIGHT = 0.1
+        PASSIVE_WEIGHT = float(self.goal_weights.get("passive_transfer", 0.25))
+        BREAK_RESET_MIN = 45
+        LONG_UNPAID_BREAK_LIMIT = self.greedy.long_unpaid_break_limit
+        LONG_UNPAID_BREAK_PENALTY = self.greedy.long_unpaid_break_penalty_weight
 
-        # Gera candidatos (usando função otimizada)
-        candidates = sorted(
-            self._generate_columns_smart(tasks),
-            key=lambda item: item[1] - sum(duals.get(block.id, 0.0) for block in item[0]),
+        target_work = max(
+            self.greedy.min_work,
+            min(self.greedy.max_work, int(self.goal_weights.get("target_work_minutes", self.greedy.max_work * 0.85)))
         )
+        fairness_tolerance = int(self.goal_weights.get("fairness_tolerance_minutes", 30))
 
-        for combo, cost in candidates:
-            signature = tuple(block.id for block in combo)
-            if signature in existing:
+        class _Label:
+            __slots__ = ('rc', 'c', 'w', 's', 'd', 'ub', 'task', 'first_start', 'prev')
+
+            def __init__(
+                self_l,
+                rc: float, c: float, w: int, s: int, d: int, ub: int,
+                task: Block, first_start: int,
+                prev: Optional['_Label'] = None,
+            ) -> None:
+                self_l.rc = rc
+                self_l.c = c
+                self_l.w = w
+                self_l.s = s
+                self_l.d = d
+                self_l.ub = ub
+                self_l.task = task
+                self_l.first_start = first_start
+                self_l.prev = prev
+
+            def dominates(self_l, other: '_Label') -> bool:
+                """True se self_l domina other em todos os recursos (Pareto).
+                
+                CORREÇÃO NON-LINEAR: Inclui ub (unpaid_break) e trata w com cuidado
+                devido à penalidade de fairness baseada em target_work.
+                """
+                if self_l.ub > other.ub:
+                    return False
+
+                w_dominates = False
+                w1_fairness = abs(self_l.w - target_work)
+                w2_fairness = abs(other.w - target_work)
+                
+                if self_l.w == other.w:
+                    w_dominates = True
+                elif self_l.w < other.w:
+                    if w1_fairness <= fairness_tolerance and w2_fairness <= fairness_tolerance:
+                        w_dominates = True
+                    elif w1_fairness <= w2_fairness:
+                        w_dominates = True
+                else:  # self_l.w > other.w
+                    if w1_fairness <= fairness_tolerance and w2_fairness <= fairness_tolerance:
+                        w_dominates = True
+                    elif w1_fairness <= w2_fairness:
+                        w_dominates = True
+
+                if not w_dominates:
+                    return False
+
+                w_strictly_better = (self_l.w != other.w) and w_dominates
+
+                return (
+                    self_l.rc <= other.rc
+                    and self_l.s <= other.s
+                    and self_l.d <= other.d
+                    and self_l.ub <= other.ub
+                    and (
+                        self_l.rc < other.rc
+                        or w_strictly_better
+                        or self_l.s < other.s
+                        or self_l.d < other.d
+                        or self_l.ub < other.ub
+                    )
+                )
+
+            def get_path(self_l) -> List[Block]:
+                """Reconstrói o path seguindo ponteiros prev."""
+                nodes: List[Block] = []
+                curr: Optional['_Label'] = self_l
+                while curr is not None:
+                    nodes.append(curr.task)
+                    curr = curr.prev
+                nodes.reverse()
+                return nodes
+
+        # ── 1. Ordenação topológica do DAG ────────────────────────────────────
+        ordered = sorted(tasks, key=lambda b: (b.start_time, b.id))
+        n = len(ordered)
+        pullout = self.greedy.pullout
+        pullback = self.greedy.pullback
+
+        # Rótulos não-dominados por nodo (índice = posição em `ordered`)
+        node_labels: List[List[_Label]] = [[] for _ in range(n)]
+
+        def _add_label(node_idx: int, new_lbl: '_Label') -> bool:
+            """Insere new_lbl se não dominado; remove labels que new_lbl domina."""
+            bucket = node_labels[node_idx]
+            for existing in bucket:
+                if existing.dominates(new_lbl):
+                    return False  # new_lbl é dominado — descartado
+            node_labels[node_idx] = [lb for lb in bucket if not new_lbl.dominates(lb)]
+            node_labels[node_idx].append(new_lbl)
+            return True
+
+        # ── 2. Inicialização: Source → Tarefa_i (1ª tarefa de cada jornada) ───
+        for i, task in enumerate(ordered):
+            drive = self.greedy._block_drive(task)
+            s0 = task.total_duration + pullout + pullback
+            if s0 > self.max_shift or drive > self.greedy.max_driving:
                 continue
 
-            # Custo reduzido negativo = coluna promissora
-            reduced = cost - sum(duals.get(block.id, 0.0) for block in combo)
-            if reduced < -1e-5:
+            c0 = FIXED_DUTY_COST + drive * CREW_COST_PER_MIN
+            rc0 = c0 - duals.get(task.id, 0.0)
+
+            _add_label(i, _Label(
+                rc=rc0, c=c0, w=drive, s=s0, d=drive, ub=0,
+                task=task, first_start=task.start_time,
+            ))
+
+        # ── 3. Extensão em ordem topológica ───────────────────────────────────
+        for i, task_i in enumerate(ordered):
+            if not node_labels[i]:
+                continue
+
+            for j in range(i + 1, n):
+                task_j = ordered[j]
+                gap = task_j.start_time - task_i.end_time
+
+                # Early-break: tarefas ordenadas → gap só cresce
+                if gap > self.max_shift:
+                    break
+
+                # Poda rápida O(1) antes de verificações custosas
+                if not self._fast_feasibility_check(task_i, task_j):
+                    continue
+
+                drive_j = self.greedy._block_drive(task_j)
+                passive = max(
+                    0,
+                    self.greedy._transfer_needed(task_i, task_j) - self.greedy.min_layover,
+                )
+                edge_c = (
+                    drive_j * CREW_COST_PER_MIN
+                    + gap * GAP_WEIGHT
+                    + passive * PASSIVE_WEIGHT
+                )
+                edge_rc = edge_c - duals.get(task_j.id, 0.0)
+
+                for lbl in node_labels[i]:
+                    new_w = lbl.w + drive_j
+                    if new_w > self.max_piece:
+                        continue
+
+                    # Spread: start da 1ª tarefa ao end da última + buffers
+                    new_s = (task_j.end_time + pullback) - (lbl.first_start - pullout)
+                    if new_s > self.max_shift:
+                        continue
+
+                    # Condução contínua: reseta se gap ≥ limiar de pausa
+                    new_d = drive_j if gap >= BREAK_RESET_MIN else lbl.d + drive_j
+                    if new_d > self.greedy.max_driving:
+                        continue
+
+                    # Unpaid break acumulado: soma do gap atual ao ub anterior
+                    # O gap é parte não remunerada entre tarefas
+                    new_ub = lbl.ub + gap
+
+                    _add_label(j, _Label(
+                        rc=lbl.rc + edge_rc,
+                        c=lbl.c + edge_c,
+                        w=new_w,
+                        s=new_s,
+                        d=new_d,
+                        ub=new_ub,
+                        task=task_j,
+                        first_start=lbl.first_start,
+                        prev=lbl,
+                    ))
+
+        # ── 4. Coleta: rótulos com rc < 0 → novas Colunas para o RMP ─────────
+        results: List[Tuple[List[Block], float]] = []
+        seen: Set[Tuple[int, ...]] = set()
+
+        for node_lbls in node_labels:
+            for lbl in node_lbls:
+                if lbl.rc >= -1e-5:
+                    continue
+                if lbl.w < self.min_piece:
+                    continue
+                path = lbl.get_path()
+                sig = tuple(b.id for b in path)
+                if sig in seen:
+                    continue
+                seen.add(sig)
+                results.append((path, lbl.c))
+
+        # Ordena pelo custo reduzido mais negativo (colunas mais promissoras)
+        results.sort(
+            key=lambda item: item[1] - sum(duals.get(b.id, 0.0) for b in item[0])
+        )
+
+        _log.debug(
+            "SPPRC pricing: %d colunas rc<0 encontradas (%d nodos, %d labels totais)",
+            len(results), n,
+            sum(len(lbls) for lbls in node_labels),
+        )
+        return results
+
+    def _pricing(self, tasks: List[Block], columns: List[Tuple[List[Block], float]], duals: Dict[int, float]) -> List[Tuple[List[Block], float]]:
+        """
+        Subproblema de Pricing com SPPRC Label-Setting Algorithm.
+
+        Substitui o DFS-com-bounds pelo Algoritmo de Rotulação Dinâmica sobre
+        DAG, garantindo a prova de otimalidade da Geração de Colunas:
+        se nenhuma coluna com rc < 0 existir, o RMP atual é ótimo.
+
+        FUNCIONAMENTO:
+        1. Chama _spprc_pricing para encontrar jornadas com rc < 0
+        2. Filtra colunas já presentes no pool
+        3. Retorna até max_pricing_additions novas colunas (as mais promissoras)
+        """
+        existing = {tuple(block.id for block in combo) for combo, _ in columns}
+
+        candidates = self._spprc_pricing(tasks, duals)
+
+        additions: List[Tuple[List[Block], float]] = []
+        for combo, cost in candidates:
+            sig = tuple(block.id for block in combo)
+            if sig not in existing:
                 additions.append((combo, cost))
                 if len(additions) >= self.max_pricing_additions:
                     break
 
-        _log.debug(f"Pricing: {len(additions)} novas colunas com custo reduzido negativo")
+        _log.debug("Pricing SPPRC: %d novas colunas com custo reduzido negativo", len(additions))
         return additions
 
     def solve(

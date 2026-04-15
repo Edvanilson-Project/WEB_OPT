@@ -5,6 +5,14 @@ set -uo pipefail
 status=0
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+extract_port_from_url() {
+  local url="$1"
+
+  if [[ "$url" =~ :([0-9]+)(/|$) ]]; then
+    printf '%s\n' "${BASH_REMATCH[1]}"
+  fi
+}
+
 resolve_backend_port() {
   if [[ -n "${BACKEND_PORT:-}" ]]; then
     printf '%s\n' "${BACKEND_PORT}"
@@ -22,6 +30,37 @@ resolve_backend_port() {
   fi
 
   printf '3001\n'
+}
+
+resolve_optimizer_port() {
+  if [[ -n "${OPTIMIZER_PORT:-}" ]]; then
+    printf '%s\n' "${OPTIMIZER_PORT}"
+    return 0
+  fi
+
+  local backend_env_file="$ROOT_DIR/backend/.env"
+  if [[ -f "$backend_env_file" ]]; then
+    local optimizer_url
+    local optimizer_port
+    optimizer_url="$(awk -F= '/^OPTIMIZER_URL=/{print $2; exit}' "$backend_env_file" | tr -d '[:space:]\r')"
+    optimizer_port="$(extract_port_from_url "$optimizer_url")"
+    if [[ -n "$optimizer_port" ]]; then
+      printf '%s\n' "$optimizer_port"
+      return 0
+    fi
+  fi
+
+  local optimizer_env_file="$ROOT_DIR/optimizer/.env"
+  if [[ -f "$optimizer_env_file" ]]; then
+    local env_port
+    env_port="$(awk -F= '/^PORT=/{print $2; exit}' "$optimizer_env_file" | tr -d '[:space:]\r')"
+    if [[ -n "$env_port" ]]; then
+      printf '%s\n' "$env_port"
+      return 0
+    fi
+  fi
+
+  printf '8000\n'
 }
 
 get_pid_for_port() {
@@ -72,9 +111,10 @@ print_service_status() {
 }
 
 BACKEND_PORT="$(resolve_backend_port)"
+OPTIMIZER_PORT="$(resolve_optimizer_port)"
 
 print_service_status "frontend" "http://127.0.0.1:3000/otimiz/optimization" "3000"
 print_service_status "backend" "http://127.0.0.1:${BACKEND_PORT}/api/docs" "${BACKEND_PORT}"
-print_service_status "optimizer" "http://127.0.0.1:8000/health" "8000"
+print_service_status "optimizer" "http://127.0.0.1:${OPTIMIZER_PORT}/health/" "${OPTIMIZER_PORT}"
 
 exit "$status"

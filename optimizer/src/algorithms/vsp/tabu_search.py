@@ -1,99 +1,213 @@
 """
-VSP — Tabu Search (TS).
+VSP — Tabu Search (TS) OTIMIZADO.
 
-Vizinhança: Reloc (mover 1 viagem entre blocos).
-Lista tabu: conjunto de (trip_id, bloco_origem_id) recentemente movidos — evita reversões.
+Estado interno: List[List[int]] (blocos como listas de trip_ids).
+Vizinhança: Reloc (mover 1 viagem entre blocos) + Merge.
+Lista tabu: conjunto de (trip_id, from_idx, to_idx) recentemente movidos — evita reversões.
 Critério de aspiração: aceita movimento tabu se melhora o global.
 """
 from __future__ import annotations
 
 import random
 from collections import deque
-from typing import Deque, List, Optional, Tuple
+from typing import Deque, Dict, List, Optional, Tuple
 
 from ...core.config import get_settings
 from ...domain.interfaces import IVSPAlgorithm
 from ...domain.models import Block, Trip, VehicleType, VSPSolution
-
-
-def _copy_blocks(blocks: List[Block]) -> List[Block]:
-    """Shallow copy: new list + new Block/trips-list wrappers, shared Trip refs."""
-    return [Block(id=b.id, trips=list(b.trips), vehicle_type_id=b.vehicle_type_id,
-                  warnings=b.warnings, meta=dict(b.meta)) for b in blocks]
 from ..base import BaseAlgorithm
-from ..utils import blocks_are_feasible, preferred_pair_penalty, quick_cost_sorted, sort_block_trips
 from .greedy import GreedyVSP, build_preferred_pairs
 
 settings = get_settings()
 
-# Move: (trip_id, from_block_id, to_block_id, insert_pos) — hashable
 Move = Tuple[int, int, int, int]
 
 
-def _generate_reloc_neighbours(blocks: List[Block], sample_n: int = 30, min_gap: int = 8) -> List[Tuple[Move, List[Block]]]:
+def _quick_cost(
+    state: List[List[int]],
+    trip_map: Dict[int, Trip],
+    fixed_vehicle_cost: float = 800.0,
+    idle_cost_per_minute: float = 0.5,
+    max_work_minutes: float = 480.0,
+    crew_cost_weight: float = 400.0,
+) -> float:
+    """Calcula custo rápido usando trip_map para acesso O(1)."""
+    vehicle_cost = len(state) * fixed_vehicle_cost
+    idle_time = 0
+    work_time = 0
+    
+    for block in state:
+        if not block:
+            continue
+        first_trip = trip_map[block[0]]
+        last_trip = trip_map[block[-1]]
+        block_start = first_trip.start_time
+        block_end = last_trip.end_time
+        idle_time += (block_end - block_start)
+        for tid in block:
+            work_time += trip_map[tid].duration
+    
+    idle_penalty = idle_time * idle_cost_per_minute
+    crew_penalty = max(0, work_time - max_work_minutes) * crew_cost_weight
+    
+    return vehicle_cost + idle_penalty + crew_penalty
+
+
+def _blocks_are_feasible(
+    state: List[List[int]],
+    trip_map: Dict[int, Trip],
+    min_gap: int = 8,
+) -> bool:
+    """Verifica viabilidade dos blocos usando trip_map."""
+    for block in state:
+        if not block:
+            continue
+        
+        prev_end = None
+        for i, tid in enumerate(block):
+            trip = trip_map[tid]
+            if prev_end is not None:
+                gap = trip.start_time - prev_end
+                if gap < min_gap:
+                    return False
+                needed = trip_map[block[i-1]].deadhead_times.get(trip.origin_id, 0)
+                if gap < needed:
+                    return False
+            prev_end = trip.end_time
+    
+    return True
+
+
+def _preferred_pair_penalty(
+    state: List[List[int]],
+    trip_map: Dict[int, Trip],
+    preferred_pairs: Dict[int, int],
+    pair_break_penalty: float,
+    paired_trip_bonus: float,
+    hard_pairing_penalty: float,
+) -> float:
+    """Calcula penalidade de pares usando trip_map."""
+    penalty = 0.0
+    
+    for block in state:
+        for i, tid in enumerate(block):
+            if tid not in preferred_pairs:
+                continue
+            expected_partner = preferred_pairs[tid]
+            next_trip = trip_map[block[i+1]] if i + 1 < len(block) else None
+            
+            if next_trip is None:
+                penalty += pair_break_penalty
+            elif next_trip.id != expected_partner:
+                if hard_pairing_penalty > 0:
+                    penalty += hard_pairing_penalty
+                else:
+                    penalty += pair_break_penalty
+            else:
+                penalty -= paired_trip_bonus
+    
+    return penalty
+
+
+def _copy_state(state: List[List[int]]) -> List[List[int]]:
+    """Cópia profunda eficiente do estado (lista de listas de ints)."""
+    return [block[:] for block in state]
+
+
+def _generate_reloc_neighbours(
+    state: List[List[int]],
+    trip_map: Dict[int, Trip],
+    sample_n: int = 30,
+    min_gap: int = 8,
+) -> List[Tuple[Move, List[List[int]]]]:
     """Gera até `sample_n` vizinhos via Relocation e Merge."""
-    if len(blocks) < 2:
+    if len(state) < 2:
         return []
+    
     neighbours = []
-    attempts = min(sample_n, len(blocks) * max((len(b.trips) for b in blocks if b.trips), default=1))
+    attempts = min(sample_n * 3, len(state) * max((len(b) for b in state if b), default=1))
     seen: set = set()
 
-    # Reloc neighbours
-    for _ in range(attempts * 3):
+    for _ in range(attempts):
         if len(neighbours) >= sample_n:
             break
-        src_idx = random.randint(0, len(blocks) - 1)
-        if not blocks[src_idx].trips:
+        
+        src_idx = random.randint(0, len(state) - 1)
+        if not state[src_idx]:
             continue
-        dst_idx = random.choice([i for i in range(len(blocks)) if i != src_idx])
-        trip_pos = random.randint(0, len(blocks[src_idx].trips) - 1)
-        insert_pos = random.randint(0, len(blocks[dst_idx].trips))
+        dst_idx = random.choice([i for i in range(len(state)) if i != src_idx])
+        trip_pos = random.randint(0, len(state[src_idx]) - 1)
+        insert_pos = random.randint(0, len(state[dst_idx]))
         key = (src_idx, trip_pos, dst_idx, insert_pos)
         if key in seen:
             continue
         seen.add(key)
 
-        new_blocks = _copy_blocks(blocks)
-        trip = new_blocks[src_idx].trips.pop(trip_pos)
-        new_blocks[dst_idx].trips.append(trip)
-        new_blocks = [b for b in new_blocks if b.trips]
-        sort_block_trips(new_blocks)
-        if not blocks_are_feasible(new_blocks, min_gap):
+        new_state = _copy_state(state)
+        trip_id = new_state[src_idx].pop(trip_pos)
+        new_state[dst_idx].append(trip_id)
+        new_state = [b for b in new_state if b]
+        
+        for block in new_state:
+            block.sort(key=lambda tid: trip_map[tid].start_time)
+        
+        if not _blocks_are_feasible(new_state, trip_map, min_gap):
             continue
 
-        move: Move = (trip.id, blocks[src_idx].id, blocks[dst_idx].id, insert_pos)
-        neighbours.append((move, new_blocks))
+        move: Move = (trip_id, src_idx, dst_idx, insert_pos)
+        neighbours.append((move, new_state))
 
-    # Merge neighbours — tenta combinar pares de blocos
-    merge_tries = min(sample_n // 3, len(blocks) * (len(blocks) - 1) // 2)
+    merge_tries = min(sample_n // 3, len(state) * (len(state) - 1) // 2)
     for _ in range(merge_tries):
         if len(neighbours) >= sample_n + merge_tries:
             break
-        i, j = random.sample(range(len(blocks)), 2)
-        merge_key = ("merge", min(blocks[i].id, blocks[j].id), max(blocks[i].id, blocks[j].id), 0)
+        i, j = random.sample(range(len(state)), 2)
+        merge_key = ("merge", i, j, 0)
         if merge_key in seen:
             continue
         seen.add(merge_key)
-        new_blocks = _copy_blocks(blocks)
-        new_blocks[i].trips.extend(new_blocks[j].trips)
-        del new_blocks[j]
-        sort_block_trips(new_blocks)
-        if not blocks_are_feasible(new_blocks, min_gap):
+        
+        new_state = _copy_state(state)
+        new_state[i].extend(new_state[j])
+        del new_state[j]
+        
+        for block in new_state:
+            block.sort(key=lambda tid: trip_map[tid].start_time)
+        
+        if not _blocks_are_feasible(new_state, trip_map, min_gap):
             continue
-        move: Move = (-1, blocks[j].id, blocks[i].id, -1)  # sentinel -1 distinguishes merge from reloc
-        neighbours.append((move, new_blocks))
+        
+        move: Move = (-1, j, i, -1)
+        neighbours.append((move, new_state))
 
     return neighbours
 
 
 class TabuSearchVSP(BaseAlgorithm, IVSPAlgorithm):
-    """Busca Tabu para VSP com lista circular e critério de aspiração."""
+    """Busca Tabu para VSP com lista circular e critério de aspiração (versão otimizada)."""
 
     def __init__(self, vsp_params=None):
         super().__init__(name="tabu_vsp", time_budget_s=settings.hybrid_time_budget_seconds)
         self.tabu_size = settings.ts_tabu_size
         self.max_iterations = settings.ts_max_iterations
         self.vsp_params = vsp_params or {}
+
+    def _state_to_blocks(
+        self,
+        state: List[List[int]],
+        trip_map: Dict[int, Trip],
+    ) -> List[Block]:
+        """Reconstrói objetos Block a partir do estado leve (final do algoritmo)."""
+        blocks = []
+        block_id = 1
+        for block_ids in state:
+            if not block_ids:
+                continue
+            trips = [trip_map[tid] for tid in block_ids]
+            block = Block(id=block_id, trips=trips)
+            blocks.append(block)
+            block_id += 1
+        return blocks
 
     def solve(
         self,
@@ -104,11 +218,13 @@ class TabuSearchVSP(BaseAlgorithm, IVSPAlgorithm):
         self._start_timer()
         if not trips:
             return VSPSolution(algorithm=self.name)
+        
         random_seed = self.vsp_params.get("random_seed")
         if random_seed is not None:
             random.seed(int(random_seed))
 
-        # Custos parametrizáveis
+        trip_map: Dict[int, Trip] = {t.id: t for t in trips}
+
         fvc = float(self.vsp_params.get("fixed_vehicle_activation_cost", 800.0))
         icpm = float(self.vsp_params.get("idle_cost_per_minute", 0.5))
         max_work = float(self.vsp_params.get("max_work_minutes", 480.0))
@@ -130,73 +246,75 @@ class TabuSearchVSP(BaseAlgorithm, IVSPAlgorithm):
             if bool(self.vsp_params.get("hard_pairing_vehicle_level", False))
             else 0.0
         )
-        cost_fn = lambda blks: quick_cost_sorted(blks, fvc, icpm, max_work, crew_cw) + preferred_pair_penalty(
-            blks,
-            preferred_pairs,
-            pair_break_penalty,
-            paired_trip_bonus,
-            hard_pairing_penalty,
-        )
 
-        current_blocks = _copy_blocks(GreedyVSP(vsp_params=self.vsp_params).solve(trips, vehicle_types).blocks)
-        current_cost = cost_fn(current_blocks)
-        best_blocks = _copy_blocks(current_blocks)
+        def cost_fn(state: List[List[int]]) -> float:
+            base = _quick_cost(state, trip_map, fvc, icpm, max_work, crew_cw)
+            pairs = _preferred_pair_penalty(
+                state, trip_map, preferred_pairs,
+                pair_break_penalty, paired_trip_bonus, hard_pairing_penalty,
+            )
+            return base + pairs
+
+        current_sol = GreedyVSP(vsp_params=self.vsp_params).solve(trips, vehicle_types)
+        current_state = [[t.id for t in block.trips] for block in current_sol.blocks]
+        current_cost = cost_fn(current_state)
+
+        best_state = _copy_state(current_state)
         best_cost = current_cost
 
         tabu_list: Deque[Move] = deque(maxlen=self.tabu_size)
         iteration = 0
         stale_count = 0
 
-        # Use time budget instead of fixed max_iterations
         while not self._check_timeout():
             iteration += 1
 
-            neighbours = _generate_reloc_neighbours(current_blocks, sample_n=40, min_gap=min_gap)
+            neighbours = _generate_reloc_neighbours(current_state, trip_map, sample_n=40, min_gap=min_gap)
             if not neighbours:
-                # Diversification: perturb and continue
                 stale_count += 1
                 if stale_count > 10:
                     break
                 continue
 
-            # Ordena por custo, aplica lista tabu + aspiração
             scored = [(move, nb, cost_fn(nb)) for move, nb in neighbours]
             scored.sort(key=lambda x: x[2])
 
             chosen_move = None
-            chosen_blocks = None
+            chosen_state = None
             chosen_cost = float("inf")
 
             for move, nb, cost in scored:
-                if move not in tabu_list or cost < best_cost:  # Aspiração
+                if move not in tabu_list or cost < best_cost:
                     chosen_move = move
-                    chosen_blocks = nb
+                    chosen_state = nb
                     chosen_cost = cost
                     break
 
-            if chosen_blocks is None:
-                # Força o melhor mesmo tabu (diversificação)
-                chosen_move, chosen_blocks, chosen_cost = scored[0]
+            if chosen_state is None:
+                chosen_move, chosen_state, chosen_cost = scored[0]
 
-            tabu_list.append(chosen_move)  # type: ignore[arg-type]
-            current_blocks = chosen_blocks  # type: ignore[assignment]
+            tabu_list.append(chosen_move)
+            current_state = chosen_state
             current_cost = chosen_cost
 
             if current_cost < best_cost:
-                best_blocks = _copy_blocks(current_blocks)
+                best_state = _copy_state(current_state)
                 best_cost = current_cost
                 stale_count = 0
             else:
                 stale_count += 1
 
-            # Diversification restart if stagnant
             if stale_count > 25:
-                current_blocks = _copy_blocks(best_blocks)
+                current_state = _copy_state(best_state)
                 current_cost = best_cost
                 tabu_list.clear()
                 stale_count = 0
 
-        sort_block_trips(best_blocks)  # Garante ordenação final (CORREÇÃO B1)
+        best_blocks = self._state_to_blocks(best_state, trip_map)
+        
+        for block in best_blocks:
+            block.trips.sort(key=lambda t: t.start_time)
+
         return VSPSolution(
             blocks=best_blocks,
             algorithm=self.name,

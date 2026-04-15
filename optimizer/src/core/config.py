@@ -102,6 +102,12 @@ class Settings(BaseSettings):
     cct_max_driving_minutes: int = 270          # 4h30 de direção contínua
     cct_min_break_minutes: int = 30             # 30 min de intervalo mínimo
 
+    # ── AI Copilot (OpenRouter) ───────────────────────────────────────────────
+    openrouter_api_key: str = ""                # Chave de API. Vazia = recurso desativado silenciosamente.
+
+    # ── Celery / Redis (fila de tarefas assíncronas) ──────────────────────────
+    redis_url: str = "redis://localhost:6379/0" # Lida de REDIS_URL no .env ou docker-compose
+
 
 @lru_cache
 def get_settings() -> Settings:

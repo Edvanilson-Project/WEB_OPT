@@ -100,6 +100,7 @@ class HybridPipeline(BaseAlgorithm):
                 return True
             return False
 
+        remaining_budget = max(1.0, budget - (time.perf_counter() - self._start_time))
         sa = SimulatedAnnealingVSP(vsp_params=self.vsp_params)
         sa_budget = remaining_budget * 0.35
         sa.time_budget_s = sa_budget

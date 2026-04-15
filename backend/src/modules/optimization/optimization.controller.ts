@@ -100,4 +100,12 @@ export class OptimizationController {
     const companyId = resolveScopedCompanyId(req.user?.companyId, body?.companyId, req.user?.role);
     return this.optimizationService.evaluateDelta(body, companyId);
   }
+
+  @Post('evaluate-baseline')
+  @ApiOperation({ summary: 'Baseline de custo do arranjo atual (comparável ao what-if)' })
+  @Roles(UserRole.SUPER_ADMIN, UserRole.COMPANY_ADMIN, UserRole.ANALYST)
+  evaluateBaseline(@Body() body: any, @Request() req: AuthRequest) {
+    const companyId = resolveScopedCompanyId(req.user?.companyId, body?.companyId, req.user?.role);
+    return this.optimizationService.evaluateBaseline(body, companyId);
+  }
 }

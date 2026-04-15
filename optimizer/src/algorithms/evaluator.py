@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import Any, Dict, List
 
 from ..core.config import get_settings
+from ..core.rule_engine import DynamicRuleEngine
 from ..domain.interfaces import ICostEvaluator
 from ..domain.models import (
     Block,
@@ -54,6 +55,7 @@ class CostEvaluator(ICostEvaluator):
         self.long_unpaid_break_penalty_weight = max(0.0, float(long_unpaid_break_penalty_weight))
         self.idle_cost_per_minute = idle_cost_per_minute
         self.overtime_extra_pct = max(0.0, float(overtime_extra_pct))
+        self._dynamic_rules: list = []  # Populado externamente via set_dynamic_rules()
 
     def _long_unpaid_break_penalty(self, unpaid_break_minutes: int) -> float:
         """Piecewise-linear penalty.
@@ -75,6 +77,17 @@ class CostEvaluator(ICostEvaluator):
             + tier2 * 3.0
             + tier3 * 10.0
         )
+
+    def set_dynamic_rules(self, rules: list) -> None:
+        """Define regras dinâmicas para esta instância do avaliador.
+
+        Chamado pelo OptimizerService após receber os cct_params do payload.
+        As regras são compiladas uma única vez pelo DynamicRuleEngine e
+        aplicadas em cada duty durante o csp_cost_breakdown.
+
+        Se rules estiver vazio ou None, o motor não faz nada (zero impacto).
+        """
+        self._dynamic_rules = list(rules) if rules else []
 
     # ── Frota ─────────────────────────────────────────────────────────────────
 
@@ -180,6 +193,11 @@ class CostEvaluator(ICostEvaluator):
         holiday_extra = 0.0
         cct_penalties = 0.0
 
+        # ── Compilar regras dinâmicas UMA VEZ (reutilizada em todos os duties) ─
+        rule_engine = DynamicRuleEngine(self._dynamic_rules)
+        has_dynamic_rules = rule_engine.rule_count > 0
+        dynamic_adjustments_total = 0.0
+
         for duty in solution.duties:
             duty_work_cost = (duty.work_time / 60.0) * self.crew_cost_per_hour
             guaranteed_minutes = max(
@@ -216,6 +234,85 @@ class CostEvaluator(ICostEvaluator):
                     * float(duty.meta.get("holiday_extra_pct", 0.0))
                 )
             duty_cct_penalties = (duty.rest_violations + duty.shift_violations) * self.violation_penalty
+
+            # ── REGRAS DINÂMICAS: aplicar modificadores APÓS custos base ──────
+            # Custos base estão todos calculados. As regras dinâmicas atuam como
+            # modificadores (multiply, add, subtract, set) sobre os valores.
+            # Se nenhuma regra está definida, este bloco é um no-op.
+            if has_dynamic_rules:
+                # Construir contexto do duty de forma BLINDADA (evita AttributeError)
+                duty_context: Dict[str, Any] = {
+                    # Campos temporais
+                    "work_time": getattr(duty, "work_time", 0),
+                    "spread_time": getattr(duty, "spread_time", 0),
+                    "paid_minutes": getattr(duty, "paid_minutes", 0),
+                    "overtime_minutes": getattr(duty, "overtime_minutes", 0),
+                    "nocturnal_minutes": getattr(duty, "nocturnal_minutes", 0),
+                    "start_time": getattr(duty, "start_time", None),
+                    "end_time": getattr(duty, "end_time", None),
+                    "start_hour": (getattr(duty, "start_time", 0) // 60) if getattr(duty, "start_time", None) is not None else 0,
+                    "end_hour": (getattr(duty, "end_time", 0) // 60) if getattr(duty, "end_time", None) is not None else 0,
+
+                    # Campos de violação
+                    "rest_violations": getattr(duty, "rest_violations", 0),
+                    "shift_violations": getattr(duty, "shift_violations", 0),
+                    "continuous_driving_violation": getattr(duty, "continuous_driving_violation", False),
+
+                    # Campos de meta do duty (com fallback para inspeção de viagens)
+                    "is_holiday": bool(
+                        getattr(duty, "meta", {}).get("is_holiday", False)
+                        or any(getattr(t, "is_holiday", False) for t in getattr(duty, "all_trips", getattr(duty, "trips", [])))
+                    ),
+                    "is_sunday": bool(
+                        getattr(duty, "meta", {}).get("is_sunday", False)
+                        or any(getattr(t, "service_day", -1) == 0 for t in getattr(duty, "all_trips", getattr(duty, "trips", [])))
+                    ),
+                    "is_nocturnal": getattr(duty, "nocturnal_minutes", 0) > 0,
+                    "has_overtime": (getattr(duty, "overtime_minutes", 0) or 0) > 0,
+
+                    # Contagens (protegidas com fallbacks para diferentes nomes de atributos)
+                    "num_blocks": len(getattr(duty, "tasks", getattr(duty, "blocks", []))),
+                    "num_trips": len(getattr(duty, "all_trips", getattr(duty, "trips", []))),
+
+                    # Custos base (para condições baseadas em valor)
+                    "base_work_cost": duty_work_cost,
+                    "base_overtime_cost": duty_overtime_cost,
+                    "base_total": (
+                        duty_work_cost + duty_guaranteed_cost + duty_waiting_cost
+                        + duty_overtime_cost + duty_long_break_penalty
+                        + duty_nocturnal_extra + duty_holiday_extra + duty_cct_penalties
+                    ),
+                }
+
+                # Dicionário de custos mutável (o engine modifica in-place)
+                mutable_costs = {
+                    "work_cost": duty_work_cost,
+                    "guaranteed_cost": duty_guaranteed_cost,
+                    "waiting_cost": duty_waiting_cost,
+                    "overtime_cost": duty_overtime_cost,
+                    "long_unpaid_break_penalty": duty_long_break_penalty,
+                    "nocturnal_extra": duty_nocturnal_extra,
+                    "holiday_extra": duty_holiday_extra,
+                    "cct_penalties": duty_cct_penalties,
+                }
+
+                # Soma antes da aplicação (para calcular delta)
+                sum_before = sum(mutable_costs.values())
+
+                # Aplicar regras (degradação graciosa interna)
+                rule_engine.apply(duty_context, mutable_costs)
+
+                # Atualizar variáveis locais com os valores modificados
+                duty_work_cost = mutable_costs["work_cost"]
+                duty_guaranteed_cost = mutable_costs["guaranteed_cost"]
+                duty_waiting_cost = mutable_costs["waiting_cost"]
+                duty_overtime_cost = mutable_costs["overtime_cost"]
+                duty_long_break_penalty = mutable_costs["long_unpaid_break_penalty"]
+                duty_nocturnal_extra = mutable_costs["nocturnal_extra"]
+                duty_holiday_extra = mutable_costs["holiday_extra"]
+                duty_cct_penalties = mutable_costs["cct_penalties"]
+
+                dynamic_adjustments_total += sum(mutable_costs.values()) - sum_before
 
             work_cost += duty_work_cost
             guaranteed_cost += duty_guaranteed_cost
@@ -259,7 +356,7 @@ class CostEvaluator(ICostEvaluator):
             + holiday_extra
             + cct_penalties
         )
-        return {
+        result = {
             "total": _R(total),
             "work_cost": _R(work_cost),
             "guaranteed_cost": _R(guaranteed_cost),
@@ -273,6 +370,12 @@ class CostEvaluator(ICostEvaluator):
             "num_uncovered_blocks": len(solution.uncovered_blocks),
             "duties": duties,
         }
+        if has_dynamic_rules:
+            result["dynamic_rules_applied"] = rule_engine.rule_count
+            result["dynamic_adjustments_total"] = _R(dynamic_adjustments_total)
+            if rule_engine.warnings:
+                result["dynamic_rules_warnings"] = rule_engine.warnings
+        return result
 
     def csp_cost(self, solution: CSPSolution) -> float:
         """

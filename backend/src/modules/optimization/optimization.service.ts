@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, HttpException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
@@ -61,6 +61,8 @@ export interface OptimizationResultPayload {
   };
   [key: string]: any;
 }
+
+import { firstValueFrom } from 'rxjs';
 
 @Injectable()
 export class OptimizationService implements OnModuleInit {
@@ -638,6 +640,12 @@ export class OptimizationService implements OnModuleInit {
         }));
         this.logger.debug(`[MDVSP] ${depots.length} garagens encontradas: ${JSON.stringify(depots)}`);
 
+        const resolvedTimeBudgetSeconds =
+          dto.timeBudgetSeconds ??
+          dto.vspParams?.timeBudgetSeconds ??
+          activeSettings?.timeBudgetSeconds ??
+          300;
+
         const optimizerPayload: Record<string, any> = {
           trips: trips.map((t: any) => ({
             id: t.id,
@@ -665,11 +673,7 @@ export class OptimizationService implements OnModuleInit {
               ? null
               : (dto.lineId ?? dto.lineIds?.[0] ?? null),
           company_id: dto.companyId,
-          time_budget_s:
-            dto.timeBudgetSeconds ??
-            dto.vspParams?.timeBudgetSeconds ??
-            activeSettings?.timeBudgetSeconds ??
-            null,
+          time_budget_s: resolvedTimeBudgetSeconds,
           cct_params: cctParams,
           vsp_params: vspParams,
           depots: depots,
@@ -692,7 +696,7 @@ export class OptimizationService implements OnModuleInit {
         const resolvedParams = this._cloneJson({
           algorithm: mappedAlgorithm,
           operationMode: dto.operationMode ?? 'urban',
-          timeBudgetSeconds: optimizerPayload.time_budget_s ?? null,
+          timeBudgetSeconds: resolvedTimeBudgetSeconds,
           cct: cctParams,
           vsp: vspParams,
         });
@@ -822,12 +826,104 @@ export class OptimizationService implements OnModuleInit {
     }
   }
 
-  /** Chama o microserviço FastAPI optimizer via HTTP. */
-  private _callOptimizerService(
+  /**
+   * Chama o microserviço FastAPI optimizer via arquitetura assíncrona Celery+Redis.
+   *
+   * FLUXO:
+   *   1. POST /optimize/ → Python enfileira no Celery e devolve {task_id} imediatamente
+   *   2. Loop de polling: GET /optimize/status/{task_id} a cada 5s
+   *   3. Quando status="completed" → resolve(result) com payload idêntico ao anterior
+   *   4. Quando status="failed"    → reject(error) com diagnósticos ricos preservados
+   *
+   * AJUSTE 2 (Non-blocking sleep):
+   *   O sleep usa `await new Promise(resolve => setTimeout(resolve, 5000))`.
+   *   Isso garante que o event loop do Node.js continua livre para processar
+   *   outros pedidos de outros utilizadores durante o polling.
+   *
+   * COMPATIBILIDADE:
+   *   A assinatura do método é idêntica à anterior. O caller (_executeOptimization)
+   *   recebe o mesmo payload que recebia na arquitectura síncrona — sem mudanças fora
+   *   deste método.
+   */
+  private async _callOptimizerService(
     baseUrl: string,
     payload: Record<string, any>,
     timeoutMs: number = 360000,
   ): Promise<any> {
+    const POLL_INTERVAL_MS = 5000; // 5 segundos entre cada polling
+    const startedAt = Date.now();
+
+    // ── PASSO 1: Submeter tarefa ao Celery via POST /optimize/ ────────────────
+    const taskId = await this._submitOptimizationTask(baseUrl, payload, timeoutMs);
+    this.logger.debug(`[CELERY] run#${payload.run_id}: task enfileirada → task_id=${taskId}`);
+
+    // ── PASSO 2: Loop de polling não-bloqueante ───────────────────────────────
+    while (true) {
+      // AJUSTE 2: sleep não-bloqueante — event loop livre durante a espera
+      await new Promise<void>((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
+
+      const elapsed = Date.now() - startedAt;
+      if (elapsed >= timeoutMs) {
+        throw new Error(
+          `Optimizer polling timeout após ${Math.round(elapsed / 1000)}s (task_id=${taskId})`,
+        );
+      }
+
+      // ── PASSO 3: Consultar estado da tarefa ─────────────────────────────────
+      const statusUrl = new URL(`/optimize/status/${taskId}`, baseUrl).toString();
+      let statusResponse: any;
+
+      try {
+        statusResponse = await this._httpGet(statusUrl, timeoutMs - elapsed);
+      } catch (pollErr: any) {
+        // Se o erro tiver a propriedade 'detail', o servidor Python respondeu
+        // propositalmente com HTTP 400 ou 500 (Erro de Negócio ou Worker Crash).
+        // Devemos ABORTAR e propagar o erro — continuar seria um loop infinito!
+        if (pollErr.detail) {
+          throw new Error(JSON.stringify(pollErr.detail));
+        }
+
+        // Sem 'detail' = erro de infraestrutura real (ECONNREFUSED, socket timeout, etc.).
+        // Faz sentido logar e tentar na próxima iteração.
+        this.logger.warn(
+          `[CELERY] task_id=${taskId}: erro de infraestrutura no polling (tentando novamente): ${pollErr.message}`,
+        );
+        continue;
+      }
+
+      const status: string = statusResponse?.status ?? '';
+      this.logger.debug(
+        `[CELERY] task_id=${taskId}: status=${status} elapsed=${Math.round(elapsed / 1000)}s`,
+      );
+
+      // ── PASSO 4: Processar resposta ─────────────────────────────────────────
+      if (status === 'completed') {
+        // Retorna o result aninhado (idêntico ao payload síncrono anterior)
+        return statusResponse.result ?? statusResponse;
+      }
+
+      if (status === 'failed') {
+        const errorDetail = statusResponse.error || {};
+        const errorMsg = errorDetail.message || 'Falha no worker de otimização';
+        const diagnostics = errorDetail.diagnostics || {};
+        const code = errorDetail.code || 'OPTIMIZER_ERROR';
+
+        // Reconstructs a rich error string so _classifyOptimizerError can parse it
+        throw new Error(
+          JSON.stringify({ code, message: errorMsg, diagnostics }),
+        );
+      }
+
+      // status === 'processing' → continuar o loop
+    }
+  }
+
+  /** Submete o payload ao FastAPI e recupera o task_id do Celery. */
+  private _submitOptimizationTask(
+    baseUrl: string,
+    payload: Record<string, any>,
+    timeoutMs: number,
+  ): Promise<string> {
     return new Promise((resolve, reject) => {
       const body = JSON.stringify(payload);
       const url = new URL('/optimize/', baseUrl);
@@ -849,9 +945,15 @@ export class OptimizationService implements OnModuleInit {
         res.on('end', () => {
           if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
             try {
-              resolve(JSON.parse(data));
+              const parsed = JSON.parse(data);
+              const taskId: string = parsed?.task_id;
+              if (!taskId) {
+                reject(new Error(`POST /optimize/ não retornou task_id: ${data}`));
+              } else {
+                resolve(taskId);
+              }
             } catch {
-              reject(new Error(`Invalid JSON from optimizer: ${data}`));
+              reject(new Error(`Invalid JSON from optimizer POST: ${data}`));
             }
           } else {
             reject(new Error(`Optimizer HTTP ${res.statusCode}: ${data}`));
@@ -862,12 +964,61 @@ export class OptimizationService implements OnModuleInit {
       req.on('error', reject);
       req.setTimeout(timeoutMs, () => {
         req.destroy();
-        reject(new Error('Optimizer request timed out'));
+        reject(new Error('Optimizer POST /optimize/ timed out'));
       });
       req.write(body);
       req.end();
     });
   }
+
+  /** GET HTTP simples não-bloqueante para o endpoint de polling. */
+  private _httpGet(url: string, timeoutMs: number): Promise<any> {
+    return new Promise((resolve, reject) => {
+      const parsedUrl = new URL(url);
+      const options = {
+        hostname: parsedUrl.hostname,
+        port: parsedUrl.port || 80,
+        path: parsedUrl.pathname,
+        method: 'GET',
+      };
+
+      const req = http.request(options, (res) => {
+        let data = '';
+        res.on('data', (chunk) => (data += chunk));
+        res.on('end', () => {
+          // HTTP 400/500 do endpoint de status = erro de negócio estruturado
+          if (res.statusCode && res.statusCode >= 400) {
+            try {
+              const parsed = JSON.parse(data);
+              // Re-lança como erro com detalhes para o caller processar
+              reject(
+                Object.assign(new Error(`Optimizer status HTTP ${res.statusCode}`), {
+                  httpStatus: res.statusCode,
+                  detail: parsed?.detail ?? parsed,
+                }),
+              );
+            } catch {
+              reject(new Error(`Optimizer status HTTP ${res.statusCode}: ${data}`));
+            }
+            return;
+          }
+          try {
+            resolve(JSON.parse(data));
+          } catch {
+            reject(new Error(`Invalid JSON from optimizer GET: ${data}`));
+          }
+        });
+      });
+
+      req.on('error', reject);
+      req.setTimeout(Math.min(timeoutMs, 10000), () => {
+        req.destroy();
+        reject(new Error('Optimizer GET status timed out'));
+      });
+      req.end();
+    });
+  }
+
 
   /**
    * Mapeia o algoritmo do frontend/enum para o AlgorithmType válido do microserviço Python.
@@ -1576,14 +1727,19 @@ export class OptimizationService implements OnModuleInit {
         const id = typeof tripIdOrObj === 'object' ? tripIdOrObj.id : tripIdOrObj;
         const t = tripMap.get(id);
         if (!t) return tripIdOrObj;
+        const originId = t.originTerminalId ?? 1;
+        const destId = t.destinationTerminalId ?? 2;
         return {
           id: t.id,
           trip_id: t.id,
           start_time: t.startTimeMinutes ?? null,
           end_time: t.endTimeMinutes ?? null,
-          origin_id: String(t.originTerminalId ?? '--'),
-          destination_id: String(t.destinationTerminalId ?? '--'),
+          origin_id: String(originId),
+          destination_id: String(destId),
           duration: t.durationMinutes ?? 0,
+          line_id: t.lineId ?? null,
+          direction: originId < destId ? 'outbound' : 'inbound',
+          trip_group_id: t.tripGroupId ?? null,
           block_id: block.block_id,
           status: 'assigned',
         };
@@ -2020,6 +2176,7 @@ export class OptimizationService implements OnModuleInit {
     const promotedFields = [
       'cost_breakdown',
       'solver_explanation',
+      'ai_copilot_insight',
       'phase_summary',
       'trip_group_audit',
       'reproducibility',
@@ -2146,6 +2303,10 @@ export class OptimizationService implements OnModuleInit {
 
     if (summary.solverExplanation == null && summary.solver_explanation != null) {
       summary.solverExplanation = this._cloneJson(summary.solver_explanation);
+    }
+    // AI Copilot: promover alias camelCase para o frontend TypeScript
+    if (summary.aiCopilotInsight == null && summary.ai_copilot_insight != null) {
+      summary.aiCopilotInsight = summary.ai_copilot_insight;
     }
     if (summary.phaseSummary == null && summary.phase_summary != null) {
       summary.phaseSummary = this._cloneJson(summary.phase_summary);
@@ -2558,20 +2719,64 @@ export class OptimizationService implements OnModuleInit {
     this.logger.debug(`[WhatIf] Proxy para ${whatIfUrl}`);
     
     try {
-      const response = await this.httpService.post(whatIfUrl, {
+      const response = await firstValueFrom(this.httpService.post(whatIfUrl, {
         ...body,
         company_id: companyId,
-      }).toPromise();
-      
+      }));
+
       return response?.data;
     } catch (error: any) {
-      this.logger.error(`[WhatIf] Erro ao chamar optimizer: ${error?.message}`);
-      
-      if (error?.response?.data) {
-        throw new Error(`Optimizer WhatIf error: ${JSON.stringify(error.response.data)}`);
+      // Preserva status HTTP do optimizer (404 de Python deve sair como 404,
+      // não virar 500 genérico). Evita mascarar bugs de payload como "erro interno".
+      const upstreamStatus = error?.response?.status;
+      const upstreamData = error?.response?.data;
+      this.logger.error(
+        `[WhatIf] Erro ao chamar optimizer (status=${upstreamStatus}): ${error?.message} :: ${JSON.stringify(upstreamData)}`,
+      );
+
+      if (upstreamStatus && upstreamData) {
+        throw new HttpException(
+          typeof upstreamData === 'object' ? upstreamData : { detail: String(upstreamData) },
+          upstreamStatus,
+        );
       }
-      
-      throw new Error(`Failed to evaluate delta: ${error?.message}`);
+
+      throw new HttpException(
+        { detail: `Failed to evaluate delta: ${error?.message}` },
+        500,
+      );
+    }
+  }
+
+  async evaluateBaseline(body: any, companyId?: number): Promise<any> {
+    const optimizerUrl = this.configService.get('OPTIMIZER_URL', 'http://localhost:8000');
+    const baselineUrl = `${optimizerUrl}/api/v1/evaluate-baseline`;
+
+    this.logger.debug(`[Baseline] Proxy para ${baselineUrl}`);
+
+    try {
+      const response = await firstValueFrom(
+        this.httpService.post(baselineUrl, { ...body, company_id: companyId }),
+      );
+      return response?.data;
+    } catch (error: any) {
+      const upstreamStatus = error?.response?.status;
+      const upstreamData = error?.response?.data;
+      this.logger.error(
+        `[Baseline] Erro ao chamar optimizer (status=${upstreamStatus}): ${error?.message} :: ${JSON.stringify(upstreamData)}`,
+      );
+
+      if (upstreamStatus && upstreamData) {
+        throw new HttpException(
+          typeof upstreamData === 'object' ? upstreamData : { detail: String(upstreamData) },
+          upstreamStatus,
+        );
+      }
+
+      throw new HttpException(
+        { detail: `Failed to evaluate baseline: ${error?.message}` },
+        500,
+      );
     }
   }
 

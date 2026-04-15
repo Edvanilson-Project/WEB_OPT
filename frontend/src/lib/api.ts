@@ -130,6 +130,8 @@ export const optimizationApi = {
     apiClient.get(`/optimization/dashboard/${companyId}`).then((r) => r.data),
   evaluateDelta: (data: object) =>
     apiClient.post('/optimization/evaluate-delta', data).then((r) => r.data),
+  evaluateBaseline: (data: object) =>
+    apiClient.post('/optimization/evaluate-baseline', data).then((r) => r.data),
 };
 
 // ─── Reports ─────────────────────────────────────────────────────────────────

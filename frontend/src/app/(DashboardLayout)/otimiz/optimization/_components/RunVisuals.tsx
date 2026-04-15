@@ -26,6 +26,7 @@ import { TabAlerts } from './TabAlerts';
 import { TabTrips } from './TabTrips';
 import { TabGantt } from './TabGantt';
 import { TabAudit } from './TabAudit';
+import { AiCopilotInsight } from './AiCopilotInsight';
 
 export function RunVisuals({
   run,
@@ -42,7 +43,11 @@ export function RunVisuals({
 }) {
   const theme = useTheme();
   const [tab, setTab] = useState(0);
+  const [whatIfCost, setWhatIfCost] = useState<number | null>(null);
   const res = useMemo(() => run.resultSummary || {}, [run.resultSummary]);
+
+  // Reset what-if cost when switching to a different run
+  React.useEffect(() => { setWhatIfCost(null); }, [run.id]);
   const warningsRaw = res.warnings || [];
   const warnings = Array.isArray(warningsRaw) ? (warningsRaw as (string | OptimizationStructuredIssue)[]).map(w => typeof w === 'string' ? w : w.message) : [];
   const unassigned = res.unassigned_trips || [];
@@ -159,7 +164,10 @@ export function RunVisuals({
 
   return (
     <Box>
-      <KpiStrip res={res} run={run} />
+      <KpiStrip res={res} run={run} whatIfCost={whatIfCost} />
+
+      {/* AI Copilot Insight — aparece abaixo dos KPIs, acima das abas */}
+      <AiCopilotInsight insight={res.aiCopilotInsight ?? res.ai_copilot_insight} />
 
       <Box sx={{ mb: 4, position: 'relative' }}>
         <Tabs 
@@ -233,6 +241,7 @@ export function RunVisuals({
             lines={lines}
             terminals={terminals}
             intervalPolicy={intervalPolicy}
+            onWhatIfUpdate={setWhatIfCost}
           />
         )}
         {tab === 5 && <TabAudit run={run} allRuns={allRuns} />}

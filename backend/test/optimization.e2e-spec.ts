@@ -3,6 +3,7 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import * as request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { JwtService } from '@nestjs/jwt';
+import { OptimizationService } from '../src/modules/optimization/optimization.service';
 
 describe('Optimization Controller (e2e)', () => {
   let app: INestApplication;
@@ -12,6 +13,11 @@ describe('Optimization Controller (e2e)', () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
     }).compile();
+
+    const optimizationService = moduleFixture.get<OptimizationService>(OptimizationService);
+    jest
+      .spyOn(optimizationService as any, '_processNextInQueue')
+      .mockResolvedValue(undefined);
 
     app = moduleFixture.createNestApplication();
     app.useGlobalPipes(new ValidationPipe({ transform: true, whitelist: true }));

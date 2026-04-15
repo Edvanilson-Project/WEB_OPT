@@ -1,6 +1,10 @@
 /**
- * Funções utilitárias de formatação usadas pelas tabs de otimização.
- * Extraído de page.tsx para manter o componente principal limpo.
+ * Formatadores específicos do módulo de otimização.
+ *
+ * Formatadores genéricos (moeda, duração, HH:MM, percent, etc.) são
+ * re-exportados de `@/lib/format` — fonte única de verdade. Este arquivo
+ * mantém apenas o que é específico do domínio de otimização (direção,
+ * comparações, janelas de bloco, policies de intervalo).
  */
 import type {
   OptimizationRun, OptimizationSettings,
@@ -8,103 +12,43 @@ import type {
   OptimizationComparisonMetric,
   OptimizationBlock, OptimizationDuty, TripDetail,
 } from '../../_types';
+import {
+  asRecord,
+  toMinuteValue,
+  minToDuration,
+  minToHHMM,
+  fmtCurrency,
+  fmtSignedCurrency,
+  fmtNumber,
+  fmtSignedNumber,
+  fmtSignedPercent,
+  fmtElapsedMsCompact,
+  labelizeKey,
+  truncateMiddle,
+} from '@/lib/format';
 
-// ── Helpers genéricos ──
-export function asRecord(value: unknown): Record<string, any> | null {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, any>)
-    : null;
-}
+// Re-export para preservar imports existentes (`from '../_helpers/formatters'`).
+export {
+  asRecord,
+  toMinuteValue,
+  minToDuration,
+  minToHHMM,
+  fmtCurrency,
+  fmtSignedCurrency,
+  fmtNumber,
+  fmtSignedNumber,
+  fmtSignedPercent,
+  fmtElapsedMsCompact,
+  labelizeKey,
+  truncateMiddle,
+};
 
-export function toMinuteValue(value: unknown): number | null {
-  return Number.isFinite(Number(value)) ? Number(value) : null;
-}
-
-// ── Moeda ──
-export function fmtCurrency(value: number | string | null | undefined): string {
-  if (value == null || value === '') return '--';
-  const amount = Number(value);
-  if (Number.isNaN(amount)) return '--';
-  return amount.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 0, maximumFractionDigits: 2 });
-}
-
-// ── Duração ──
-export function minToDuration(minutes: number | null | undefined): string {
-  if (minutes == null || isNaN(Number(minutes))) return '--';
-  const m = Math.floor(Math.abs(Number(minutes)));
-  if (m < 60) return `${m}min`;
-  const h = Math.floor(m / 60);
-  const min = m % 60;
-  return min > 0 ? `${h}h${min.toString().padStart(2, '0')}` : `${h}h`;
-}
-
-export function minToHHMM(minutes?: number | null): string {
-  if (minutes == null || isNaN(Number(minutes))) return '--:--';
-  const m = Math.abs(Number(minutes));
-  const h = Math.floor(m / 60);
-  const min = Math.floor(m % 60);
-  return `${h.toString().padStart(2, '0')}:${min.toString().padStart(2, '0')}`;
-}
-
-// ── Direção ──
+// ── Direção (específico do domínio) ──
 export function directionLabel(direction?: 'outbound' | 'inbound' | string) {
   const normalized = direction?.toLowerCase();
   if (normalized === 'outbound' || normalized === 'ida') return 'Ida';
   if (normalized === 'inbound' || normalized === 'volta') return 'Volta';
   return 'Sem sentido';
-}
-
-// ── Chave → Título ──
-export function labelizeKey(key: string): string {
-  return key
-    .replace(/_/g, ' ')
-    .replace(/([a-z])([A-Z])/g, '$1 $2')
-    .replace(/\b\w/g, (char) => char.toUpperCase());
-}
-
-// ── Numéricos / sinalizados ──
-export function fmtNumber(value?: number | null, suffix = ''): string {
-  if (value == null || Number.isNaN(Number(value))) return '--';
-  return `${Number(value).toLocaleString('pt-BR', { maximumFractionDigits: 2 })}${suffix}`;
-}
-
-export function fmtSignedNumber(value?: number | null, suffix = ''): string {
-  if (value == null || Number.isNaN(Number(value))) return '--';
-  const amount = Number(value);
-  const sign = amount > 0 ? '+' : amount < 0 ? '-' : '';
-  return `${sign}${Math.abs(amount).toLocaleString('pt-BR', { maximumFractionDigits: 2 })}${suffix}`;
-}
-
-export function fmtSignedCurrency(value?: number | null): string {
-  if (value == null || Number.isNaN(Number(value))) return '--';
-  const amount = Number(value);
-  const absolute = Math.abs(amount).toLocaleString('pt-BR', {
-    style: 'currency', currency: 'BRL', minimumFractionDigits: 0, maximumFractionDigits: 2,
-  });
-  if (amount > 0) return `+${absolute}`;
-  if (amount < 0) return `-${absolute}`;
-  return absolute;
-}
-
-export function fmtSignedPercent(value?: number | null): string {
-  if (value == null || Number.isNaN(Number(value))) return '--';
-  const amount = Number(value);
-  const sign = amount > 0 ? '+' : amount < 0 ? '-' : '';
-  return `${sign}${Math.abs(amount).toLocaleString('pt-BR', { maximumFractionDigits: 2 })}%`;
-}
-
-export function fmtElapsedMsCompact(value?: number | null): string {
-  if (value == null || Number.isNaN(Number(value))) return '--';
-  const totalMs = Number(value);
-  if (Math.abs(totalMs) >= 1000) {
-    return `${(totalMs / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}s`;
-  }
-  return `${Math.round(totalMs).toLocaleString('pt-BR')}ms`;
-}
-
-export function truncateMiddle(value?: string | null, head = 5, tail = 4): string {
-  if (!value) return '--';
-  return value.length <= head + tail + 1 ? value : `${value.slice(0, head)}...${value.slice(-tail)}`;
 }
 
 // ── Comparação ──

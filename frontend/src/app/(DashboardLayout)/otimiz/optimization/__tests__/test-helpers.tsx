@@ -1,18 +1,4 @@
-/**
- * @file test-helpers.ts
- * Exporta utilitários e componentes do page.tsx para uso em testes unitários.
- *
- * Estes wrappers permitem testar funções puras e componentes isolados
- * sem importar o módulo completo (que depende de Next.js SSR).
- *
- * Estratégia: re-implementa os utilitários idênticos ao page.tsx
- * para evitar o ciclo de dependência com NotifyProvider / API.
- */
 import React, { useState } from 'react';
-import {
-  Box, Table, TableHead, TableBody, TableRow, TableCell,
-  TableContainer, Paper, Typography, Tooltip, Button, Drawer,
-} from '@mui/material';
 import type { TripDetail } from '../../_types';
 
 // ─── Utilitários de formatação ─────────────────────────────────────────────────
@@ -45,38 +31,54 @@ export function minToHHMM(minutes?: number | null): string {
 
 export function TripDetailTable({ trips }: { trips: TripDetail[] }) {
   const safeTrips = Array.isArray(trips) ? trips : [];
-  return (
-    <TableContainer component={Paper} variant="outlined" sx={{ borderRadius: 2, mt: 1, maxHeight: 300 }}>
-      <Table size="small">
-        <TableHead>
-          <TableRow>
-            <TableCell sx={{ py: 1, fontWeight: 700 }}>Início</TableCell>
-            <TableCell sx={{ py: 1, fontWeight: 700 }}>Fim</TableCell>
-            <TableCell sx={{ py: 1, fontWeight: 700 }}>Origem</TableCell>
-            <TableCell sx={{ py: 1, fontWeight: 700 }}>Destino</TableCell>
-            <TableCell sx={{ py: 1, fontWeight: 700 }}>Duração</TableCell>
-            <TableCell sx={{ py: 1, fontWeight: 700 }}>ID</TableCell>
-          </TableRow>
-        </TableHead>
-        <TableBody>
-          {safeTrips
-            .slice()
-            .sort((a, b) => (a?.start_time ?? 0) - (b?.start_time ?? 0))
-            .map((t, i) => (
-              <TableRow key={i} sx={{ '&:last-child td': { border: 0 } }}>
-                <TableCell sx={{ py: 0.75 }}>{minToHHMM(t?.start_time)}</TableCell>
-                <TableCell sx={{ py: 0.75 }}>{minToHHMM(t?.end_time)}</TableCell>
-                <TableCell sx={{ py: 0.75 }}>{(t as any)?.origin_name || (t as any)?.origin_id || '--'}</TableCell>
-                <TableCell sx={{ py: 0.75 }}>{(t as any)?.destination_name || (t as any)?.destination_id || '--'}</TableCell>
-                <TableCell sx={{ py: 0.75 }}>{minToDuration(t?.duration)}</TableCell>
-                <TableCell sx={{ py: 0.75 }}>
-                  <Typography variant="caption" fontWeight={700}>#{t?.id ?? 'N/A'}</Typography>
-                </TableCell>
-              </TableRow>
-            ))}
-        </TableBody>
-      </Table>
-    </TableContainer>
+  const rows = safeTrips
+    .slice()
+    .sort((a, b) => (a?.start_time ?? 0) - (b?.start_time ?? 0))
+    .map((trip, index) =>
+      React.createElement(
+        'tr',
+        { key: `${trip?.id ?? 'trip'}-${index}` },
+        React.createElement('td', null, minToHHMM(trip?.start_time)),
+        React.createElement('td', null, minToHHMM(trip?.end_time)),
+        React.createElement(
+          'td',
+          null,
+          (trip as any)?.origin_name || (trip as any)?.origin_id || '--',
+        ),
+        React.createElement(
+          'td',
+          null,
+          (trip as any)?.destination_name ||
+            (trip as any)?.destination_id ||
+            '--',
+        ),
+        React.createElement('td', null, minToDuration(trip?.duration)),
+        React.createElement('td', null, `#${trip?.id ?? 'N/A'}`),
+      ),
+    );
+
+  return React.createElement(
+    'div',
+    null,
+    React.createElement(
+      'table',
+      null,
+      React.createElement(
+        'thead',
+        null,
+        React.createElement(
+          'tr',
+          null,
+          React.createElement('th', null, 'Inicio'),
+          React.createElement('th', null, 'Fim'),
+          React.createElement('th', null, 'Origem'),
+          React.createElement('th', null, 'Destino'),
+          React.createElement('th', null, 'Duracao'),
+          React.createElement('th', null, 'ID'),
+        ),
+      ),
+      React.createElement('tbody', null, rows),
+    ),
   );
 }
 
@@ -95,43 +97,44 @@ export function TripTimeline({
 }) {
   if (!totalDuration || totalDuration <= 0) return null;
 
-  return (
-    <Box
-      sx={{
-        position: 'relative',
-        height: 26,
-        bgcolor: 'rgba(0,0,0,0.05)',
-        borderRadius: 1.5,
-        overflow: 'hidden',
-        border: '1px solid',
-        borderColor: 'divider',
-      }}
-    >
-      {(trips ?? []).map((t, i) => {
-        const tStart = t?.start_time ?? start;
-        const tEnd = t?.end_time ?? tStart;
-        const left = ((tStart - start) / totalDuration) * 100;
-        const width = Math.max(0.5, ((tEnd - tStart) / totalDuration) * 100);
-        const isPull = (t as any)?.is_pull_out || (t as any)?.is_pull_back;
+  const endLabel = minToHHMM(end);
+  const bars = (trips ?? []).map((trip, index) => {
+    const tripStart = trip?.start_time ?? start;
+    const tripEnd = trip?.end_time ?? tripStart;
+    const left = ((tripStart - start) / totalDuration) * 100;
+    const width = Math.max(0.5, ((tripEnd - tripStart) / totalDuration) * 100);
+    const isPull = (trip as any)?.is_pull_out || (trip as any)?.is_pull_back;
 
-        return (
-          <Tooltip key={i} title={`${minToHHMM(tStart)} - ${minToHHMM(tEnd)} | #${t?.id ?? i}`}>
-            <Box
-              sx={{
-                position: 'absolute',
-                top: 2,
-                bottom: 2,
-                left: `${left}%`,
-                width: `${width}%`,
-                bgcolor: isPull ? 'warning.main' : 'primary.main',
-                borderRadius: 0.5,
-                opacity: 0.85,
-              }}
-            />
-          </Tooltip>
-        );
-      })}
-    </Box>
+    return React.createElement('div', {
+      key: `${trip?.id ?? 'timeline'}-${index}`,
+      title: `${minToHHMM(tripStart)} - ${minToHHMM(tripEnd)} | #${trip?.id ?? index}`,
+      style: {
+        position: 'absolute',
+        top: '2px',
+        bottom: '2px',
+        left: `${left}%`,
+        width: `${width}%`,
+        background: isPull ? '#ed6c02' : '#1976d2',
+        borderRadius: '2px',
+        opacity: 0.85,
+      },
+    });
+  });
+
+  return React.createElement(
+    'div',
+    {
+      'data-end-label': endLabel,
+      style: {
+        position: 'relative',
+        height: '26px',
+        background: 'rgba(0,0,0,0.05)',
+        borderRadius: '6px',
+        overflow: 'hidden',
+        border: '1px solid rgba(0,0,0,0.12)',
+      },
+    },
+    bars,
   );
 }
 
@@ -149,36 +152,55 @@ export function EnterpriseGanttHarness({
   const [showLines, setShowLines] = useState(false);
   const [openGuide, setOpenGuide] = useState(false);
 
-  return (
-    <Box>
-      <Box sx={{ display: 'flex', gap: 1, mb: 1 }}>
-        <Button size="small" onClick={() => setShowLines((p) => !p)}>
-          {showLines ? 'Ocultar linhas' : 'Mostrar linhas'}
-        </Button>
-        <Button size="small" aria-label="abrir-guia-gantt" onClick={() => setOpenGuide(true)}>
-          Abrir guia
-        </Button>
-      </Box>
-
-      <Typography>Produtivo</Typography>
-      <Typography>Improdutivo</Typography>
-
-      {Array.from({ length: idleWindows }).map((_, idx) => (
-        <Box key={`idle-${idx}`} data-testid="gantt-idle-window" />
-      ))}
-
-      {hasCycle && <Box data-testid="gantt-cycle-group" />}
-
-      {showLines && lineLabels.map((label) => (
-        <Typography key={label}>{label}</Typography>
-      ))}
-
-      <Drawer anchor="right" open={openGuide} onClose={() => setOpenGuide(false)}>
-        <Box sx={{ p: 2, width: 280 }}>
-          <Typography>Guia visual do Gantt</Typography>
-          <Typography>Informacoes de detalhe foram movidas para este painel.</Typography>
-        </Box>
-      </Drawer>
-    </Box>
+  return React.createElement(
+    'div',
+    null,
+    React.createElement(
+      'div',
+      null,
+      React.createElement(
+        'button',
+        {
+          type: 'button',
+          onClick: () => setShowLines((prev) => !prev),
+        },
+        showLines ? 'Ocultar linhas' : 'Mostrar linhas',
+      ),
+      React.createElement(
+        'button',
+        {
+          type: 'button',
+          'aria-label': 'abrir-guia-gantt',
+          onClick: () => setOpenGuide(true),
+        },
+        'Abrir guia',
+      ),
+    ),
+    React.createElement('span', null, 'Produtivo'),
+    React.createElement('span', null, 'Improdutivo'),
+    ...Array.from({ length: idleWindows }, (_, index) =>
+      React.createElement('div', {
+        key: `idle-${index}`,
+        'data-testid': 'gantt-idle-window',
+      }),
+    ),
+    hasCycle
+      ? React.createElement('div', { 'data-testid': 'gantt-cycle-group' })
+      : null,
+    ...(showLines
+      ? lineLabels.map((label) => React.createElement('span', { key: label }, label))
+      : []),
+    openGuide
+      ? React.createElement(
+          'aside',
+          null,
+          React.createElement('h3', null, 'Guia visual do Gantt'),
+          React.createElement(
+            'p',
+            null,
+            'Informacoes de detalhe foram movidas para este painel.',
+          ),
+        )
+      : null,
   );
 }

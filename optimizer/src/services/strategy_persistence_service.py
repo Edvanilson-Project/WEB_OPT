@@ -1,166 +1,131 @@
-"""Persistência local para cenários estratégicos, ingestões de feed e relatórios de reconciliação."""
+"""
+strategy_persistence_service.py — Persistência Efêmera (In-Memory) para cenários estratégicos.
+
+SUBSTITUIÇÃO (Cloud-Ready):
+Removido o uso de 'filelock' e escrita em disco local.
+Utiliza um Singleton em memória para guardar cenários e relatórios durante o tempo de vida do processo.
+Em produção, esta persistência deve ser movida para o Banco de Dados (PostgreSQL) via NestJS.
+"""
 from __future__ import annotations
 
-import json
-import os
-from filelock import FileLock
+import logging
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 
 class StrategyPersistenceService:
-    def __init__(self, base_dir: str) -> None:
-        self.base_path = Path(base_dir)
-        self.base_path.mkdir(parents=True, exist_ok=True)
-        # Arquivos de persistência
-        self._scenarios_file = self.base_path / "scenarios.json"
-        self._feeds_file = self.base_path / "feeds.json"
-        self._reports_file = self.base_path / "reconciliation_reports.json"
+    # Armazenamento compartilhado entre todas as instâncias da classe no mesmo processo
+    _storage = {
+        "scenarios": {"last_id": 0, "items": []},
+        "feeds": {"last_id": 0, "snapshots": []},
+        "reports": {"last_id": 0, "items": []},
+    }
 
-        # Garante arquivos existentes antes de criar locks
-        self._ensure_file(self._scenarios_file)
-        self._ensure_file(self._feeds_file)
-        self._ensure_file(self._reports_file)
-
-        # Locks a nível de sistema operativo (Multi-Process Safe)
-        # Adiciona timeout de segurança para evitar bloqueio infinito caso um processo morra
-        self._scenarios_lock = FileLock(str(self._scenarios_file) + ".lock", timeout=10)
-        self._feeds_lock = FileLock(str(self._feeds_file) + ".lock", timeout=10)
-        self._reports_lock = FileLock(str(self._reports_file) + ".lock", timeout=10)
+    def __init__(self, base_dir: Optional[str] = None) -> None:
+        # base_dir ignorado pois não usamos mais o disco
+        pass
 
     def save_scenario(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        with self._scenarios_lock:
-            data = self._read_json(self._scenarios_file)
-            items = data.get("items", [])
-            scenario_id = int(data.get("last_id", 0)) + 1
-            now_iso = self._utc_now_iso()
+        store = self._storage["scenarios"]
+        scenario_id = store["last_id"] + 1
+        now_iso = self._utc_now_iso()
 
-            item = {
-                "id": scenario_id,
-                "created_at": now_iso,
-                "updated_at": now_iso,
-                **payload,
-            }
-            items.append(item)
-
-            self._write_json(
-                self._scenarios_file,
-                {
-                    "last_id": scenario_id,
-                    "items": items,
-                },
-            )
-            return item
+        item = {
+            "id": scenario_id,
+            "created_at": now_iso,
+            "updated_at": now_iso,
+            **payload,
+        }
+        store["items"].append(item)
+        store["last_id"] = scenario_id
+        
+        logger.info("[Persistence] Cenário salvo em memória: id=%d", scenario_id)
+        return item
 
     def list_scenarios(self, limit: int = 20) -> List[Dict[str, Any]]:
-        with self._scenarios_lock:
-            data = self._read_json(self._scenarios_file)
-            items = data.get("items", [])
-            return list(reversed(items[-max(1, limit):]))
+        items = self._storage["scenarios"]["items"]
+        return list(reversed(items[-max(1, limit):]))
 
     def get_scenario(self, scenario_id: int) -> Optional[Dict[str, Any]]:
-        with self._scenarios_lock:
-            data = self._read_json(self._scenarios_file)
-            items = data.get("items", [])
-            for item in items:
-                if int(item.get("id", 0)) == int(scenario_id):
-                    return item
+        items = self._storage["scenarios"]["items"]
+        for item in items:
+            if int(item.get("id", 0)) == int(scenario_id):
+                return item
         return None
 
     def get_latest_scenario(self) -> Optional[Dict[str, Any]]:
-        with self._scenarios_lock:
-            data = self._read_json(self._scenarios_file)
-            items = data.get("items", [])
-            if not items:
-                return None
-            return items[-1]
+        items = self._storage["scenarios"]["items"]
+        if not items:
+            return None
+        return items[-1]
 
     def ingest_feed(self, entries: List[Dict[str, Any]]) -> Dict[str, Any]:
-        with self._feeds_lock:
-            data = self._read_json(self._feeds_file)
-            snapshots = data.get("snapshots", [])
-            snapshot_id = int(data.get("last_id", 0)) + 1
+        store = self._storage["feeds"]
+        snapshot_id = store["last_id"] + 1
 
-            valid_gps = sum(1 for e in entries if e.get("gps_valid") is True)
-            invalid_gps = sum(1 for e in entries if e.get("gps_valid") is False)
-            terminal_ok = sum(1 for e in entries if e.get("sent_to_driver_terminal") is True)
-            terminal_missing = sum(1 for e in entries if e.get("sent_to_driver_terminal") is False)
+        valid_gps = sum(1 for e in entries if e.get("gps_valid") is True)
+        invalid_gps = sum(1 for e in entries if e.get("gps_valid") is False)
+        terminal_ok = sum(1 for e in entries if e.get("sent_to_driver_terminal") is True)
+        terminal_missing = sum(1 for e in entries if e.get("sent_to_driver_terminal") is False)
 
-            quality = {
-                "total_records": len(entries),
-                "gps_valid_count": valid_gps,
-                "gps_invalid_count": invalid_gps,
-                "terminal_ack_count": terminal_ok,
-                "terminal_ack_missing_count": terminal_missing,
-                "gps_valid_ratio": round(valid_gps / len(entries), 4) if entries else 0.0,
-                "terminal_ack_ratio": round(terminal_ok / len(entries), 4) if entries else 0.0,
-            }
+        quality = {
+            "total_records": len(entries),
+            "gps_valid_count": valid_gps,
+            "gps_invalid_count": invalid_gps,
+            "terminal_ack_count": terminal_ok,
+            "terminal_ack_missing_count": terminal_missing,
+            "gps_valid_ratio": round(valid_gps / len(entries), 4) if entries else 0.0,
+            "terminal_ack_ratio": round(terminal_ok / len(entries), 4) if entries else 0.0,
+        }
 
-            snapshot = {
-                "id": snapshot_id,
-                "created_at": self._utc_now_iso(),
-                "quality": quality,
-                "records": entries,
-            }
-            snapshots.append(snapshot)
+        snapshot = {
+            "id": snapshot_id,
+            "created_at": self._utc_now_iso(),
+            "quality": quality,
+            "records": entries,
+        }
+        store["snapshots"].append(snapshot)
+        store["last_id"] = snapshot_id
 
-            self._write_json(
-                self._feeds_file,
-                {
-                    "last_id": snapshot_id,
-                    "snapshots": snapshots,
-                },
-            )
-
-            return {
-                "snapshot_id": snapshot_id,
-                "quality": quality,
-            }
+        logger.info("[Persistence] Feed Snapshot ingerido: id=%d", snapshot_id)
+        return {
+            "snapshot_id": snapshot_id,
+            "quality": quality,
+        }
 
     def get_latest_feed_records(self) -> List[Dict[str, Any]]:
-        with self._feeds_lock:
-            data = self._read_json(self._feeds_file)
-            snapshots = data.get("snapshots", [])
-            if not snapshots:
-                return []
-            latest = snapshots[-1]
-            return list(latest.get("records", []))
+        snapshots = self._storage["feeds"]["snapshots"]
+        if not snapshots:
+            return []
+        return list(snapshots[-1].get("records", []))
 
     def get_latest_feed_snapshot(self) -> Optional[Dict[str, Any]]:
-        with self._feeds_lock:
-            snapshots = self._read_json(self._feeds_file).get("snapshots", [])
-            if not snapshots:
-                return None
-            return dict(snapshots[-1])
+        snapshots = self._storage["feeds"]["snapshots"]
+        if not snapshots:
+            return None
+        return dict(snapshots[-1])
 
     def save_reconciliation_report(self, report: Dict[str, Any]) -> Dict[str, Any]:
-        with self._reports_lock:
-            data = self._read_json(self._reports_file)
-            items = data.get("items", [])
-            report_id = int(data.get("last_id", 0)) + 1
-            now_iso = self._utc_now_iso()
+        store = self._storage["reports"]
+        report_id = store["last_id"] + 1
+        now_iso = self._utc_now_iso()
 
-            item = {
-                "id": report_id,
-                "created_at": now_iso,
-                "report": report,
-            }
-            items.append(item)
+        item = {
+            "id": report_id,
+            "created_at": now_iso,
+            "report": report,
+        }
+        store["items"].append(item)
+        store["last_id"] = report_id
 
-            self._write_json(
-                self._reports_file,
-                {
-                    "last_id": report_id,
-                    "items": items,
-                },
-            )
-            return item
+        logger.info("[Persistence] Relatório de reconciliação salvo: id=%d", report_id)
+        return item
 
     def list_reconciliation_reports(self, limit: int = 20) -> List[Dict[str, Any]]:
-        with self._reports_lock:
-            items = self._read_json(self._reports_file).get("items", [])
-            return list(reversed(items[-max(1, limit):]))
+        items = self._storage["reports"]["items"]
+        return list(reversed(items[-max(1, limit):]))
 
     def prune_data(
         self,
@@ -169,101 +134,30 @@ class StrategyPersistenceService:
         max_reports: int,
         max_age_days: int,
     ) -> Dict[str, int]:
-        # Acquire locks in a fixed order to avoid deadlocks across processes
-        with self._scenarios_lock:
-            with self._feeds_lock:
-                with self._reports_lock:
-                    scenarios_data = self._read_json(self._scenarios_file)
-                    feeds_data = self._read_json(self._feeds_file)
-                    reports_data = self._read_json(self._reports_file)
+        # Implementação básica de retenção em memória
+        scenarios = self._storage["scenarios"]["items"]
+        snapshots = self._storage["feeds"]["snapshots"]
+        reports = self._storage["reports"]["items"]
 
-                    scenarios = scenarios_data.get("items", [])
-                    snapshots = feeds_data.get("snapshots", [])
-                    reports = reports_data.get("items", [])
+        old_counts = (len(scenarios), len(snapshots), len(reports))
+        
+        self._storage["scenarios"]["items"] = self._apply_retention(scenarios, max_scenarios, max_age_days)
+        self._storage["feeds"]["snapshots"] = self._apply_retention(snapshots, max_feed_snapshots, max_age_days)
+        self._storage["reports"]["items"] = self._apply_retention(reports, max_reports, max_age_days)
 
-                    new_scenarios = self._apply_retention(
-                        scenarios,
-                        max_items=max_scenarios,
-                        max_age_days=max_age_days,
-                    )
-                    new_snapshots = self._apply_retention(
-                        snapshots,
-                        max_items=max_feed_snapshots,
-                        max_age_days=max_age_days,
-                    )
-                    new_reports = self._apply_retention(
-                        reports,
-                        max_items=max_reports,
-                        max_age_days=max_age_days,
-                    )
+        new_counts = (len(self._storage["scenarios"]["items"]), 
+                      len(self._storage["feeds"]["snapshots"]), 
+                      len(self._storage["reports"]["items"]))
 
-                    self._write_json(
-                        self._scenarios_file,
-                        {
-                            "last_id": self._compute_last_id(new_scenarios),
-                            "items": new_scenarios,
-                        },
-                    )
-                    self._write_json(
-                        self._feeds_file,
-                        {
-                            "last_id": self._compute_last_id(new_snapshots),
-                            "snapshots": new_snapshots,
-                        },
-                    )
-                    self._write_json(
-                        self._reports_file,
-                        {
-                            "last_id": self._compute_last_id(new_reports),
-                            "items": new_reports,
-                        },
-                    )
-
-                    return {
-                        "scenarios_removed": max(0, len(scenarios) - len(new_scenarios)),
-                        "feed_snapshots_removed": max(0, len(snapshots) - len(new_snapshots)),
-                        "reports_removed": max(0, len(reports) - len(new_reports)),
-                    }
+        return {
+            "scenarios_removed": old_counts[0] - new_counts[0],
+            "feed_snapshots_removed": old_counts[1] - new_counts[1],
+            "reports_removed": old_counts[2] - new_counts[2],
+        }
 
     @staticmethod
     def _utc_now_iso() -> str:
         return datetime.now(timezone.utc).isoformat()
-
-    @staticmethod
-    def _ensure_file(path: Path) -> None:
-        if path.exists():
-            return
-        path.write_text(json.dumps({}, ensure_ascii=False), encoding="utf-8")
-
-    @staticmethod
-    def _read_json(path: Path) -> Dict[str, Any]:
-        try:
-            raw = path.read_text(encoding="utf-8").strip()
-            if not raw:
-                return {}
-            parsed = json.loads(raw)
-            if isinstance(parsed, dict):
-                return parsed
-            return {}
-        except Exception:
-            return {}
-
-    @staticmethod
-    def _write_json(path: Path, payload: Dict[str, Any]) -> None:
-        import tempfile
-        tmp_fd, tmp_path = tempfile.mkstemp(
-            dir=str(path.parent), suffix=".tmp", prefix=path.stem
-        )
-        try:
-            with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
-                f.write(
-                    json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=False)
-                )
-            os.replace(tmp_path, str(path))
-        except Exception:
-            if os.path.exists(tmp_path):
-                os.remove(tmp_path)
-            raise
 
     @classmethod
     def _apply_retention(
@@ -288,16 +182,8 @@ class StrategyPersistenceService:
         return kept
 
     @staticmethod
-    def _compute_last_id(items: List[Dict[str, Any]]) -> int:
-        if not items:
-            return 0
-        return max(int(item.get("id", 0)) for item in items)
-
-    @staticmethod
     def _to_timestamp(value: Any) -> float:
-        if not value:
-            return 0.0
-        if not isinstance(value, str):
+        if not value or not isinstance(value, str):
             return 0.0
         try:
             text = value.strip()

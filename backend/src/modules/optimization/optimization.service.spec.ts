@@ -7,6 +7,10 @@ import {
 } from './entities/optimization-run.entity';
 
 describe('OptimizationService audit and compare', () => {
+  const terminalRepo = {
+    find: jest.fn(),
+  };
+
   const runRepo = {
     create: jest.fn(),
     find: jest.fn(),
@@ -33,7 +37,7 @@ describe('OptimizationService audit and compare', () => {
     settingsService as any,
     configService as any,
     {} as any, // linesService
-    {} as any, // terminalsService
+    { terminalRepo } as any, // terminalsService
     {} as any, // vehicleTypesService
     { post: jest.fn(), get: jest.fn() } as any, // httpService
   );
@@ -47,8 +51,10 @@ describe('OptimizationService audit and compare', () => {
       ...payload,
     }));
     runRepo.update.mockResolvedValue(undefined);
+    runRepo.findOne.mockResolvedValue(undefined);
     settingsService.findActive.mockResolvedValue(null);
     configService.get.mockReturnValue('http://localhost:8000');
+    terminalRepo.find.mockResolvedValue([]);
   });
 
   it('persists profile metadata on pending runs before background execution starts', async () => {
@@ -57,8 +63,8 @@ describe('OptimizationService audit and compare', () => {
       name: 'Perfil Pico Semana',
       timeBudgetSeconds: 180,
     });
-    const executeSpy = jest
-      .spyOn(service as any, '_executeOptimization')
+    const queueSpy = jest
+      .spyOn(service as any, '_processNextInQueue')
       .mockResolvedValue(undefined);
 
     const saved = await service.startOptimization(
@@ -95,22 +101,11 @@ describe('OptimizationService audit and compare', () => {
         profileName: 'Perfil Pico Semana',
       }),
     );
-    expect(executeSpy).toHaveBeenCalledWith(
-      999,
-      expect.objectContaining({
-        companyId: 1,
-        lineId: 16,
-        scheduleId: 3,
-      }),
-      expect.objectContaining({
-        id: 12,
-        name: 'Perfil Pico Semana',
-      }),
-    );
+    expect(queueSpy).toHaveBeenCalled();
     expect(saved.profileId).toBe(12);
     expect(saved.profileName).toBe('Perfil Pico Semana');
 
-    executeSpy.mockRestore();
+    queueSpy.mockRestore();
   });
 
   it('respects persisted operational and validation flags from active settings in optimizer payload', async () => {
@@ -161,6 +156,7 @@ describe('OptimizationService audit and compare', () => {
           strict_hard_validation: false,
         }),
       }),
+      expect.any(Number),
     );
     expect(runRepo.update).toHaveBeenCalledWith(
       501,
@@ -221,6 +217,7 @@ describe('OptimizationService audit and compare', () => {
           strict_hard_validation: false,
         }),
       }),
+      expect.any(Number),
     );
   });
 
@@ -259,6 +256,7 @@ describe('OptimizationService audit and compare', () => {
           operator_pairing_hard: false,
         }),
       }),
+      expect.any(Number),
     );
   });
 
@@ -708,6 +706,7 @@ describe('OptimizationService audit and compare', () => {
           fairness_tolerance_minutes: 20,
         }),
       }),
+      expect.any(Number),
     );
     expect(runRepo.update).toHaveBeenCalledWith(
       77,
@@ -784,6 +783,7 @@ describe('OptimizationService audit and compare', () => {
           }),
         ]),
       }),
+      expect.any(Number),
     );
     expect(saveSpy).toHaveBeenCalled();
   });

@@ -40,13 +40,24 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 20
+      # NOVO: Serviço do Redis para o Celery
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
     env:
       BACKEND_PORT: 3006
       DB_DATABASE: otmiz_new
       DB_HOST: 127.0.0.1
       DB_PASSWORD: postgres
       DB_PORT: 5432
-      DB_SYNCHRONIZE: 'true'
+      DB_SYNCHRONIZE: "true"
       DB_USERNAME: postgres
       JWT_EXPIRES_IN: 7d
       JWT_SECRET: otimiz_ci_secret_key
@@ -54,6 +65,10 @@ jobs:
       OTIMIZ_BATTERY_OUTPUT_DIR: artifacts/optimization-battery/ci
       OTIMIZ_BATTERY_PROFILE: ci
       PORT: 3006
+      # NOVO: Variáveis de ambiente para o Celery/Redis
+      REDIS_URL: redis://127.0.0.1:6379/0
+      CELERY_BROKER_URL: redis://127.0.0.1:6379/0
+      CELERY_RESULT_BACKEND: redis://127.0.0.1:6379/0
 
     steps:
       - uses: actions/checkout@v4
@@ -69,7 +84,7 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: "3.12"
 
       - name: Install backend dependencies
         run: npm ci --prefix backend
@@ -113,7 +128,15 @@ jobs:
           chmod +x scripts/seed-optimization-battery-fixture.sh
           scripts/seed-optimization-battery-fixture.sh
 
-      - name: Start optimizer service
+      # NOVO: Iniciar o Worker do Celery antes do FastAPI
+      - name: Start Celery Worker
+        run: |
+          nohup bash -lc 'cd optimizer && ../.venv/bin/celery -A celery_worker.celery_app worker --loglevel=info' > celery.log 2>&1 &
+          echo $! > celery.pid
+          # Dá 3 segundos para o Celery subir (ele conecta rápido ao Redis local)
+          sleep 3
+
+      - name: Start optimizer service (FastAPI)
         run: |
           nohup bash -lc 'cd optimizer && DEBUG=false ../.venv/bin/python main.py' > optimizer.log 2>&1 &
           echo $! > optimizer.pid
@@ -168,11 +191,15 @@ jobs:
             backend.log
             backend-bootstrap.log
             optimizer.log
+            celery.log # Inclui o log do Celery para debug
           if-no-files-found: warn
 
       - name: Cleanup services
         if: always()
         run: |
+          if [[ -f celery.pid ]]; then
+            kill "$(cat celery.pid)" || true
+          fi
           if [[ -f optimizer.pid ]]; then
             kill "$(cat optimizer.pid)" || true
           fi

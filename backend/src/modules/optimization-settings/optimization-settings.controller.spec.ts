@@ -43,7 +43,7 @@ describe('OptimizationSettingsController company scoping', () => {
     controller.setActive(10, req, '5');
     controller.remove(10, req, '5');
 
-    expect(service.update).toHaveBeenCalledWith(10, 5, dto);
+    expect(service.update).toHaveBeenCalledWith(10, 5, dto, 'analyst');
     expect(service.setActive).toHaveBeenCalledWith(10, 5);
     expect(service.remove).toHaveBeenCalledWith(10, 5);
   });

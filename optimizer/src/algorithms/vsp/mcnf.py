@@ -253,7 +253,7 @@ class MCNFVSP(BaseAlgorithm, IVSPAlgorithm):
         if N > 1000:
             _log.warning("Instância massiva (>1000 trips). MCNF global abortado para evitar OOM. Retornando fallback Greedy.")
             from .greedy import GreedyVSP
-            return GreedyVSP(vsp_params=self.vsp_params).solve(trips, vehicle_types, depots=depots)
+            return GreedyVSP(vsp_params=self.vsp_params).solve(trips, vehicle_types, depot_id=depots[0]['id'] if depots else None)
 
         trips_sorted = sorted(trips, key=lambda t: (t.start_time, t.id))
 
@@ -307,7 +307,7 @@ class MCNFVSP(BaseAlgorithm, IVSPAlgorithm):
         if not _PULP_AVAILABLE:
             _log.warning("PuLP não disponível no ambiente; usando GreedyVSP como fallback.")
             from .greedy import GreedyVSP
-            return GreedyVSP(vsp_params=self.vsp_params).solve(trips, vehicle_types, depots=depots)
+            return GreedyVSP(vsp_params=self.vsp_params).solve(trips, vehicle_types, depot_id=depots[0]['id'] if depots else None)
 
         # Build MILP
         prob = pulp.LpProblem("MCNF_Subproblem", pulp.LpMinimize)
@@ -354,18 +354,18 @@ class MCNFVSP(BaseAlgorithm, IVSPAlgorithm):
         # Solve with CBC (quiet)
         milp_start = time.time()
         try:
-            solver = pulp.PULP_CBC_CMD(msg=0, maxSeconds=60)
+            solver = pulp.PULP_CBC_CMD(msg=0, timeLimit=60)
             prob.solve(solver)
             milp_end = time.time()
         except Exception as e:
             _log.exception("PuLP solver falhou: %s", e)
             from .greedy import GreedyVSP
-            return GreedyVSP(vsp_params=self.vsp_params).solve(trips, vehicle_types, depots=depots)
+            return GreedyVSP(vsp_params=self.vsp_params).solve(trips, vehicle_types, depot_id=depots[0]['id'] if depots else None)
 
         if prob.status != pulp.constants.LpStatusOptimal:
             _log.warning("ILP solver status: %s — fallback para GreedyVSP", pulp.LpStatus[prob.status])
             from .greedy import GreedyVSP
-            return GreedyVSP(vsp_params=self.vsp_params).solve(trips, vehicle_types, depots=depots)
+            return GreedyVSP(vsp_params=self.vsp_params).solve(trips, vehicle_types, depot_id=depots[0]['id'] if depots else None)
 
         # Reconstroi sequenciamento a partir das variáveis selecionadas
         next_trip: Dict[int, int] = {}

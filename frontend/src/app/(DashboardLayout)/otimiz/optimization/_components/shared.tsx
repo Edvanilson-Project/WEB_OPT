@@ -119,38 +119,81 @@ export function TripTimeline({ trips, start, end, totalDuration }: { trips: Trip
 }
 
 // ─── KpiStrip ────────────────────────────────────────────────────────────────
-export function KpiStrip({ res, run }: { res: OptimizationResultSummary; run: OptimizationRun }) {
+export function KpiStrip({
+  res,
+  run,
+  whatIfCost = null,
+}: {
+  res: OptimizationResultSummary;
+  run: OptimizationRun;
+  whatIfCost?: number | null;
+}) {
   const theme = useTheme();
   const isDark = theme.palette.mode === 'dark';
+  const isWhatIf = whatIfCost !== null;
+
+  const baseCost = run.totalCost ?? res.total_cost ?? res.totalCost ?? 0;
+  const costDelta = isWhatIf ? whatIfCost - baseCost : 0;
+  const costDeltaPct = baseCost !== 0 ? (costDelta / baseCost) * 100 : 0;
+  const costDeltaColor =
+    costDelta < 0 ? theme.palette.success.main :
+    costDelta > 0 ? theme.palette.error.main :
+    theme.palette.text.secondary;
 
   const items = [
-    { 
-      label: 'Custo Total', 
-      value: fmtCurrency(run.totalCost ?? res.total_cost ?? res.totalCost), 
-      color: theme.palette.primary.main, 
+    {
+      label: 'Custo Total',
+      value: fmtCurrency(isWhatIf ? whatIfCost : baseCost),
+      color: isWhatIf ? theme.palette.warning.main : theme.palette.primary.main,
       icon: <IconCurrencyDollar size={24} stroke={1.5} />,
-      bgColor: alpha(theme.palette.primary.main, 0.05)
+      bgColor: isWhatIf
+        ? alpha(theme.palette.warning.main, 0.08)
+        : alpha(theme.palette.primary.main, 0.05),
+      extra: isWhatIf ? (
+        <Stack direction="row" alignItems="center" spacing={0.5} mt={0.5}>
+          <Chip
+            label="SIMULAÇÃO"
+            size="small"
+            sx={{
+              height: 18, fontSize: '0.6rem', fontWeight: 800,
+              bgcolor: alpha(theme.palette.warning.main, 0.15),
+              color: theme.palette.warning.dark,
+              letterSpacing: 0.5,
+            }}
+          />
+          <Typography
+            variant="caption"
+            sx={{ fontWeight: 700, color: costDeltaColor, lineHeight: 1 }}
+          >
+            {costDelta >= 0 ? '+' : ''}{fmtCurrency(costDelta)}
+            {' '}({costDelta >= 0 ? '+' : ''}{costDeltaPct.toFixed(1)}%)
+          </Typography>
+        </Stack>
+      ) : null,
     },
-    { 
-      label: 'Veículos (VSP)', 
-      value: run.totalVehicles ?? res.vehicles ?? res.num_vehicles ?? '--', 
-      color: theme.palette.info.main, 
+    {
+      label: 'Veículos (VSP)',
+      value: run.totalVehicles ?? res.vehicles ?? res.num_vehicles ?? '--',
+      color: theme.palette.info.main,
       icon: <IconBus size={24} stroke={1.5} />,
-      bgColor: alpha(theme.palette.info.main, 0.05)
+      bgColor: alpha(theme.palette.info.main, 0.05),
+      extra: null,
     },
-    { 
-      label: 'Tripulantes (CSP)', 
-      value: run.totalCrew ?? res.crew ?? res.num_crew ?? '--', 
-      color: theme.palette.success.main, 
+    {
+      label: 'Tripulantes (CSP)',
+      value: run.totalCrew ?? res.crew ?? res.num_crew ?? '--',
+      color: theme.palette.success.main,
       icon: <IconUsers size={24} stroke={1.5} />,
-      bgColor: alpha(theme.palette.success.main, 0.05)
+      bgColor: alpha(theme.palette.success.main, 0.05),
+      extra: null,
     },
-    { 
-      label: 'Violações CCT', 
-      value: run.cctViolations ?? res.cct_violations ?? res.cctViolations ?? 0, 
-      color: (run.cctViolations ?? res.cct_violations ?? res.cctViolations ?? 0) > 0 ? theme.palette.error.main : theme.palette.success.main, 
+    {
+      label: 'Violações CCT',
+      value: run.cctViolations ?? res.cct_violations ?? res.cctViolations ?? 0,
+      color: (run.cctViolations ?? res.cct_violations ?? res.cctViolations ?? 0) > 0 ? theme.palette.error.main : theme.palette.success.main,
       icon: <IconShieldCheck size={24} stroke={1.5} />,
-      bgColor: (run.cctViolations ?? res.cct_violations ?? res.cctViolations ?? 0) > 0 ? alpha(theme.palette.error.main, 0.05) : alpha(theme.palette.success.main, 0.05)
+      bgColor: (run.cctViolations ?? res.cct_violations ?? res.cctViolations ?? 0) > 0 ? alpha(theme.palette.error.main, 0.05) : alpha(theme.palette.success.main, 0.05),
+      extra: null,
     },
   ];
 
@@ -158,9 +201,9 @@ export function KpiStrip({ res, run }: { res: OptimizationResultSummary; run: Op
     <Grid container spacing={2.5} mb={4}>
       {items.map((it) => (
         <Grid item xs={12} sm={6} md={3} key={it.label}>
-          <Paper 
-            variant="outlined" 
-            sx={{ 
+          <Paper
+            variant="outlined"
+            sx={{
               p: 2.5,
               borderRadius: 4,
               border: '1px solid',
@@ -178,16 +221,16 @@ export function KpiStrip({ res, run }: { res: OptimizationResultSummary; run: Op
             }}
           >
             {/* Background Accent */}
-            <Box sx={{ 
-              position: 'absolute', top: -20, right: -20, 
-              width: 80, height: 80, 
-              borderRadius: '50%', 
+            <Box sx={{
+              position: 'absolute', top: -20, right: -20,
+              width: 80, height: 80,
+              borderRadius: '50%',
               bgcolor: alpha(it.color, 0.05),
               zIndex: 0
             }} />
 
             <Stack direction="row" alignItems="center" spacing={2} sx={{ position: 'relative', zIndex: 1 }}>
-              <Box sx={{ 
+              <Box sx={{
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 width: 48, height: 48, borderRadius: 3,
                 bgcolor: it.bgColor, color: it.color,
@@ -195,7 +238,7 @@ export function KpiStrip({ res, run }: { res: OptimizationResultSummary; run: Op
               }}>
                 {it.icon}
               </Box>
-              
+
               <Box>
                 <Typography variant="overline" sx={{ fontWeight: 800, color: 'text.secondary', lineHeight: 1.2, display: 'block', mb: 0.5, letterSpacing: 0.5 }}>
                   {it.label}
@@ -203,6 +246,7 @@ export function KpiStrip({ res, run }: { res: OptimizationResultSummary; run: Op
                 <Typography variant="h4" sx={{ fontWeight: 900, letterSpacing: -0.5, color: 'text.primary' }}>
                   {it.value}
                 </Typography>
+                {it.extra}
               </Box>
             </Stack>
           </Paper>

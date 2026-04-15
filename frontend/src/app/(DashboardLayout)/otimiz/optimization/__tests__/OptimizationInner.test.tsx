@@ -130,7 +130,9 @@ describe('TripDetailTable', () => {
   ];
 
   it('renderiza sem crash com trips completos', () => {
-    const { container } = render(<TripDetailTable trips={tripsCompletos as any} />);
+    const { container } = render(
+      React.createElement(TripDetailTable, { trips: tripsCompletos as any }),
+    );
     expect(container.querySelector('table')).toBeTruthy();
   });
 
@@ -139,21 +141,23 @@ describe('TripDetailTable', () => {
       { id: 10, start_time: null, end_time: null, origin_id: 1, destination_id: 2, duration: 0 },
     ];
     // Não deve lançar exceção
-    expect(() => render(<TripDetailTable trips={tripsLegados as any} />)).not.toThrow();
+    expect(() =>
+      render(React.createElement(TripDetailTable, { trips: tripsLegados as any })),
+    ).not.toThrow();
   });
 
   it('exibe "--:--" para trips sem start_time', () => {
     const tripsLegados = [
       { id: 10, start_time: null, end_time: null, origin_id: 1, destination_id: 2, duration: 0 },
     ];
-    render(<TripDetailTable trips={tripsLegados as any} />);
+    render(React.createElement(TripDetailTable, { trips: tripsLegados as any }));
     // Deve exibir --:-- (ou -- para horários sem valor)
     const dashes = screen.getAllByText(/--:--|--/);
     expect(dashes.length).toBeGreaterThan(0);
   });
 
   it('exibe IDs formatados como #N', () => {
-    render(<TripDetailTable trips={tripsCompletos as any} />);
+    render(React.createElement(TripDetailTable, { trips: tripsCompletos as any }));
     expect(screen.getByText('#1')).toBeTruthy();
     expect(screen.getByText('#2')).toBeTruthy();
   });
@@ -163,7 +167,7 @@ describe('TripDetailTable', () => {
       { id: 2, start_time: 430, end_time: 490, origin_id: 2, destination_id: 3, duration: 60 },
       { id: 1, start_time: 360, end_time: 420, origin_id: 1, destination_id: 2, duration: 60 },
     ];
-    render(<TripDetailTable trips={desordenadas as any} />);
+    render(React.createElement(TripDetailTable, { trips: desordenadas as any }));
     // id=1 (06:00) deve aparecer antes de id=2 (07:10) no DOM
     const rows = screen.getAllByText(/^#\d+$/);
     expect(rows[0].textContent).toBe('#1');
@@ -178,13 +182,25 @@ describe('TripTimeline', () => {
       { id: 2, start_time: 430, end_time: 490 },
     ];
     expect(() =>
-      render(<TripTimeline trips={trips as any} start={360} end={490} totalDuration={130} />)
+      render(
+        React.createElement(TripTimeline, {
+          trips: trips as any,
+          start: 360,
+          end: 490,
+          totalDuration: 130,
+        }),
+      )
     ).not.toThrow();
   });
 
   it('retorna null quando totalDuration é 0', () => {
     const { container } = render(
-      <TripTimeline trips={[]} start={0} end={0} totalDuration={0} />
+      React.createElement(TripTimeline, {
+        trips: [],
+        start: 0,
+        end: 0,
+        totalDuration: 0,
+      }),
     );
     expect(container.firstChild).toBeNull();
   });
@@ -192,7 +208,14 @@ describe('TripTimeline', () => {
   it('não crasha com start_time null em viagem legada', () => {
     const trips = [{ id: 1, start_time: null, end_time: null }];
     expect(() =>
-      render(<TripTimeline trips={trips as any} start={360} end={480} totalDuration={120} />)
+      render(
+        React.createElement(TripTimeline, {
+          trips: trips as any,
+          start: 360,
+          end: 480,
+          totalDuration: 120,
+        }),
+      )
     ).not.toThrow();
   });
 });

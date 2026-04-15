@@ -1,5 +1,5 @@
 'use client';
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import {
   Box, Typography, Stack, Paper, Tooltip, Button, Drawer, Divider,
   IconButton, Alert, Snackbar,
@@ -57,11 +57,13 @@ export function TabGantt({
   lines,
   terminals,
   intervalPolicy,
+  onWhatIfUpdate,
 }: {
   res: OptimizationResultSummary;
   lines: Line[];
   terminals: Terminal[];
   intervalPolicy: TripIntervalPolicy;
+  onWhatIfUpdate?: (cost: number | null) => void;
 }) {
   const theme = useTheme();
   const isDark = theme.palette.mode === 'dark';
@@ -71,20 +73,87 @@ export function TabGantt({
   const [deltaResult, setDeltaResult] = useState<any>(null);
   const [deltaError, setDeltaError] = useState<string | null>(null);
   const [snackbar, setSnackbar] = useState<{ open: boolean; message: string; severity: 'success' | 'error' | 'info' | 'warning' }>({ open: false, message: '', severity: 'info' });
+  const [draggedTrip, setDraggedTrip] = useState<{ tripId: number; blockId: number; index: number } | null>(null);
+  const [dragOverBlockId, setDragOverBlockId] = useState<number | null>(null);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   
-  const { blocks = [], duties = [] } = res;
+  // ─── Local State for What-If Scenarios ───
+  const [localBlocks, setLocalBlocks] = useState<any[]>(res?.blocks || []);
+  const [baselineCost, setBaselineCost] = useState<number | null>(null);
+
+  // Sync local state when parent props change (e.g., selecting a different run)
+  useEffect(() => {
+    setLocalBlocks(res?.blocks || []);
+    setBaselineCost(null);
+    setDeltaResult(null);
+  }, [res?.blocks]);
+
+  // Baseline: chama /evaluate-baseline no mount para estabelecer um prevCost
+  // comparável ao resultado do what-if (mesmo pipeline de avaliação).
+  // Sem isso, a 1ª comparação mistura cost_breakdown da otimização original
+  // com GreedyCSP do what-if e produz delta falso (ex: 51983 → 14154).
+  useEffect(() => {
+    const blocks = res?.blocks || [];
+    if (!blocks.length) return;
+
+    const payload = {
+      blocks: blocks.map((b: any) => ({
+        id: Number(b.block_id ?? b.id),
+        vehicle_type_id: b.vehicle_type_id ?? null,
+        trips: (b.trips || []).map((t: any) => {
+          const trip: any = typeof t === 'object' ? t : { id: t };
+          const startTime = trip.start_time ?? 0;
+          const endTime = trip.end_time ?? 0;
+          return {
+            id: Number(trip.id),
+            line_id: trip.line_id ?? null,
+            start_time: startTime,
+            end_time: endTime,
+            origin_id: trip.origin_id ?? trip.origin_terminal_id ?? null,
+            destination_id: trip.destination_id ?? trip.destination_terminal_id ?? null,
+            direction: trip.direction ?? null,
+            distance_km: trip.distance_km ?? 0,
+            deadhead_times: trip.deadhead_times || {},
+            duration: trip.duration ?? (endTime - startTime),
+            idle_before_minutes: trip.idle_before_minutes ?? 0,
+            idle_after_minutes: trip.idle_after_minutes ?? 0,
+            trip_group_id: trip.tripGroupId ?? trip.trip_group_id ?? null,
+          };
+        }),
+      })),
+    };
+
+    let cancelled = false;
+    optimizationApi
+      .evaluateBaseline(payload)
+      .then((result: any) => {
+        if (cancelled) return;
+        const baseline = result?.cost_breakdown?.total ?? null;
+        setBaselineCost(baseline);
+      })
+      .catch((err: any) => {
+        console.warn('[WhatIf] Falha ao obter baseline:', err?.message);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [res?.blocks]);
+
+  const { duties = [] } = res;
+  const blocks = localBlocks;
   const ganttColors = useMemo(() => getGanttColors(theme), [theme]);
 
   // ─── Per-line color palette ───
   const LINE_PALETTE = useMemo(() => getLinePalette(theme), [theme]);
   const lineColorMap = useMemo(() => {
     const lineIds = new Set<number>();
-    blocks.forEach(b => (b.trips || []).forEach(t => {
+    blocks.forEach(b => (b.trips || []).forEach((t: TripDetail) => {
       const trip = typeof t === 'object' ? t : null;
       if (trip?.line_id) lineIds.add(trip.line_id);
     }));
     const map = new Map<number, string>();
-    Array.from(lineIds).sort((a, b) => a - b).forEach((id, i) => {
+    Array.from(lineIds).sort((a: number, b: number) => a - b).forEach((id: number, i: number) => {
       map.set(id, LINE_PALETTE[i % LINE_PALETTE.length]);
     });
     return map;
@@ -93,17 +162,21 @@ export function TabGantt({
   const listRowProps = useMemo<Record<string, never>>(() => ({}), []);
   
   // ─── Data Enrichment ───
+  // IMPORTANT: built from res.blocks (original, permanent) NOT from localBlocks.
+  // After a what-if response setLocalBlocks(result.blocks) replaces trip objects
+  // with ID-only entries, so using localBlocks here would empty the map on every
+  // subsequent drag and send zeroed data to the optimizer.
   const tripMetadataMap = useMemo(() => {
     const map = new Map<number, TripDetail>();
-    
-    blocks.forEach(b => {
-      (b.trips || []).forEach(t => {
-         if (typeof t === 'object') map.set(t.id, t);
+
+    (res?.blocks || []).forEach(b => {
+      (b.trips || []).forEach((t: TripDetail | number) => {
+        if (typeof t === 'object' && t !== null) map.set(t.id, t);
       });
     });
-    
+
     duties.forEach(d => {
-      (d.trips || []).forEach(t => {
+      (d.trips || []).forEach((t: TripDetail) => {
          if (typeof t === 'object') {
            const existing = map.get(t.id);
            map.set(t.id, { ...existing, ...t });
@@ -112,7 +185,7 @@ export function TabGantt({
     });
 
     return map;
-  }, [blocks, duties]);
+  }, [res?.blocks, duties]);
 
   const linesMap = useMemo(() => Object.fromEntries((lines ?? []).map(l => [l.id, l.code])), [lines]);
   const terminalsMap = useMemo(() => Object.fromEntries((terminals ?? []).map(t => [t.id, t.name])), [terminals]);
@@ -121,24 +194,24 @@ export function TabGantt({
     let min = Infinity;
     let max = -Infinity;
 
-    const filtered = blocks.map((b) => {
+    const filtered = blocks.map((b: any) => {
       let blockMin = Infinity;
       let blockMax = -Infinity;
       const blockWindow = getBlockDisplayWindow(b);
-      const validTrips = (b.trips || []).map(t => {
+      const validTrips = (b.trips || []).map((t: TripDetail | number) => {
         const id = typeof t === 'number' ? t : t.id;
         const meta = tripMetadataMap.get(id);
         return { ...(typeof t === 'object' ? t : {}), ...meta, id } as TripDetail;
-      }).filter(t => t.start_time !== undefined);
+      }).filter((t: TripDetail) => t.start_time !== undefined);
 
-      validTrips.forEach((t) => {
+      validTrips.forEach((t: TripDetail) => {
         if (t.start_time !== undefined && t.start_time < min) min = t.start_time;
         if (t.end_time !== undefined && t.end_time > max) max = t.end_time;
         if (t.start_time !== undefined && t.start_time < blockMin) blockMin = t.start_time;
         if (t.end_time !== undefined && t.end_time > blockMax) blockMax = t.end_time;
       });
 
-      const sortedTrips = validTrips.sort((left, right) => (left.start_time ?? 0) - (right.start_time ?? 0));
+      const sortedTrips = validTrips.sort((left: TripDetail, right: TripDetail) => (left.start_time ?? 0) - (right.start_time ?? 0));
   const displayStart = blockWindow.start ?? (blockMin !== Infinity ? blockMin : 0);
   const displayEnd = blockWindow.end ?? (blockMax !== -Infinity ? blockMax : 0);
 
@@ -255,7 +328,7 @@ export function TabGantt({
         idleWindows,
         idleSummary,
         tripCount: validTrips.length,
-        lineLabels: Array.from(new Set(validTrips.map((trip) => trip.line_id ? String(linesMap[trip.line_id] || trip.line_id) : '').filter(Boolean))).slice(0, 3),
+        lineLabels: Array.from(new Set(validTrips.map((trip: TripDetail) => trip.line_id ? String(linesMap[trip.line_id] || trip.line_id) : '').filter(Boolean))).slice(0, 3),
       };
     }).filter(b => (b.trips?.length || 0) > 0);
 
@@ -266,6 +339,225 @@ export function TabGantt({
     linesMap,
     tripMetadataMap,
   ]);
+
+  // ─── What-If Delta Evaluation ───────────────────────────────────────────────
+  const handleWhatIfDrop = useCallback(async (
+    tripIds: (number | string)[],
+    sourceBlockId: number | string,
+    targetBlockId: number | string,
+    targetIndex: number,
+  ) => {
+    setIsEvaluating(true);
+    setDeltaError(null);
+
+    // ─── REGRA DE OURO #1: Deep clone do estado atual ───────────────────────
+    // Nenhuma mutação toca `localBlocks`. Toda lógica opera em `computedNewBlocks`,
+    // que vira a Single Source of Truth para a UI E para o payload da API.
+    const backupBlocks = JSON.parse(JSON.stringify(localBlocks));
+    const computedNewBlocks: any[] = JSON.parse(JSON.stringify(localBlocks));
+
+    const numericTripIds = tripIds.map(Number);
+    const srcIdx = computedNewBlocks.findIndex(
+      (b: any) => String(b.block_id ?? b.id) === String(sourceBlockId),
+    );
+    const tgtIdx = computedNewBlocks.findIndex(
+      (b: any) => String(b.block_id ?? b.id) === String(targetBlockId),
+    );
+
+    if (srcIdx === -1 || tgtIdx === -1) {
+      setIsEvaluating(false);
+      setDeltaError('Bloco de origem ou destino não encontrado no estado local.');
+      return;
+    }
+
+    // Hidrata trip (pode estar como INT após response do Python) com metadados.
+    const hydrateTrip = (t: any) => {
+      const id = Number(typeof t === 'number' ? t : t.id);
+      const meta = (tripMetadataMap.get(id) || {}) as any;
+      return { ...meta, ...(typeof t === 'object' ? t : {}), id };
+    };
+
+    const srcTripsHydrated: any[] = (computedNewBlocks[srcIdx].trips || [])
+      .map(hydrateTrip)
+      .sort((a: any, b: any) => (a.start_time ?? 0) - (b.start_time ?? 0));
+
+    // ─── REGRA DE OURO #2: FALLBACK por tempo — Simples e confiável
+    const expandedIdSet = new Set<number>(numericTripIds);
+// Se só tem 1 trip, tenta encontrar o par (ida/volta) por tempo
+    if (expandedIdSet.size === 1) {
+      const tid = numericTripIds[0];
+      const t = srcTripsHydrated.find(x => x.id === tid);
+      if (t) {
+        const tTime = t.start_time ?? 0;
+        let bestGap = 9999;
+        let bestTid = null;
+        srcTripsHydrated.forEach((other: any) => {
+          if (other.id === tid) return;
+          const otherTime = other.start_time ?? 0;
+          const gap = Math.abs(otherTime - tTime);
+          if (gap > 0 && gap < 150 && gap < bestGap) {
+            bestGap = gap;
+            bestTid = other.id;
+          }
+        });
+        if (bestTid) expandedIdSet.add(bestTid);
+      }
+    }
+    
+    const expandedTripIds = Array.from(expandedIdSet);
+    console.log('[WhatIf] OUTPUT expandedTripIds:', expandedTripIds);
+
+    // ─── REGRA DE OURO #3: Aplica move no clone (nunca em localBlocks) ──────
+    const belongsToMove = (t: any): boolean => {
+      const id = Number(typeof t === 'number' ? t : t.id);
+      return expandedIdSet.has(id);
+    };
+
+    if (srcIdx === tgtIdx) {
+      // Cenário A: reordenar dentro do mesmo bloco
+      const block = computedNewBlocks[srcIdx];
+      const extracted = (block.trips || []).filter(belongsToMove);
+      const remaining = (block.trips || []).filter((t: any) => !belongsToMove(t));
+      const ins = Math.min(targetIndex, remaining.length);
+      remaining.splice(ins, 0, ...extracted);
+      block.trips = remaining;
+    } else {
+      // Cenário B: mover para outro bloco — AMBAS Ida+Volta viajam juntas.
+      const src = computedNewBlocks[srcIdx];
+      const tgt = computedNewBlocks[tgtIdx];
+      const extracted = (src.trips || []).filter(belongsToMove);
+      
+      // Verifica sobreposição de horário antes de mover
+      const tgtTrips = tgt.trips || [];
+      let hasOverlap = false;
+      const overlapWarnings: string[] = [];
+      extracted.forEach((mt: any) => {
+        const mStart = mt.start_time ?? 0;
+        const mEnd = mt.end_time ?? 0;
+        tgtTrips.forEach((tt: any) => {
+          const tStart = tt.start_time ?? 0;
+          const tEnd = tt.end_time ?? 0;
+          if (mStart < tEnd && mEnd > tStart) {
+            hasOverlap = true;
+            overlapWarnings.push(`Trip ${mt.id} sobres trip ${tt.id}`);
+          }
+        });
+      });
+      
+      if (hasOverlap) {
+        setIsEvaluating(false);
+        setDeltaError('Não é permitido mover para intervalo com sobreposição. Escolha outro local.');
+        setSnackbar({ open: true, message: `⚠️ Não é permitido sobresicionar!`, severity: 'error' });
+        return;
+      }
+      
+      src.trips = (src.trips || []).filter((t: any) => !belongsToMove(t));
+      const ins = Math.min(targetIndex, (tgt.trips || []).length);
+      const newTgtTrips = [...(tgt.trips || [])];
+      newTgtTrips.splice(ins, 0, ...extracted);
+      tgt.trips = newTgtTrips;
+    }
+
+    // ─── Single Source of Truth: computedNewBlocks ──────────────────────────
+    // UI: mostra apenas blocos com trips (filtro visual).
+    // Payload: preserva TODOS os blocos (incluindo source vazio) para o Python
+    //          encontrar source_block_id mesmo quando esvaziou.
+    const visibleBlocks = computedNewBlocks.filter((b: any) => (b.trips || []).length > 0);
+    setLocalBlocks(visibleBlocks);
+
+    try {
+      const blocksPayload = computedNewBlocks.map((b: any) => ({
+        id: Number(b.block_id || b.id),
+        trips: (b.trips || []).map((t: any) => {
+          const id = Number(typeof t === 'number' ? t : t.id);
+          const trip: any = typeof t === 'object' ? t : (tripMetadataMap.get(id) || {});
+          const startTime = trip.start_time ?? 0;
+          const endTime = trip.end_time ?? 0;
+          return {
+            id,
+            line_id: trip.line_id ?? null,
+            start_time: startTime,
+            end_time: endTime,
+            origin_id: trip.origin_id ?? trip.origin_terminal_id ?? null,
+            destination_id: trip.destination_id ?? trip.destination_terminal_id ?? null,
+            direction: trip.direction ?? null,
+            distance_km: trip.distance_km ?? 0,
+            deadhead_times: trip.deadhead_times || {},
+            duration: trip.duration ?? (endTime - startTime),
+            idle_before_minutes: trip.idle_before_minutes ?? 0,
+            idle_after_minutes: trip.idle_after_minutes ?? 0,
+            trip_group_id: trip.tripGroupId ?? trip.trip_group_id ?? null,
+          };
+        }),
+        vehicle_type_id: b.vehicle_type_id ?? null,
+      }));
+
+      console.log('[WhatIf] blocksPayload blocks:', blocksPayload.map((b: any) => ({id: b.id, trips: b.trips.length})));
+      const payload = {
+        blocks: blocksPayload,
+        trip_id: expandedTripIds[0],
+        source_block_id: Number(sourceBlockId),
+        target_block_id: Number(targetBlockId),
+        target_index: Math.max(0, Math.min(Number(targetIndex), (blocksPayload.find((b: any) => Number(b.id) === Number(targetBlockId))?.trips.length ?? 0))),
+      };
+
+      const result = await optimizationApi.evaluateDelta(payload);
+      
+      // Calcula custo ANTES de atualizar o deltaResult
+      const newCost: number = result?.cost_breakdown?.total ?? result?.costBreakdown?.total ?? 0;
+      console.log('[WhatIf] deltaResult ATUAL:', deltaResult?.cost_breakdown?.total);
+      
+      // Custo base comparável: deltaResult anterior → baseline do mesmo
+      // pipeline (evaluator + GreedyCSP). NUNCA cai em res.cost_breakdown
+      // porque aquele veio do optimizer full (CSP completo) e não é
+      // comparável com a avaliação what-if.
+      const prevCost = deltaResult?.cost_breakdown?.total
+        ?? baselineCost
+        ?? newCost;
+      console.log('[WhatIf] Costs: prevCost:', prevCost, 'newCost:', newCost);
+      const costDiff = newCost - prevCost;
+      const sign = costDiff >= 0 ? '+' : '';
+
+      // Atualiza o deltaResult DEPOIS de calcular o custo
+      setDeltaResult(result);
+      const newTotalCost: number | null = newCost;
+      onWhatIfUpdate?.(newTotalCost);
+
+      setSnackbar({
+        open: true,
+        message: costDiff === 0
+          ? 'Sem alteração de custo'
+          : `Custo ${costDiff > 0 ? 'aumentou' : 'reduzido'}: ${sign}${costDiff.toFixed(2)} (${prevCost.toFixed(2)} → ${newCost.toFixed(2)})`,
+        severity: costDiff > 0 ? 'warning' : costDiff < 0 ? 'success' : 'info',
+      });
+    } catch (err: any) {
+      console.error('[WhatIf] ERRO:', err);
+      setDeltaError(err?.message || 'Erro ao avaliar delta');
+      setSnackbar({
+        open: true,
+        message: `Erro What-If: ${err?.message || 'Erro desconhecido'}`,
+        severity: 'error',
+      });
+      setLocalBlocks(backupBlocks);
+      onWhatIfUpdate?.(null);
+    } finally {
+      setIsEvaluating(false);
+    }
+  }, [res, localBlocks, tripMetadataMap, onWhatIfUpdate]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return undefined;
+    }
+
+    (window as any).__otimizWhatIf = handleWhatIfDrop;
+
+    return () => {
+      if ((window as any).__otimizWhatIf === handleWhatIfDrop) {
+        delete (window as any).__otimizWhatIf;
+      }
+    };
+  }, [handleWhatIfDrop]);
 
   if (processedBlocks.length === 0 || minTime === Infinity) {
     return <Typography color="text.secondary" py={4} textAlign="center">Sem dados suficientes para gerar o gráfico.</Typography>;
@@ -286,81 +578,6 @@ export function TabGantt({
     if (t >= startScale && t <= endScale) {
        if (zoom > 1.5 || h % 2 === 0) ticks.push(t);
     }
-  }
-
-  // ─── What-If Delta Evaluation ───────────────────────────────────────────────
-  const handleWhatIfDrop = useCallback(async (tripId: number, sourceBlockId: number, targetBlockId: number, targetIndex: number) => {
-    setIsEvaluating(true);
-    setDeltaError(null);
-    
-    try {
-      const blocksPayload = (res.blocks || []).map((b: any) => ({
-        id: b.id,
-        trips: (b.trips || []).map((t: any) => {
-          const trip = typeof t === 'object' ? t : {};
-          return {
-            id: typeof t === 'number' ? t : t.id,
-            line_id: trip.line_id,
-            start_time: trip.start_time,
-            end_time: trip.end_time,
-            origin_id: trip.origin_id ?? trip.origin_terminal_id,
-            destination_id: trip.destination_id ?? trip.destination_terminal_id,
-            distance_km: trip.distance_km,
-            deadhead_times: trip.deadhead_times || {},
-          };
-        }),
-        vehicle_type_id: b.vehicle_type_id,
-      }));
-      
-      const payload = {
-        blocks: blocksPayload,
-        trip_id: tripId,
-        source_block_id: sourceBlockId,
-        target_block_id: targetBlockId,
-        target_index: targetIndex,
-      };
-      
-      const result = await optimizationApi.evaluateDelta(payload);
-      setDeltaResult(result);
-      
-      const prevCost = res.costBreakdown?.total || 0;
-      const newCost = result.cost_breakdown?.total || result.costBreakdown?.total || 0;
-      const costDiff = newCost - prevCost;
-      
-      if (costDiff > 0) {
-        setSnackbar({
-          open: true,
-          message: `Custo aumentou: +${costDiff.toFixed(2)} (${prevCost.toFixed(2)} -> ${newCost.toFixed(2)})`,
-          severity: 'warning',
-        });
-      } else if (costDiff < 0) {
-        setSnackbar({
-          open: true,
-          message: `Custo reduzido: ${costDiff.toFixed(2)} (${prevCost.toFixed(2)} -> ${newCost.toFixed(2)})`,
-          severity: 'success',
-        });
-      } else {
-        setSnackbar({
-          open: true,
-          message: 'Sem alteracao de custo',
-          severity: 'info',
-        });
-      }
-    } catch (err: any) {
-      setDeltaError(err?.message || 'Erro ao avaliar delta');
-      setSnackbar({
-        open: true,
-        message: `Erro What-If: ${err?.message || 'Erro desconhecido'}`,
-        severity: 'error',
-      });
-    } finally {
-      setIsEvaluating(false);
-    }
-  }, [res]);
-
-  // Expor funcao de drop via window (para integracao com drag handlers)
-  if (typeof window !== 'undefined') {
-    (window as any).__otimizWhatIf = handleWhatIfDrop;
   }
 
   // Visual constants for precise alignment
@@ -462,17 +679,46 @@ export function TabGantt({
           </Box>
 
           {/* Área do Gráfico */}
-          <Box sx={{ 
-            flexGrow: 1, 
-            position: 'relative', 
-            height: BLOCK_HEIGHT + 10, 
-            my: 'auto',
-            bgcolor: ganttColors.trackBg, 
-            borderRadius: 2.5, 
-            border: '1px solid', 
-            borderColor: alpha(theme.palette.divider, 0.3),
-            overflow: 'hidden'
-          }}>
+          <Box
+            onDragOver={(e) => {
+              e.preventDefault(); // OBRIGATÓRIO PARA O NAVEGADOR PERMITIR O DROP
+              e.dataTransfer.dropEffect = 'move';
+            }}
+            onDrop={(e) => {
+              e.preventDefault(); // EVITA QUE O NAVEGADOR ABRA O DADO COMO URL
+              
+              const dragData = e.dataTransfer.getData('text/plain');
+              console.log("📥 DROP: Soltou o mouse! Dados recebidos:", dragData);
+              
+              if (dragData) {
+                try {
+                  const parsed = JSON.parse(dragData);
+                  const targetBlockId = b.block_id || b.id;
+                  
+                  console.log(`🚀 ROTEANDO: Movendo Viagens ${parsed.tripIds} do Bloco ${parsed.blockId} para o Bloco ${targetBlockId}`);
+                  
+                  // Sempre permite mover (mesmo bloco ou outro)
+                  // Se mesmo bloco, vai reordenar; se outro, vai mover
+                  handleWhatIfDrop(parsed.tripIds, parsed.blockId, targetBlockId, 1000);
+                } catch (err) {
+                  console.error("❌ ERRO NO DROP: Falha ao ler os dados", err);
+                }
+              } else {
+                console.warn("⚠️ DROP VAZIO: O React perdeu os dados no caminho.");
+              }
+            }}
+            sx={{ 
+              flexGrow: 1, 
+              position: 'relative', 
+              height: BLOCK_HEIGHT + 10, 
+              my: 'auto',
+              bgcolor: ganttColors.trackBg, 
+              borderRadius: 2.5, 
+              border: '1px solid',
+              borderColor: alpha(theme.palette.divider, 0.3),
+              overflow: 'hidden',
+            }}
+          >
             {/* Grid Lines (Subtle) */}
             {ticks.map(t => (
               <Box key={`grid-${t}`} sx={{ 
@@ -516,7 +762,7 @@ export function TabGantt({
             })}
 
             {/* Ciclos e Viagens */}
-            {b.groups.map((group, gIdx) => {
+            {b.groups.map((group: any, gIdx: number) => {
               const containerStart = getPercent(group.trips[0].start_time ?? 0);
               const containerEnd = getPercent(group.trips[group.trips.length - 1].end_time ?? 0);
               const containerWidth = containerEnd - containerStart;
@@ -538,7 +784,7 @@ export function TabGantt({
                     borderColor: alpha(cycleColor ?? theme.palette.primary.main, 0.4),
                   })
                 }}>
-                  {group.trips.map((t, i) => {
+                  {group.trips.map((t: TripDetail, i: number) => {
                     const groupStart = group.trips[0].start_time ?? 0;
                     const groupEnd = group.trips[group.trips.length - 1].end_time ?? 0;
                     const range = Math.max(groupEnd - groupStart, 1);
@@ -574,25 +820,51 @@ export function TabGantt({
                           </Box>
                         }
                       >
-                        <Box sx={{
-                          position: 'absolute',
-                          left: `${startP}%`,
-                          width: `${widthP}%`,
-                          top: group.type === 'cycle' ? 2 : 0,
-                          bottom: group.type === 'cycle' ? 2 : 0,
-                          bgcolor: barColor,
-                          borderRadius: group.type === 'cycle' ? 99 : 1.5,
-                          boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
-                          transition: 'all 0.15s ease-out',
-                          cursor: 'pointer',
-                          display: 'flex', alignItems: 'center', justifyContent: 'center',
-                          '&:hover': { 
-                            filter: 'brightness(1.1)',
-                            transform: 'scaleY(1.1)',
-                            zIndex: 10,
-                            boxShadow: '0 4px 12px rgba(0,0,0,0.2)'
-                          },
-                        }}>
+                        <Box
+                          draggable
+                          onDragStart={(e) => {
+                            const thisBlockId = b.block_id || b.id;
+                            const tripIds = group.trips.map((gt: any) => gt.id);
+                            const payload = JSON.stringify({ tripIds, blockId: thisBlockId, index: i });
+                            
+                            console.log(`📤 DRAG START: Segurou o ciclo contendo as viagens ${tripIds} do bloco ${thisBlockId}`);
+                            
+                            e.dataTransfer.setData('text/plain', payload);
+                            e.dataTransfer.effectAllowed = 'move';
+                            
+                            // Hack para forçar o navegador a não perder a imagem fantasma
+                            e.stopPropagation(); 
+                          }}
+                          onDragEnd={() => {
+                            setDraggedTrip(null);
+                            setDragOverBlockId(null);
+                            setDragOverIndex(null);
+                          }}
+                          sx={{
+                            position: 'absolute',
+                            left: `${startP}%`,
+                            width: `${widthP}%`,
+                            top: group.type === 'cycle' ? 2 : 0,
+                            bottom: group.type === 'cycle' ? 2 : 0,
+                            bgcolor: barColor,
+                            borderRadius: group.type === 'cycle' ? 99 : 1.5,
+                            boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
+                            transition: 'all 0.15s ease-out',
+                            cursor: 'grab',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            opacity: draggedTrip?.tripId === t.id ? 0.5 : 1,
+                            '&:hover': { 
+                              filter: 'brightness(1.1)',
+                              transform: 'scaleY(1.1)',
+                              zIndex: 10,
+                              boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
+                              cursor: 'grab'
+                            },
+                            '&:active': {
+                              cursor: 'grabbing'
+                            }
+                          }}
+                        >
                           {widthP > 8 && !isDeadhead && (
                             <Typography variant="caption" sx={{ color: '#fff', fontSize: '0.65rem', fontWeight: 800, px: 0.5, pointerEvents: 'none' }}>
                                {linesMap[t.line_id!] || t.line_id}
@@ -667,6 +939,50 @@ export function TabGantt({
       )}
 
       <Box sx={{ position: 'relative' }}>
+        {isEvaluating && (
+          <Box
+            sx={{
+              position: 'absolute',
+              top: 0, left: 0, right: 0, bottom: 0,
+              bgcolor: alpha(theme.palette.background.paper, 0.4),
+              backdropFilter: 'blur(2px)',
+              zIndex: 100,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              borderRadius: 4,
+            }}
+          >
+            <Paper
+              elevation={4}
+              sx={{
+                p: 2,
+                px: 3,
+                borderRadius: 3,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 2,
+                bgcolor: theme.palette.primary.main,
+                color: '#fff',
+                boxShadow: '0 8px 32px rgba(0,0,0,0.2)',
+              }}
+            >
+              <Box
+                sx={{
+                  width: 20,
+                  height: 20,
+                  border: '3px solid rgba(255,255,255,0.3)',
+                  borderTopColor: '#fff',
+                  borderRadius: '50%',
+                  animation: 'spin 1s linear infinite',
+                }}
+              />
+              <Typography variant="subtitle2" fontWeight={900} sx={{ letterSpacing: 1 }}>
+                RECALCULANDO...
+              </Typography>
+            </Paper>
+          </Box>
+        )}
          <Paper variant="outlined" sx={{ 
            borderRadius: 4, 
            overflow: 'hidden', 
@@ -761,6 +1077,10 @@ export function TabGantt({
           0% { transform: scale(1); opacity: 0.8; }
           50% { transform: scale(1.3); opacity: 1; }
           100% { transform: scale(1); opacity: 0.8; }
+        }
+        @keyframes spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
         }
       `}</style>
 

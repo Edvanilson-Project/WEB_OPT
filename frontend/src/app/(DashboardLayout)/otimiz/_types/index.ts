@@ -311,6 +311,10 @@ export interface OptimizationResultSummary {
   elapsed_ms?: number;
   costBreakdown?: OptimizationCostBreakdown | null;
   solverExplanation?: OptimizationSolverExplanation | null;
+  /** Insight em linguagem natural gerado pelo AI Copilot (OpenRouter). Null se indisponível. */
+  aiCopilotInsight?: string | null;
+  /** Snake_case alias vindo direto da API Python (antes da normalização NestJS). */
+  ai_copilot_insight?: string | null;
   phaseSummary?: OptimizationPhaseSummary | null;
   tripGroupAudit?: OptimizationTripGroupAudit | null;
   reproducibility?: OptimizationReproducibility | null;
