@@ -24,6 +24,7 @@ alembic>=1.14.0
 
 # ── Async / background tasks ─────────────────────────────────────────────────
 anyio>=4.7.0
+celery[redis]>=5.4.0          # Fila de tarefas assíncronas (workers VSP/CSP paralelos)
 
 # ── Observability ────────────────────────────────────────────────────────────
 structlog>=24.4.0
