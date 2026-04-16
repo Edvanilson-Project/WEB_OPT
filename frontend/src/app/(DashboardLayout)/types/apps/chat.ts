@@ -4,8 +4,8 @@ type attachType = {
   fileSize?: string;
 };
 
-type MessageType = {
-  createdAt?: any;
+export type MessageType = {
+  createdAt?: Date | string | number;
   msg: string;
   senderId: number | string;
   type: string;
@@ -20,6 +20,5 @@ export interface ChatsType {
   thumb: string;
   recent: boolean;
   excerpt: string;
-  chatHistory?: any[];
   messages: MessageType[];
 }

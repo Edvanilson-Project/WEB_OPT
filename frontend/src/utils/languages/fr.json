@@ -18,5 +18,10 @@
     "Notes": "Remarques",
     "Calendar": "Calendrier",
     "Email": "E-mail",
-    "Tickets": "Des billets"
+    "Tickets": "Des billets",
+    "Kanban": "Kanban",
+    "Invoice": "Facture",
+    "Details": "Détails",
+    "Create": "Créer",
+    "Edit": "Modifier"
 }

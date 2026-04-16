@@ -1,5 +1,5 @@
 export type ProfileType = {
-  id: number | string;
+  id: string;
   avatar: string;
   name: string;
   time: string;
@@ -25,19 +25,19 @@ export type CommentDataType = {
 };
 
 export type Reply = {
-  id?: string | number;
+  id?: string;
   profile?: ProfileType;
   data: CommentDataType;
 };
 
 export type Comment = {
-  id: string | number;
+  id: string;
   profile: ProfileType;
   data?: CommentDataType;
 };
 
 export type PostDataType = {
-  id?: string | number;
+  id?: string;
   content: string;
   images: PostImageType[];
   video?: string;
@@ -46,7 +46,17 @@ export type PostDataType = {
 };
 
 export type PostType = {
-  id?: any;
+  id?: string;
   profile: ProfileType;
   data: PostDataType;
+};
+
+export type profiledataType = {
+  name: string;
+  role: string;
+  avatar: string;
+  coverImage: string;
+  postsCount: number;
+  followersCount: number;
+  followingCount: number;
 };

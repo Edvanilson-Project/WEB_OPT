@@ -9,20 +9,27 @@ import { OptimizationSettingsModule } from '../optimization-settings/optimizatio
 import { LinesModule } from '../lines/lines.module';
 import { TerminalsModule } from '../terminals/terminals.module';
 import { VehicleTypesModule } from '../vehicle-types/vehicle-types.module';
+import { OptimizerClientService } from './optimizer-client.service';
+import { OptimizationGateway } from './gateways/optimization.gateway';
+import { AuthModule } from '../auth/auth.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([OptimizationRunEntity]),
-    HttpModule,
+    HttpModule.register({
+      timeout: 300000,
+      maxRedirects: 5,
+    }),
     TripsModule,
     OptimizationSettingsModule,
     LinesModule,
     TerminalsModule,
     VehicleTypesModule,
+    AuthModule,
   ],
   controllers: [OptimizationController],
-  providers: [OptimizationService],
-  exports: [OptimizationService],
+  providers: [OptimizationService, OptimizerClientService, OptimizationGateway],
+  exports: [OptimizationService, OptimizerClientService, OptimizationGateway],
 })
 export class OptimizationModule implements OnModuleInit {
   private readonly logger = new Logger(OptimizationModule.name);

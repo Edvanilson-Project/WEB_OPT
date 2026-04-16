@@ -35,9 +35,7 @@ export class LinesController {
   @Get()
   @ApiQuery({ name: 'companyId', required: false })
   findAll(@Request() req: AuthRequest, @Query('companyId') companyId?: string) {
-    return this.linesService.findAll(
-      resolveScopedCompanyId(req.user?.companyId, companyId, req.user?.role),
-    );
+    return this.linesService.findAll();
   }
 
   @Get(':id')

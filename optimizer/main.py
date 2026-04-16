@@ -10,9 +10,10 @@ from pathlib import Path
 
 import structlog
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends, Header, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from prometheus_fastapi_instrumentator import Instrumentator
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from src.api.routes import health, optimize, strategy, whatif, rostering
 from src.core.config import get_settings
@@ -22,6 +23,42 @@ from src.services import StrategyPersistenceService, StrategyService, worker_sta
 
 log = structlog.get_logger(__name__)
 settings = get_settings()
+
+# ── Dependency: Validates Internal Key ─────────────────────────────────────
+async def verify_internal_key(
+    x_internal_key: str = Header(None, alias="X-Internal-Key")
+):
+    if not settings.internal_security_key: # Fail-fast se não configurado
+        log.error("security_key_not_configured")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Security key not configured on server",
+        )
+    
+    if x_internal_key != settings.internal_security_key:
+        log.warning("invalid_internal_key_attempt", header=x_internal_key)
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Invalid internal security key",
+        )
+    return x_internal_key
+
+# ── Middleware: Tracking & Logging Correlation ID & Multi-Tenancy ───────
+class TenantLoggingMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        correlation_id = request.headers.get("X-Correlation-ID", "internal-task")
+        company_id = request.headers.get("X-Company-ID", "unknown")
+        
+        # Injeta variáveis no contexto de log do structlog
+        structlog.contextvars.bind_contextvars(
+            correlation_id=correlation_id,
+            company_id=company_id
+        )
+        
+        response = await call_next(request)
+        response.headers["X-Correlation-ID"] = correlation_id
+        response.headers["X-Company-ID"] = company_id
+        return response
 
 
 def _trip_from_dict(item: dict) -> Trip:
@@ -248,6 +285,9 @@ com múltiplos algoritmos:
     redoc_url="/redoc",
 )
 
+# ── Multi-Tenancy & Correlation ID ──────────────────────────────────────────
+app.add_middleware(TenantLoggingMiddleware)
+
 # ── CORS ─────────────────────────────────────────────────────────────────────
 app.add_middleware(
     CORSMiddleware,
@@ -261,10 +301,32 @@ Instrumentator(excluded_handlers=["/health", "/metrics"]).instrument(app).expose
 
 # ── Rotas ────────────────────────────────────────────────────────────────────
 app.include_router(health.router, prefix="/health", tags=["Health"])
-app.include_router(optimize.router, prefix="/optimize", tags=["Optimize"])
-app.include_router(strategy.router, prefix="/strategy", tags=["Strategy"])
-app.include_router(rostering.router, prefix="/optimize/rostering", tags=["Rostering"])
-app.include_router(whatif.router, prefix="/api/v1", tags=["What-If"])
+
+# Proteção global das rotas operacionais
+app.include_router(
+    optimize.router, 
+    prefix="/optimize", 
+    tags=["Optimize"],
+    dependencies=[Depends(verify_internal_key)]
+)
+app.include_router(
+    strategy.router, 
+    prefix="/strategy", 
+    tags=["Strategy"],
+    dependencies=[Depends(verify_internal_key)]
+)
+app.include_router(
+    rostering.router, 
+    prefix="/optimize/rostering", 
+    tags=["Rostering"],
+    dependencies=[Depends(verify_internal_key)]
+)
+app.include_router(
+    whatif.router, 
+    prefix="/api/v1", 
+    tags=["What-If"],
+    dependencies=[Depends(verify_internal_key)]
+)
 
 
 if __name__ == "__main__":

@@ -10,14 +10,21 @@ import {
   ParseIntPipe,
   Query,
   Request,
+  UseInterceptors,
+  UploadedFile,
+  BadRequestException,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import {
   ApiBearerAuth,
   ApiTags,
   ApiQuery,
   ApiOperation,
+  ApiConsumes,
+  ApiBody,
 } from '@nestjs/swagger';
 import { TripsService } from './trips.service';
+import { TripsImportService } from './trips-import.service';
 import { CreateTripDto } from './dto/create-trip.dto';
 import { UpdateTripDto } from './dto/update-trip.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -30,7 +37,35 @@ import { AuthRequest } from '../../common/interfaces/auth.interface';
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('trips')
 export class TripsController {
-  constructor(private readonly tripsService: TripsService) {}
+  constructor(
+    private readonly tripsService: TripsService,
+    private readonly tripsImportService: TripsImportService,
+  ) {}
+
+  @Post('import')
+  @UseInterceptors(FileInterceptor('file'))
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({ summary: 'Importar viagens via CSV/Excel' })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        file: {
+          type: 'string',
+          format: 'binary',
+        },
+      },
+    },
+  })
+  async importTrips(
+    @UploadedFile() file: Express.Multer.File,
+    @Request() req: AuthRequest,
+  ) {
+    if (!file) throw new BadRequestException('Arquivo não enviado.');
+    
+    // O companyId é extraído do token JWT (Contexto Multi-Tenant)
+    return this.tripsImportService.importFromBuffer(file.buffer, req.user.companyId);
+  }
 
   @Post()
   @ApiOperation({ summary: 'Criar viagem' })

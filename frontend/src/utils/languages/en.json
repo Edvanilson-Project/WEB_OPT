@@ -1,11 +1,11 @@
 {
-    "Modern": "Modern",
-    "Ecommerce": "Ecommerce",
+    "Modern": "Modern",    
     "eCommerce": "eCommerce",
     "Contacts": "Contacts",
     "Blog": "Blog",
     "Posts": "Posts",
     "Detail": "Detail",
+    "Ecommerce": "Ecommerce",
     "Shop": "Shop",
     "List": "List",
     "Checkout": "Checkout",
@@ -18,5 +18,10 @@
     "Notes": "Notes",
     "Calendar": "Calendar",
     "Email": "Email",
-    "Tickets": "Tickets"
+    "Tickets": "Tickets",
+    "Kanban": "Kanban",
+    "Invoice": "Invoice",
+    "Details": "Details",
+    "Create": "Create",
+    "Edit": "Edit"
 }

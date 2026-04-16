@@ -9,6 +9,7 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { ConfigService } from '@nestjs/config';
 import { Reflector } from '@nestjs/core';
 import helmet from 'helmet';
+import * as cookieParser from 'cookie-parser';
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
@@ -24,6 +25,7 @@ async function bootstrap() {
 
   // Security headers
   app.use(helmet());
+  app.use(cookieParser());
 
   // CORS
   app.enableCors({

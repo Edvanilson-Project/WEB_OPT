@@ -1,7 +1,8 @@
-import React from "react";
+import React, { useContext, useState } from "react";
 
-import { useState } from "react";
-import { useSelector } from "@/store/hooks";
+
+import { CustomizerContext } from "@/app/context/customizerContext";
+
 import { usePathname } from "next/navigation";
 
 // mui imports
@@ -20,25 +21,9 @@ import { isNull } from "lodash";
 // plugins
 import { IconChevronDown, IconChevronUp } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
-import { AppState } from "@/store/store";
+import { NavCollapseProps, NavGroup } from "@/app/(DashboardLayout)/types/layout/sidebar";
 
-type NavGroupProps = {
-  [x: string]: any;
-  navlabel?: boolean;
-  subheader?: string;
-  title?: string;
-  icon?: any;
-  href?: any;
-};
 
-interface NavCollapseProps {
-  menu: NavGroupProps;
-  level: number;
-  pathWithoutLastPart: any;
-  pathDirect: any;
-  hideMenu: any;
-  onClick: (event: React.MouseEvent<HTMLElement>) => void;
-}
 
 // FC Component For Dropdown Menu
 export default function NavCollapse({
@@ -51,18 +36,20 @@ export default function NavCollapse({
 }: NavCollapseProps) {
   const lgDown = useMediaQuery((theme: Theme) => theme.breakpoints.down("lg"));
 
-  const customizer = useSelector((state: AppState) => state.customizer);
+  const { isBorderRadius } = useContext(CustomizerContext);
   const Icon = menu?.icon;
   const theme = useTheme();
   const pathname = usePathname();
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
-  const menuIcon =
-    level > 1 ? (
-      <Icon stroke={1.5} size="1rem" />
-    ) : (
-      <Icon stroke={1.5} size="1.3rem" />
-    );
+
+
+
+  const menuIcon = Icon ? (
+    level > 1 ? <Icon stroke={1.5} size="1rem" /> : <Icon stroke={1.5} size="1.3rem" />
+  ) : null;
+
+
 
   const handleClick = () => {
     setOpen(!open);
@@ -71,7 +58,7 @@ export default function NavCollapse({
   // menu collapse for sub-levels
   React.useEffect(() => {
     setOpen(false);
-    menu?.children?.forEach((item: any) => {
+    menu?.children?.forEach((item: NavGroup) => {
       if (item?.href === pathname) {
         setOpen(true);
       }
@@ -86,21 +73,21 @@ export default function NavCollapse({
     whiteSpace: "nowrap",
     "&:hover": {
       backgroundColor:
-        pathname.includes(menu.href) || open
+        pathname.includes(menu.href || '') || open
           ? theme.palette.primary.main
           : theme.palette.primary.light,
       color:
-        pathname.includes(menu.href) || open
+        pathname.includes(menu.href || '') || open
           ? "white"
           : theme.palette.primary.main,
     },
     color:
       open && level < 2
         ? "white"
-        : `inherit` && level > 1 && open
-        ? theme.palette.primary.main
-        : theme.palette.text.secondary,
-    borderRadius: `${customizer.borderRadius}px`,
+        : level > 1 && open
+          ? theme.palette.primary.main
+          : theme.palette.text.secondary,
+    borderRadius: `${isBorderRadius}px`,
   }));
 
   // If Menu has Children

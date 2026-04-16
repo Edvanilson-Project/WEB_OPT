@@ -1,4 +1,4 @@
-"use client"
+"use client";
 import { Box, Container, Typography, Button } from "@mui/material";
 import Image from "next/image";
 import Link from "next/link";
@@ -14,8 +14,10 @@ const Error = () => (
     <Container maxWidth="md">
       <Image
         src={"/images/backgrounds/errorimg.svg"}
-        alt="404" width={500} height={500}
-        style={{ width: "100%", maxWidth: "500px",  maxHeight: '500px' }}
+        alt="404"
+        width={500}
+        height={500}
+        style={{ width: "100%", maxWidth: "500px", maxHeight: "500px" }}
       />
       <Typography align="center" variant="h1" mb={4}>
         Opps 404!!!

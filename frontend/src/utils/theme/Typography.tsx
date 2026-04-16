@@ -7,7 +7,7 @@ export const plus = Plus_Jakarta_Sans({
   fallback: ["Helvetica", "Arial", "sans-serif"],
 });
 
-const typography: any = {
+const typography = {
   fontFamily: plus.style.fontFamily,
   h1: {
     fontWeight: 600,

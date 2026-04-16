@@ -1,7 +1,7 @@
 import _ from 'lodash';
 import { createTheme } from '@mui/material/styles';
-import { useSelector } from '@/store/hooks';
-import { AppState } from '@/store/store';
+import { CustomizerContext } from "@/app/context/customizerContext";
+import { useContext, useEffect } from 'react';
 import components from './Components';
 import typography from './Typography';
 import { shadows, darkshadows } from './Shadows';
@@ -13,16 +13,16 @@ import * as locales from '@mui/material/locale';
 export const BuildTheme = (config: any = {}) => {
   const themeOptions = LightThemeColors.find((theme) => theme.name === config.theme);
   const darkthemeOptions = DarkThemeColors.find((theme) => theme.name === config.theme);
-  const customizer = useSelector((state: AppState) => state.customizer);
-  const defaultTheme = customizer.activeMode === 'dark' ? baseDarkTheme : baselightTheme;
-  const defaultShadow = customizer.activeMode === 'dark' ? darkshadows : shadows;
-  const themeSelect = customizer.activeMode === 'dark' ? darkthemeOptions : themeOptions;
+  const { activeMode, isBorderRadius } = useContext(CustomizerContext);
+  const defaultTheme = activeMode === 'dark' ? baseDarkTheme : baselightTheme;
+  const defaultShadow = activeMode === 'dark' ? darkshadows : shadows;
+  const themeSelect = activeMode === 'dark' ? darkthemeOptions : themeOptions;
   const baseMode = {
     palette: {
-      mode: customizer.activeMode,
+      mode: activeMode,
     },
     shape: {
-      borderRadius: customizer.borderRadius,
+      borderRadius: isBorderRadius,
     },
     shadows: defaultShadow,
     typography: typography,
@@ -38,12 +38,15 @@ export const BuildTheme = (config: any = {}) => {
 };
 
 const ThemeSettings = () => {
-  const activDir = useSelector((state: AppState) => state.customizer.activeDir);
-  const activeTheme = useSelector((state: AppState) => state.customizer.activeTheme);
+  const { activeDir, activeTheme } = useContext(CustomizerContext);
+
   const theme = BuildTheme({
-    direction: activDir,
+    direction: activeDir,
     theme: activeTheme,
   });
+  useEffect(() => {
+    document.dir = activeDir;
+  }, [activeDir]);
 
   return theme;
 };

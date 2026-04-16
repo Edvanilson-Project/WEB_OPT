@@ -24,6 +24,7 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { UserRole } from '../users/entities/user.entity';
 import { resolveScopedCompanyId } from '../../common/utils/company-scope.util';
 import { AuthRequest } from '../../common/interfaces/auth.interface';
+import { Public } from '../../common/decorators/public.decorator';
 
 @ApiTags('optimization')
 @ApiBearerAuth()
@@ -37,8 +38,20 @@ export class OptimizationController {
   @ApiOperation({ summary: 'Iniciar nova execução de otimização VSP+CSP' })
   @Roles(UserRole.SUPER_ADMIN, UserRole.COMPANY_ADMIN, UserRole.ANALYST)
   run(@Body() dto: RunOptimizationDto, @Request() req: AuthRequest) {
-    dto.companyId = resolveScopedCompanyId(req.user?.companyId, dto.companyId, req.user?.role);
-    return this.optimizationService.startOptimization(dto, req.user?.id);
+    const companyId = resolveScopedCompanyId(req.user?.companyId, dto.companyId, req.user?.role);
+    return this.optimizationService.triggerRun(dto, companyId);
+  }
+
+  @Public()
+  @Get('check-optimizer')
+  @ApiOperation({ summary: 'Endpoint de diagnóstico para testar a ponte NestJS -> Python' })
+  async checkOptimizer() {
+    try {
+      const response = await this.optimizationService['optimizerClient'].get('/health');
+      return { status: 'ok', python_bridge: 'connected', response };
+    } catch (error) {
+      return { status: 'error', message: 'Falha na ponte', error: error.message };
+    }
   }
 
   @Get()

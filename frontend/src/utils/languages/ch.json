@@ -18,5 +18,10 @@
     "Notes": "笔记",
     "Calendar": "日历",
     "Email": "电子邮件",
-    "Tickets": "门票"
+    "Tickets": "门票",
+    "Kanban": "看板",
+    "Invoice": "發票",
+    "Details": "細節",
+    "Create": "創造",
+    "Edit": "編輯"
 }

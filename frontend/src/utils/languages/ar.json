@@ -18,5 +18,10 @@
     "Notes": "ملاحظات",
     "Calendar": "التقويم",
     "Email": "بريد إلكتروني",
-    "Tickets": "تذاكر"
+    "Tickets": "تذاكر",
+    "Kanban": "كانبان",
+    "Invoice": "فاتورة",
+    "Details": "تفاصيل",
+    "Create": "يخلق",
+    "Edit": "يحرر"
 }

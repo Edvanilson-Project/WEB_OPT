@@ -1,3 +1,4 @@
+import { ElementType } from "react";
 
 export interface ProductType {
   title: string;
@@ -22,7 +23,7 @@ export interface ProductFiterType {
   filterbyTitle?: string;
   name?: string;
   sort?: string;
-  icon?:  any;
+  icon?: ElementType;
   devider?: boolean;
 }
 

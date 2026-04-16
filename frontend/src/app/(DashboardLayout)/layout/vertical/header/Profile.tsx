@@ -1,5 +1,5 @@
-'use client';
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
+import Link from 'next/link';
 import {
   Box,
   Menu,
@@ -9,38 +9,26 @@ import {
   Button,
   IconButton,
 } from '@mui/material';
-import { IconMail, IconUser, IconSettings, IconPower } from '@tabler/icons-react';
+import * as dropdownData from './data';
+
+import { IconMail } from '@tabler/icons-react';
 import { Stack } from '@mui/system';
-import { getSessionUser, clearSession, type SessionUser } from '@/lib/api';
-import Link from 'next/link';
+import Image from 'next/image';
+
 
 const Profile = () => {
-  const [anchorEl2, setAnchorEl2] = useState(null);
-  const [user, setUser] = useState<SessionUser | null>(null);
-
-  useEffect(() => {
-    const u = getSessionUser();
-    if (u) setUser(u);
-  }, []);
-
-  const handleClick2 = (event: any) => {
+  const [anchorEl2, setAnchorEl2] = useState<HTMLElement | null>(null);
+  const handleClick2 = (event: React.MouseEvent<HTMLElement>) => {
     setAnchorEl2(event.currentTarget);
   };
   const handleClose2 = () => {
     setAnchorEl2(null);
   };
-  const handleLogout = () => {
-    clearSession();
-    window.location.href = '/auth/auth1/login';
-  };
-
-  const initials = (user?.name ?? 'U').charAt(0).toUpperCase();
 
   return (
     <Box>
       <IconButton
-        size="large"
-        aria-label="perfil do usuário"
+        aria-label="show 11 new notifications"
         color="inherit"
         aria-controls="msgs-menu"
         aria-haspopup="true"
@@ -52,11 +40,17 @@ const Profile = () => {
         onClick={handleClick2}
       >
         <Avatar
-          sx={{ width: 35, height: 35, bgcolor: 'primary.main', fontSize: 14, fontWeight: 700 }}
-        >
-          {initials}
-        </Avatar>
+          src={"/images/profile/user-1.jpg"}
+          alt={'ProfileImg'}
+          sx={{
+            width: 35,
+            height: 35,
+          }}
+        />
       </IconButton>
+      {/* ------------------------------------------- */}
+      {/* Message Dropdown */}
+      {/* ------------------------------------------- */}
       <Menu
         id="msgs-menu"
         anchorEl={anchorEl2}
@@ -67,53 +61,103 @@ const Profile = () => {
         transformOrigin={{ horizontal: 'right', vertical: 'top' }}
         sx={{
           '& .MuiMenu-paper': {
-            width: '280px',
-            p: 3,
+            width: '360px',
+            p: 4,
           },
         }}
       >
-        <Typography variant="h5" mb={1}>Meu Perfil</Typography>
-        <Stack direction="row" py={2} spacing={2} alignItems="center">
-          <Avatar sx={{ width: 56, height: 56, bgcolor: 'primary.main', fontSize: 22, fontWeight: 700 }}>
-            {initials}
-          </Avatar>
+        <Typography variant="h5">User Profile</Typography>
+        <Stack direction="row" py={3} spacing={2} alignItems="center">
+          <Avatar src={"/images/profile/user-1.jpg"} alt={"ProfileImg"} sx={{ width: 95, height: 95 }} />
           <Box>
-            <Typography variant="subtitle2" fontWeight={600}>
-              {user?.name ?? 'Usuário'}
+            <Typography variant="subtitle2" color="textPrimary" fontWeight={600}>
+              Mathew Anderson
             </Typography>
-            <Typography variant="caption" color="textSecondary">
-              {user?.role === 'super_admin' ? 'Super Admin' : user?.role === 'company_admin' ? 'Administrador' : user?.role === 'analyst' ? 'Analista' : 'Operador'}
+            <Typography variant="subtitle2" color="textSecondary">
+              Designer
             </Typography>
-            {user?.email && (
-              <Typography variant="caption" color="textSecondary" display="flex" alignItems="center" gap={0.5}>
-                <IconMail width={14} height={14} />
-                {user.email}
-              </Typography>
-            )}
+            <Typography
+              variant="subtitle2"
+              color="textSecondary"
+              display="flex"
+              alignItems="center"
+              gap={1}
+            >
+              <IconMail width={15} height={15} />
+              info@modernize.com
+            </Typography>
           </Box>
         </Stack>
-        <Divider sx={{ my: 1 }} />
-        <Box sx={{ py: 1 }}>
-          <Button
-            component={Link}
-            href="/otimiz/settings"
-            startIcon={<IconSettings size={18} />}
-            fullWidth
-            sx={{ justifyContent: 'flex-start', textTransform: 'none', color: 'text.primary' }}
-            onClick={handleClose2}
-          >
-            Configurações
-          </Button>
-        </Box>
-        <Box mt={1}>
-          <Button
-            onClick={handleLogout}
-            variant="outlined"
-            color="primary"
-            fullWidth
-            startIcon={<IconPower size={18} />}
-          >
-            Sair
+        <Divider />
+        {dropdownData.profile.map((profile) => (
+          <Box key={profile.title}>
+            <Box sx={{ py: 2, px: 0 }} className="hover-text-primary">
+              <Link href={profile.href}>
+                <Stack direction="row" spacing={2}>
+                  <Box
+                    width="45px"
+                    height="45px"
+                    bgcolor="primary.light"
+                    display="flex"
+                    alignItems="center"
+                    justifyContent="center" flexShrink="0"
+                  >
+                    <Avatar
+                      src={profile.icon}
+                      alt={profile.icon}
+                      sx={{
+                        width: 24,
+                        height: 24,
+                        borderRadius: 0,
+                      }}
+                    />
+                  </Box>
+                  <Box>
+                    <Typography
+                      variant="subtitle2"
+                      fontWeight={600}
+                      color="textPrimary"
+                      className="text-hover"
+                      noWrap
+                      sx={{
+                        width: '240px',
+                      }}
+                    >
+                      {profile.title}
+                    </Typography>
+                    <Typography
+                      color="textSecondary"
+                      variant="subtitle2"
+                      sx={{
+                        width: '240px',
+                      }}
+                      noWrap
+                    >
+                      {profile.subtitle}
+                    </Typography>
+                  </Box>
+                </Stack>
+              </Link>
+            </Box>
+          </Box>
+        ))}
+        <Box mt={2}>
+          <Box bgcolor="primary.light" p={3} mb={3} overflow="hidden" position="relative">
+            <Box display="flex" justifyContent="space-between">
+              <Box>
+                <Typography variant="h5" mb={2}>
+                  Unlimited <br />
+                  Access
+                </Typography>
+                <Button variant="contained" color="primary">
+                  Upgrade
+                </Button>
+              </Box>
+              <Image src={"/images/backgrounds/unlimited-bg.png"} width={150} height={183} style={{ height: 'auto', width: 'auto' }} alt="unlimited" className="signup-bg" />
+            </Box>
+          </Box>
+          <Button href="/auth/auth1/login" variant="outlined" color="primary" component={Link} fullWidth>
+            Logout
           </Button>
         </Box>
       </Menu>

@@ -1,18 +1,18 @@
+import { useContext } from 'react';
 import { SxProps, Theme, useTheme } from '@mui/material/styles';
 import { Card, CardContent, Typography, Stack, Box } from '@mui/material';
-import { useSelector } from '@/store/hooks';
-import { AppState } from '@/store/store';
+import { CustomizerContext } from '@/app/context/customizerContext';
 
 type Props = {
   title?: string;
   subtitle?: string;
-  action?: JSX.Element | any;
-  footer?: JSX.Element;
-  cardheading?: string | JSX.Element;
-  headtitle?: string | JSX.Element;
-  headsubtitle?: string | JSX.Element;
-  children?: JSX.Element;
-  middlecontent?: string | JSX.Element;
+  action?: React.ReactNode | any;
+  footer?: React.ReactNode;
+  cardheading?: string | React.ReactNode;
+  headtitle?: string | React.ReactNode;
+  headsubtitle?: string | React.ReactNode;
+  children?: React.ReactNode;
+  middlecontent?: string | React.ReactNode;
   sx?: SxProps<Theme>;
 };
 
@@ -28,7 +28,7 @@ const DashboardCard = ({
   middlecontent,
   sx,
 }: Props) => {
-  const customizer = useSelector((state: AppState) => state.customizer);
+  const { isCardShadow } = useContext(CustomizerContext);
 
   const theme = useTheme();
   const borderColor = theme.palette.divider;
@@ -37,11 +37,11 @@ const DashboardCard = ({
     <Card
       sx={{
         padding: 0,
-        border: !customizer.isCardShadow ?  `1px solid ${borderColor}` : 'none',
+        border: !isCardShadow ?  `1px solid ${borderColor}` : 'none',
         ...sx,
       }}
-      elevation={customizer.isCardShadow ? 9 : 0}
-      variant={!customizer.isCardShadow ? 'outlined' : undefined}
+      elevation={isCardShadow ? 9 : 0}
+      variant={!isCardShadow ? 'outlined' : undefined}
     >
       {cardheading ? (
         <CardContent>

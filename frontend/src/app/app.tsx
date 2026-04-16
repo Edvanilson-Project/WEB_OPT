@@ -1,25 +1,32 @@
-'use client';
-import React, { useEffect } from 'react';
-import { ThemeProvider } from '@mui/material/styles';
-import CssBaseline from '@mui/material/CssBaseline';
-import { ThemeSettings } from '@/utils/theme/Theme';
-import { useSelector } from '@/store/hooks';
-import { AppState } from '@/store/store';
-// Inicializa o i18n no lado do cliente
-import '@/utils/i18n';
 
-export default function MyApp({ children }: { children: React.ReactNode }) {
-  const theme = ThemeSettings();
-  const customizer = useSelector((state: AppState) => state.customizer);
 
-  useEffect(() => {
-    document.dir = customizer.activeDir ?? 'ltr';
-  }, [customizer.activeDir]);
+"use client";
+import React, { useContext } from "react";
+import { ThemeProvider } from "@mui/material/styles";
+import CssBaseline from "@mui/material/CssBaseline";
+import RTL from "@/app/(DashboardLayout)/layout/shared/customizer/RTL";
+import { ThemeSettings } from "@/utils/theme/Theme";
+import { AppRouterCacheProvider } from '@mui/material-nextjs/v14-appRouter';
+import "@/utils/i18n";
+import { CustomizerContext } from '@/app/context/customizerContext';
 
-  return (
-    <ThemeProvider theme={theme}>
-      <CssBaseline />
-      {children}
-    </ThemeProvider>
-  );
-}
+
+const MyApp = ({ children }: { children: React.ReactNode }) => {
+    const theme = ThemeSettings();
+    const { activeDir } = useContext(CustomizerContext);
+
+    return (
+        <>
+            <AppRouterCacheProvider options={{ enableCssLayer: true }}>
+                <ThemeProvider theme={theme}>
+                    <RTL direction={activeDir}>
+                        <CssBaseline />
+                        {children}
+                    </RTL>
+                </ThemeProvider>
+            </AppRouterCacheProvider>
+        </>
+    );
+};
+
+export default MyApp;

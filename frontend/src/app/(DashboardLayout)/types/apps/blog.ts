@@ -7,22 +7,37 @@ export type Profile = {
 
 export interface BlogType {
   id?: string;
-  profile?: Profile;
+  profile: Profile;
   time?: Date;
   comment?: string;
-  replies?: any[];
+  replies?: BlogType[];
 }
 
 export interface BlogPostType {
-  id?: number;
-  title?: any;
+  id: number | string;
+  title: string;
   content?: string;
-  coverImg?: string;
+  coverImg?: string | any;
   createdAt?: Date;
   view?: number;
   share?: number;
   category?: string;
   featured?: boolean;
   author?: Profile;
-  comments?: any[];
+  comments?: BlogType[];
+  published: boolean;
 }
+
+
+// export type BlogPostType = {
+//   id: string;
+//   title: string;
+//   content: string;
+//   coverImg: string;
+//   createdAt: string;
+//   category: string;
+//   published: boolean;
+//   author: {
+//     name: string;
+//     avatar: string;
+//   };

@@ -8,8 +8,8 @@ export interface userType {
 }
 
 export interface GallaryType {
-  id: string;
+  id: string | number;
   cover: string;
   name: string;
-  time: string;
+  time: string | Date;
 }

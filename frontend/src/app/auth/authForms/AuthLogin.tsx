@@ -1,134 +1,126 @@
-'use client';
-import React, { useState } from 'react';
+'use client'
+import React, { useState } from "react";
 import {
   Box,
   Typography,
+  FormGroup,
+  FormControlLabel,
   Button,
   Stack,
-  InputAdornment,
-  IconButton,
-  Alert,
-  CircularProgress,
   Divider,
-} from '@mui/material';
-import { useRouter } from 'next/navigation';
-import { authApi, saveSession, SessionUser } from '@/lib/api';
-import CustomTextField from '@/app/components/forms/theme-elements/CustomTextField';
-import CustomFormLabel from '@/app/components/forms/theme-elements/CustomFormLabel';
+  Alert,
+} from "@mui/material";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { loginType } from "@/app/(DashboardLayout)/types/auth/auth";
+import { Checkbox } from "@mui/material";
+import CustomTextField from "@/app/components/forms/theme-elements/CustomTextField";
+import CustomFormLabel from "@/app/components/forms/theme-elements/CustomFormLabel";
+import axios from "../../../utils/axios";
 
-interface AuthLoginProps {
-  title?: string;
-  subtext?: React.ReactNode;
-  subtitle?: React.ReactNode;
-}
-
-const AuthLogin = ({ title, subtitle, subtext }: AuthLoginProps) => {
+/**
+ * Componente de Formulário de Login (SRP: Responsável pela captura de credenciais e comunicação com o Auth backend).
+ */
+const AuthLogin = ({ title, subtitle, subtext }: loginType) => {
   const router = useRouter();
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
 
+  /**
+   * Submete as credenciais para o NestJS. O token será recebido via HTTP-Only Cookie.
+   */
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!email.trim() || !password) {
-      setError('Preencha e-mail e senha.');
-      return;
-    }
+    setError(null);
     setLoading(true);
-    setError('');
+
     try {
-      const res = await authApi.login(email.trim(), password);
-      const { accessToken, user } = res.data as { accessToken: string; user: SessionUser };
-      saveSession(accessToken, user);
-      router.replace('/');
-    } catch (err: unknown) {
-      const msg =
-        (err as { response?: { data?: { message?: string } } })?.response?.data?.message ??
-        'Credenciais inválidas. Tente novamente.';
-      setError(msg);
+      const response = await axios.post("/auth/login", { email, password });
+      
+      // Salva dados básicos para exibição na UI (O token real está no Cookie)
+      if (response.data?.user) {
+        localStorage.setItem('user', JSON.stringify(response.data.user));
+      }
+
+      // Se sucesso, redireciona para o dashboard principal
+      router.push("/");
+    } catch (err: any) {
+      setError(err?.message || "Falha ao realizar login. Verifique suas credenciais.");
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <Box component="form" onSubmit={handleSubmit} noValidate>
-      {title && (
-        <Typography fontWeight={700} variant="h3" mb={0.5}>
+    <form onSubmit={handleSubmit}>
+      {title ? (
+        <Typography fontWeight="700" variant="h3" mb={1}>
           {title}
         </Typography>
-      )}
+      ) : null}
 
       {subtext}
 
-      <Box mt={2} mb={1}>
-        <Divider sx={{ borderColor: 'divider' }} />
+      <Box mt={3}>
+        {error && (
+          <Alert severity="error" sx={{ mb: 2 }}>
+            {error}
+          </Alert>
+        )}
       </Box>
 
-      {error && (
-        <Alert severity="error" sx={{ mb: 2, borderRadius: 2 }}>
-          {error}
-        </Alert>
-      )}
-
-      <Stack spacing={2.5}>
+      <Stack>
         <Box>
-          <CustomFormLabel htmlFor="email">E-mail</CustomFormLabel>
-          <CustomTextField
-            id="email"
-            type="email"
-            variant="outlined"
-            fullWidth
+          <CustomFormLabel htmlFor="email">Email</CustomFormLabel>
+          <CustomTextField 
+            id="email" 
+            variant="outlined" 
+            fullWidth 
             value={email}
-            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEmail(e.target.value)}
-            placeholder="admin@otimiz.com"
-            autoComplete="email"
-            autoFocus
+            onChange={(e: any) => setEmail(e.target.value)}
+            required
           />
         </Box>
-
-        <Box>
-          <Stack direction="row" justifyContent="space-between" alignItems="center">
-            <CustomFormLabel htmlFor="password" sx={{ mb: 0 }}>Senha</CustomFormLabel>
-          </Stack>
+        <Box mt={2}>
+          <CustomFormLabel htmlFor="password">Senha</CustomFormLabel>
           <CustomTextField
             id="password"
-            type={showPassword ? 'text' : 'password'}
+            type="password"
             variant="outlined"
             fullWidth
             value={password}
-            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setPassword(e.target.value)}
-            placeholder="••••••••"
-            autoComplete="current-password"
-            InputProps={{
-              endAdornment: (
-                <InputAdornment position="end">
-                  <IconButton
-                    size="small"
-                    onClick={() => setShowPassword((v) => !v)}
-                    edge="end"
-                    tabIndex={-1}
-                  >
-                    {showPassword ? (
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/>
-                        <line x1="1" y1="1" x2="23" y2="23"/>
-                      </svg>
-                    ) : (
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-                        <circle cx="12" cy="12" r="3"/>
-                      </svg>
-                    )}
-                  </IconButton>
-                </InputAdornment>
-              ),
-            }}
+            onChange={(e: any) => setPassword(e.target.value)}
+            required
           />
         </Box>
-
+        <Stack
+          justifyContent="space-between"
+          direction="row"
+          alignItems="center"
+          my={2}
+        >
+          <FormGroup>
+            <FormControlLabel
+              control={<Checkbox defaultChecked />}
+              label="Lembrar dispositivo"
+            />
+          </FormGroup>
+          <Typography
+            component={Link}
+            href="/auth/auth1/forgot-password"
+            fontWeight="500"
+            sx={{
+              textDecoration: "none",
+              color: "primary.main",
+            }}
+          >
+            Esqueceu a senha?
+          </Typography>
+        </Stack>
+      </Stack>
+      <Box>
         <Button
           color="primary"
           variant="contained"
@@ -136,16 +128,13 @@ const AuthLogin = ({ title, subtitle, subtext }: AuthLoginProps) => {
           fullWidth
           type="submit"
           disabled={loading}
-          sx={{ mt: 1, borderRadius: 2, py: 1.4, fontWeight: 700, fontSize: '1rem' }}
         >
-          {loading ? <CircularProgress size={22} color="inherit" /> : 'Entrar'}
+          {loading ? "Entrando..." : "Entrar"}
         </Button>
-      </Stack>
-
+      </Box>
       {subtitle}
-    </Box>
+    </form>
   );
 };
 
 export default AuthLogin;
-

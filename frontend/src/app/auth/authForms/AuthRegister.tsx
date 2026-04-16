@@ -1,3 +1,4 @@
+'use client'
 import { Box, Typography, Button, Divider } from "@mui/material";
 import Link from "next/link";
 import CustomTextField from "@/app/components/forms/theme-elements/CustomTextField";
@@ -15,7 +16,7 @@ const AuthRegister = ({ title, subtitle, subtext }: registerType) => (
     ) : null}
 
     {subtext}
-    <AuthSocialButtons title="Cadastrar com" />
+    <AuthSocialButtons title="Sign up with" />
 
     <Box mt={3}>
       <Divider>
@@ -27,18 +28,18 @@ const AuthRegister = ({ title, subtitle, subtext }: registerType) => (
           position="relative"
           px={2}
         >
-          ou cadastre-se com
+          or sign up with
         </Typography>
       </Divider>
     </Box>
 
     <Box>
       <Stack mb={3}>
-        <CustomFormLabel htmlFor="name">Nome</CustomFormLabel>
+        <CustomFormLabel htmlFor="name">Name</CustomFormLabel>
         <CustomTextField id="name" variant="outlined" fullWidth />
-        <CustomFormLabel htmlFor="email">E-mail</CustomFormLabel>
+        <CustomFormLabel htmlFor="email">Email Adddress</CustomFormLabel>
         <CustomTextField id="email" variant="outlined" fullWidth />
-        <CustomFormLabel htmlFor="password">Senha</CustomFormLabel>
+        <CustomFormLabel htmlFor="password">Password</CustomFormLabel>
         <CustomTextField id="password" variant="outlined" fullWidth />
       </Stack>
       <Button
@@ -49,7 +50,7 @@ const AuthRegister = ({ title, subtitle, subtext }: registerType) => (
         component={Link}
         href="/auth/auth1/login"
       >
-        Cadastrar
+        Sign Up
       </Button>
     </Box>
     {subtitle}

@@ -3,15 +3,15 @@ const LightThemeColors = [
     name: 'BLUE_THEME',
     palette: {
       primary: {
-        main: '#2563EB', // OptiBus / Goal style Blue
-        light: '#EFF6FF',
-        dark: '#1D4ED8',
+        main: '#5D87FF',
+        light: '#ECF2FF',
+        dark: '#4570EA',
         contrastText: '#ffffff',
       },
       secondary: {
-        main: '#0F172A', // Deep Slate for headers/accents
-        light: '#F8FAFC',
-        dark: '#020617',
+        main: '#49BEFF',
+        light: '#E8F7FF',
+        dark: '#23afdb',
         contrastText: '#ffffff',
       },
     },

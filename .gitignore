@@ -20,6 +20,9 @@
 /*.tmp
 /*.pid
 
+# Backup and redundant templates
+/modernizenextjs-1100/
+
 # OS/editor noise
 /.DS_Store
 /Thumbs.db

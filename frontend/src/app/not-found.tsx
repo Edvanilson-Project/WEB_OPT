@@ -18,10 +18,10 @@ const NotFound = () => (
         style={{ width: "100%", maxWidth: "500px",  maxHeight: '500px' }}
       />
       <Typography align="center" variant="h1" mb={4}>
-        Ops!
+        Opps!!!
       </Typography>
       <Typography align="center" variant="h4" mb={4}>
-        A página que você procura não foi encontrada.
+        This page you are looking for could not be found.
       </Typography>
       <Button
         color="primary"
@@ -30,7 +30,7 @@ const NotFound = () => (
         href="/"
         disableElevation
       >
-        Voltar ao Início
+        Go Back to Home
       </Button>
     </Container>
   </Box>

@@ -1,6 +1,7 @@
-import { Entity, Column, Index } from 'typeorm';
+import { Entity, Column, Index, ManyToOne, JoinColumn } from 'typeorm';
 import { Exclude } from 'class-transformer';
 import { BaseEntity } from '../../../common/entities/base.entity';
+import { CompanyEntity } from '../../companies/entities/company.entity';
 
 export enum UserRole {
   SUPER_ADMIN = 'super_admin',
@@ -41,8 +42,12 @@ export class UserEntity extends BaseEntity {
   })
   status: UserStatus;
 
-  @Column({ name: 'company_id', nullable: true })
+  @Column({ name: 'company_id' })
   companyId: number;
+
+  @ManyToOne(() => CompanyEntity)
+  @JoinColumn({ name: 'company_id' })
+  company: CompanyEntity;
 
   @Column({ name: 'avatar_url', nullable: true, length: 500 })
   avatarUrl: string;

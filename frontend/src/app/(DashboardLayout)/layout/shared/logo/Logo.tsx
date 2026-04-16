@@ -1,31 +1,67 @@
-import { useSelector } from "@/store/hooks";
+'use client'
+import { CustomizerContext } from "@/app/context/customizerContext";
 import Link from "next/link";
 import { styled } from "@mui/material/styles";
-import { AppState } from "@/store/store";
+import config from '@/app/context/config'
 import Image from "next/image";
+import { useContext } from "react";
 
 const Logo = () => {
-  const customizer = useSelector((state: AppState) => state.customizer);
+  const { isCollapse, isSidebarHover, activeDir, activeMode } = useContext(CustomizerContext);
+
+  const TopbarHeight = config.topbarHeight;
+
   const LinkStyled = styled(Link)(() => ({
-    height: customizer.TopbarHeight,
-    width: customizer.isCollapse ? "40px" : "180px",
+    height: TopbarHeight,
+
+    width: isCollapse == "mini-sidebar" && !isSidebarHover ? '40px' : '180px',
     overflow: "hidden",
     display: "block",
   }));
 
-  const logoSrc = customizer.activeMode === "dark"
-    ? "/images/logos/otimiz-logo-light.svg"
-    : "/images/logos/otimiz-logo.svg";
+  if (activeDir === "ltr") {
+    return (
+      <LinkStyled href="/">
+        {activeMode === "dark" ? (
+          <Image
+            src="/images/logos/light-logo.svg"
+            alt="logo"
+            height={TopbarHeight}
+            width={174}
+            priority
+          />
+        ) : (
+          <Image
+            src={"/images/logos/dark-logo.svg"}
+            alt="logo"
+            height={TopbarHeight}
+            width={174}
+            priority
+          />
+        )}
+      </LinkStyled>
+    );
+  }
 
   return (
     <LinkStyled href="/">
-      <Image
-        src={logoSrc}
-        alt="OTIMIZ"
-        height={customizer.TopbarHeight}
-        width={174}
-        priority
-      />
+      {activeMode === "dark" ? (
+        <Image
+          src="/images/logos/dark-rtl-logo.svg"
+          alt="logo"
+          height={TopbarHeight}
+          width={174}
+          priority
+        />
+      ) : (
+        <Image
+          src="/images/logos/light-logo-rtl.svg"
+          alt="logo"
+          height={TopbarHeight}
+          width={174}
+          priority
+        />
+      )}
     </LinkStyled>
   );
 };

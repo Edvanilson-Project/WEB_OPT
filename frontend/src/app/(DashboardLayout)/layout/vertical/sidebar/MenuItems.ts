@@ -1,122 +1,28 @@
 import { uniqueId } from "lodash";
+import { IconRoute, IconLogin, IconAppWindow } from "@tabler/icons-react";
+import { NavGroup } from "@/app/(DashboardLayout)/types/layout/sidebar";
 
-interface MenuitemsType {
-  [x: string]: any;
-  id?: string;
-  navlabel?: boolean;
-  subheader?: string;
-  title?: string;
-  icon?: any;
-  href?: string;
-  children?: MenuitemsType[];
-  chip?: string;
-  chipColor?: string;
-  variant?: string;
-  external?: boolean;
-}
-
-import {
-  IconChartPie,
-  IconPlayerPlay,
-  IconRoute,
-  IconMap,
-  IconBus,
-  IconReportAnalytics,
-  IconBuilding,
-  IconUsers,
-  IconClock,
-  IconSettings,
-  IconCalendarEvent,
-  IconLayoutGrid,
-} from "@tabler/icons-react";
-
-const Menuitems: MenuitemsType[] = [
+const Menuitems: NavGroup[] = [
   {
     navlabel: true,
-    subheader: "OTIMIZ",
-  },
-  {
-    id: uniqueId(),
-    title: "Dashboard",
-    icon: IconChartPie,
-    href: "/otimiz/dashboard",
-  },
-  {
-    id: uniqueId(),
-    title: "Motor de Otimização",
-    icon: IconPlayerPlay,
-    href: "/otimiz/optimization",
-  },
-  {
-    id: uniqueId(),
-    title: "Linhas",
-    icon: IconRoute,
-    href: "/otimiz/lines",
-  },
-  {
-    id: uniqueId(),
-    title: "Terminais",
-    icon: IconMap,
-    href: "/otimiz/terminals",
-  },
-  {
-    id: uniqueId(),
-    title: "Frota",
-    icon: IconBus,
-    href: "/otimiz/vehicles",
+    subheader: "Operações OTIMIZ",
   },
   {
     id: uniqueId(),
     title: "Viagens",
-    icon: IconClock,
-    href: "/otimiz/trips",
-  },
-  {
-    id: uniqueId(),
-    title: "Tempo de Viagem",
-    icon: IconClock,
-    href: "/otimiz/trip-times",
-  },
-  {
-    id: uniqueId(),
-    title: "Passageiros",
-    icon: IconUsers,
-    href: "/otimiz/passengers",
-  },
-  {
-    id: uniqueId(),
-    title: "Carta Horária",
-    icon: IconCalendarEvent,
-    href: "/otimiz/timetables",
-  },
-  {
-    id: uniqueId(),
-    title: "Relatórios",
-    icon: IconReportAnalytics,
-    href: "/otimiz/reports",
-  },
-  {
-    id: uniqueId(),
-    title: "Configurações",
-    icon: IconSettings,
-    href: "/otimiz/settings",
+    icon: IconRoute,
+    href: "/apps/trips",
   },
   {
     navlabel: true,
-    subheader: "Administração",
+    subheader: "Acesso",
   },
   {
     id: uniqueId(),
-    title: "Empresas",
-    icon: IconBuilding,
-    href: "/otimiz/companies",
-  },
-  {
-    id: uniqueId(),
-    title: "Usuários",
-    icon: IconUsers,
-    href: "/otimiz/users",
-  },
+    title: "Logout",
+    icon: IconLogin,
+    href: "/auth/auth1/login",
+  }
 ];
 
 export default Menuitems;

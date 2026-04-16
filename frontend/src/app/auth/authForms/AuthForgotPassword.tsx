@@ -1,3 +1,4 @@
+'use client'
 import { Button, Stack } from "@mui/material";
 import Link from "next/link";
 
@@ -8,7 +9,7 @@ export default function AuthForgotPassword(){
  return (
   <>
     <Stack mt={4} spacing={2}>
-      <CustomFormLabel htmlFor="reset-email">E-mail</CustomFormLabel>
+      <CustomFormLabel htmlFor="reset-email">Email Adddress</CustomFormLabel>
       <CustomTextField id="reset-email" variant="outlined" fullWidth />
 
       <Button
@@ -19,7 +20,7 @@ export default function AuthForgotPassword(){
         component={Link}
         href="/"
       >
-        Recuperar Senha
+        Forgot Password
       </Button>
       <Button
         color="primary"
@@ -28,7 +29,7 @@ export default function AuthForgotPassword(){
         component={Link}
         href="/auth/auth1/login"
       >
-        Voltar ao Login
+        Back to Login
       </Button>
     </Stack>
   </>

@@ -108,6 +108,9 @@ class Settings(BaseSettings):
     # ── Celery / Redis (fila de tarefas assíncronas) ──────────────────────────
     redis_url: str = "redis://localhost:6379/0" # Lida de REDIS_URL no .env ou docker-compose
 
+    # ── Segurança Interna (Security Bridge) ──────────────────────────────────
+    internal_security_key: str = Field(default="", env="INTERNAL_OPTIMIZER_KEY")
+
 
 @lru_cache
 def get_settings() -> Settings:

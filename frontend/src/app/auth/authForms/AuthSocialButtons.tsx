@@ -1,3 +1,4 @@
+'use client'
 import CustomSocialButton from "@/app/components/forms/theme-elements/CustomSocialButton";
 import { Stack } from "@mui/system";
 import { Avatar, Box } from "@mui/material";

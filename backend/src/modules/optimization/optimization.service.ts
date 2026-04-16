@@ -61,13 +61,17 @@ export interface OptimizationResultPayload {
   };
   [key: string]: any;
 }
-
 import { firstValueFrom } from 'rxjs';
+import { OptimizationGateway } from './gateways/optimization.gateway';
+import { TenantContext } from '../../common/context/tenant.context';
+import { OptimizerClientService } from './optimizer-client.service';
 
 @Injectable()
 export class OptimizationService implements OnModuleInit {
   private readonly logger = new Logger(OptimizationService.name);
   private isProcessingQueue = false;
+  private readonly POLLING_INTERVAL_MS = 5000;
+  private readonly MAX_DURATION_MS = 300000;
 
   constructor(
     @InjectRepository(OptimizationRunEntity)
@@ -79,7 +83,145 @@ export class OptimizationService implements OnModuleInit {
     private readonly terminalsService: TerminalsService,
     private readonly vehicleTypesService: VehicleTypesService,
     private readonly httpService: HttpService,
+    private readonly gateway: OptimizationGateway,
+    private readonly optimizerClient?: OptimizerClientService,
   ) {}
+
+  /**
+   * Ponto de entrada E2E: Dispara uma otimização real.
+   */
+  async triggerRun(dto: RunOptimizationDto, companyId: number): Promise<OptimizationRunEntity> {
+    const correlationId = `OPT-${Date.now()}`;
+    this.logger.log(`[${correlationId}] Iniciando orquestração E2E para empresa #${companyId}`);
+
+    const lineIds = dto.lineIds || (dto.lineId ? [dto.lineId] : []);
+    let trips = [];
+
+    if (lineIds.length > 0) {
+      const tripsPromises = lineIds.map(id => this.tripsService.findAll(companyId, id));
+      const results = await Promise.all(tripsPromises);
+      trips = results.flat();
+    } else {
+      trips = await this.tripsService.findAll(companyId);
+    }
+
+    if (!trips.length) {
+      throw new HttpException('Nenhuma viagem encontrada para os filtros selecionados.', 400);
+    }
+
+    const run = this.runRepo.create({
+      companyId,
+      name: dto.name || `Otimização ${new Date().toLocaleDateString()}`,
+      status: OptimizationStatus.RUNNING,
+      algorithm: (dto.algorithm as OptimizationAlgorithm) || OptimizationAlgorithm.HYBRID_PIPELINE,
+      lineIds: lineIds.length > 0 ? lineIds : null,
+      startedAt: new Date(),
+      params: dto as any,
+      totalTrips: trips.length,
+    });
+    const savedRun = await this.runRepo.save(run);
+
+    try {
+      const payload = {
+        run_id: savedRun.id,
+        company_id: companyId,
+        trips: trips.map(t => ({
+          id: t.id,
+          line_id: t.lineId,
+          start_time: t.startTimeMinutes,
+          end_time: t.endTimeMinutes,
+          duration: t.durationMinutes,
+          direction: t.direction,
+        })),
+        vehicle_types: [],
+        algorithm: savedRun.algorithm,
+        time_budget_s: dto.timeBudgetSeconds || 30
+      };
+
+      const submitResult = await this.optimizerClient.post<{ task_id: string }>('/', payload);
+      const taskId = submitResult.task_id;
+      this.logger.log(`[${correlationId}] Tarefa enfileirada no Python: ${taskId}`);
+
+      this.gateway.emitStatusUpdate(companyId, {
+        runId: savedRun.id,
+        status: 'running',
+        message: 'Cálculo enviado para o motor matemático...',
+        correlationId
+      });
+
+      this.startPolling(savedRun.id, taskId, companyId, correlationId);
+      return savedRun;
+    } catch (err: any) {
+      this.logger.error(`[${correlationId}] Falha ao disparar otimização: ${err.message}`);
+      savedRun.status = OptimizationStatus.FAILED;
+      savedRun.errorMessage = `Falha no disparo: ${err.message}`;
+      await this.runRepo.save(savedRun);
+      
+      this.gateway.emitStatusUpdate(companyId, {
+        runId: savedRun.id,
+        status: 'failed',
+        error: err.message
+      });
+      
+      throw err;
+    }
+  }
+
+  private async startPolling(runId: number, taskId: string, companyId: number, correlationId: string) {
+    const startTime = Date.now();
+
+    const poll = async () => {
+      if (Date.now() - startTime > this.MAX_DURATION_MS) {
+        this.logger.error(`[${correlationId}] Timeout atingido para task ${taskId}`);
+        await this.handleFailure(runId, companyId, 'Timeout na otimização.');
+        return;
+      }
+
+      try {
+        const response = await this.optimizerClient.get<any>(`/status/${taskId}`);
+        if (response.status === 'completed') {
+          await this.handleSuccess(runId, companyId, response.result);
+        } else if (response.status === 'failed') {
+          await this.handleFailure(runId, companyId, response.error?.message || 'Erro no solver.');
+        } else {
+          setTimeout(poll, this.POLLING_INTERVAL_MS);
+        }
+      } catch (err: any) {
+        setTimeout(poll, this.POLLING_INTERVAL_MS);
+      }
+    };
+
+    setTimeout(poll, this.POLLING_INTERVAL_MS);
+  }
+
+  private async handleSuccess(runId: number, companyId: number, result: any) {
+    const run = await this.runRepo.findOne({ where: { id: runId } });
+    if (!run) return;
+
+    run.status = OptimizationStatus.COMPLETED;
+    run.finishedAt = new Date();
+    run.durationMs = Date.now() - run.startedAt.getTime();
+    run.resultSummary = result;
+    run.totalVehicles = result.vehicles;
+    run.totalCost = result.total_cost;
+    run.cctViolations = result.cct_violations;
+    
+    await this.runRepo.save(run);
+    this.gateway.emitStatusUpdate(companyId, {
+      runId, status: 'completed', summary: { vehicles: result.vehicles, cost: result.total_cost, reduction: '...' }
+    });
+  }
+
+  private async handleFailure(runId: number, companyId: number, error: string) {
+    const run = await this.runRepo.findOne({ where: { id: runId } });
+    if (!run) return;
+
+    run.status = OptimizationStatus.FAILED;
+    run.finishedAt = new Date();
+    run.errorMessage = error;
+    await this.runRepo.save(run);
+    this.gateway.emitStatusUpdate(companyId, { runId, status: 'failed', message: error });
+  }
 
   async onModuleInit() {
     await this._cleanupZombieRuns();
@@ -1784,7 +1926,7 @@ export class OptimizationService implements OnModuleInit {
         cctViolations,
         errorMessage:
           'Execução encerrada por hard constraints inválidas. Ajuste parâmetros operacionais antes de publicar a escala.',
-        resultSummary: result,
+        resultSummary: result as any,
       });
       return;
     }
@@ -1798,7 +1940,7 @@ export class OptimizationService implements OnModuleInit {
       totalTrips,
       totalCost,
       cctViolations,
-      resultSummary: result,
+      resultSummary: result as any,
     });
   }
 

@@ -7,6 +7,9 @@ import { OptimizationRunEntity } from '../optimization/entities/optimization-run
 import { RosteringService } from './rostering.service';
 import { RosteringIntegrationService } from './rostering-integration.service';
 import { RosteringController } from './rostering.controller';
+import { OperatorsRepository } from './repositories/operators.repository';
+
+import { OptimizationModule } from '../optimization/optimization.module';
 
 @Module({
   imports: [
@@ -15,10 +18,10 @@ import { RosteringController } from './rostering.controller';
       RosteringRuleEntity,
       OptimizationRunEntity,
     ]),
-    HttpModule,
+    OptimizationModule,
   ],
   controllers: [RosteringController],
-  providers: [RosteringService, RosteringIntegrationService],
-  exports: [RosteringService, RosteringIntegrationService],
+  providers: [RosteringService, RosteringIntegrationService, OperatorsRepository],
+  exports: [RosteringService, RosteringIntegrationService, OperatorsRepository],
 })
 export class RosteringModule {}

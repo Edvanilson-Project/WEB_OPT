@@ -1,4 +1,4 @@
-type AttachType = {
+export type AttachType = {
   id: string;
   image: string;
   title: string;
@@ -10,7 +10,7 @@ export interface EmailType {
   from: string;
   thumbnail: string;
   subject: string;
-  time: any;
+  time: string | Date;
   To: string;
   emailExcerpt: string;
   emailContent: string;

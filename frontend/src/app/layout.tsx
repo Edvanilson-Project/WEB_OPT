@@ -1,12 +1,13 @@
 import React from "react";
-import { Providers } from "@/store/providers";
 import MyApp from "./app";
+import NextTopLoader from 'nextjs-toploader';
 import "./global.css";
+import { CustomizerContextProvider } from "./context/customizerContext";
 
 
 export const metadata = {
-  title: "OTIMIZ — Otimização de Transporte",
-  description: "Sistema inteligente de otimização de frota e tripulação para transporte público",
+  title: "Modernize Main Demo",
+  description: "Modernize Main kit",
 };
 
 export default function RootLayout({
@@ -15,11 +16,12 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="pt-BR" suppressHydrationWarning>
+    <html lang="en" suppressHydrationWarning>
       <body>
-        <Providers>
+        <NextTopLoader color="#5D87FF" />
+        <CustomizerContextProvider>
           <MyApp>{children}</MyApp>
-        </Providers>
+        </CustomizerContextProvider>
       </body>
     </html>
   );

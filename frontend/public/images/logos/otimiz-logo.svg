@@ -1,6 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 174 50" fill="none">
-  <rect x="2" y="10" width="30" height="30" rx="8" fill="#1565C0"/>
-  <path d="M10 25 L17 18 L24 25 L17 32Z" fill="white" opacity="0.9"/>
-  <circle cx="17" cy="25" r="4" fill="#1565C0" stroke="white" stroke-width="1.5"/>
-  <text x="40" y="33" font-family="Inter, Segoe UI, sans-serif" font-size="22" font-weight="700" fill="#1565C0">OTIMIZ</text>
-</svg>

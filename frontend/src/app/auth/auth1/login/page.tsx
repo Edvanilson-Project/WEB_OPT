@@ -1,163 +1,113 @@
-"use client"
-import { Grid, Box, Stack, Typography, Chip } from '@mui/material';
-import PageContainer from '@/app/components/container/PageContainer';
-import AuthLogin from '../../authForms/AuthLogin';
+'use client'
+import Link from "next/link";
+import { Grid, Box, Stack, Typography } from "@mui/material";
+import PageContainer from "@/app/components/container/PageContainer";
+import Logo from "@/app/(DashboardLayout)/layout/shared/logo/Logo";
+import AuthLogin from "../../authForms/AuthLogin";
+import Image from "next/image";
 
 export default function Login() {
   return (
-    <PageContainer title="OTIMIZ — Login" description="Plataforma de Otimização de Transporte Público">
-      <Grid container sx={{ minHeight: '100vh' }}>
-        {/* ── Painel esquerdo — branding ────────────────────────────────── */}
+    (<PageContainer title="Login Page" description="this is Sample page">
+      <Grid
+        container
+        spacing={0}
+        justifyContent="center"
+        sx={{ height: "100vh" }}
+      >
         <Grid
-          item
-          xs={false}
-          lg={6}
-          xl={7}
           sx={{
-            background: 'linear-gradient(135deg, #1565C0 0%, #0D47A1 40%, #01579B 100%)',
-            position: 'relative',
-            display: { xs: 'none', lg: 'flex' },
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            overflow: 'hidden',
-            p: 6,
+            position: "relative",
+            "&:before": {
+              content: '""',
+              background: "radial-gradient(#d2f1df, #d3d7fa, #bad8f4)",
+              backgroundSize: "400% 400%",
+              animation: "gradient 15s ease infinite",
+              position: "absolute",
+              height: "100%",
+              width: "100%",
+              opacity: "0.3",
+            },
           }}
-        >
-          {/* Círculos decorativos */}
-          {[
-            { size: 420, top: -100, right: -100, opacity: 0.08 },
-            { size: 280, bottom: -60, left: -60, opacity: 0.07 },
-            { size: 180, top: '40%', left: '10%', opacity: 0.05 },
-          ].map((c, i) => (
-            <Box
-              key={i}
-              sx={{
-                position: 'absolute',
-                width: c.size,
-                height: c.size,
-                borderRadius: '50%',
-                border: '1.5px solid rgba(255,255,255,0.6)',
-                top: c.top,
-                bottom: c.bottom,
-                left: c.left,
-                right: c.right,
-                opacity: c.opacity,
-              }}
-            />
-          ))}
-
-          {/* Conteúdo */}
-          <Box sx={{ position: 'relative', textAlign: 'center', maxWidth: 480 }}>
-            {/* Logo / ícone */}
-            <Box
-              sx={{
-                width: 80,
-                height: 80,
-                borderRadius: 3,
-                bgcolor: 'rgba(255,255,255,0.15)',
-                backdropFilter: 'blur(8px)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                mx: 'auto',
-                mb: 3,
-                border: '1px solid rgba(255,255,255,0.2)',
-              }}
-            >
-              <svg width="42" height="42" viewBox="0 0 42 42" fill="none">
-                <path d="M8 28L14 16L20 22L26 10L34 28H8Z" fill="white" opacity="0.9"/>
-                <circle cx="34" cy="14" r="5" fill="white" opacity="0.6"/>
-              </svg>
+          size={{
+            xs: 12,
+            sm: 12,
+            lg: 7,
+            xl: 8
+          }}>
+          <Box position="relative">
+            <Box px={3}>
+              <Logo />
             </Box>
-
-            <Typography
-              variant="h2"
-              fontWeight={800}
-              color="white"
-              letterSpacing="-0.5px"
-              gutterBottom
+            <Box
+              alignItems="center"
+              justifyContent="center"
+              height={"calc(100vh - 75px)"}
+              sx={{
+                display: {
+                  xs: "none",
+                  lg: "flex",
+                },
+              }}
             >
-              OTIMIZ
-            </Typography>
-
-            <Typography
-              variant="h5"
-              color="rgba(255,255,255,0.8)"
-              fontWeight={400}
-              mb={4}
-            >
-              Plataforma de Otimização de<br />Transporte Público
-            </Typography>
-
-            <Stack direction="row" gap={1.5} justifyContent="center" flexWrap="wrap">
-              {[
-                'Escalonamento de Veículos',
-                'Otimização de Equipes',
-                'Análise em Tempo Real',
-                'Relatórios Avançados',
-              ].map((tag) => (
-                <Chip
-                  key={tag}
-                  label={tag}
-                  size="small"
-                  sx={{
-                    bgcolor: 'rgba(255,255,255,0.15)',
-                    color: 'white',
-                    borderColor: 'rgba(255,255,255,0.3)',
-                    border: '1px solid',
-                    fontWeight: 500,
-                  }}
-                />
-              ))}
-            </Stack>
+              <Image
+                src={"/images/backgrounds/login-bg.svg"}
+                alt="bg"
+                width={500}
+                height={500}
+                style={{
+                  width: "100%",
+                  maxWidth: "500px",
+                  maxHeight: "500px",
+                }}
+              />
+            </Box>
           </Box>
-
-          {/* Rodapé */}
-          <Typography
-            variant="caption"
-            color="rgba(255,255,255,0.45)"
-            sx={{ position: 'absolute', bottom: 24 }}
-          >
-            © {new Date().getFullYear()} OTIMIZ — Todos os direitos reservados
-          </Typography>
         </Grid>
-
-        {/* ── Painel direito — formulário ───────────────────────────────── */}
         <Grid
-          item
-          xs={12}
-          lg={6}
-          xl={5}
           display="flex"
-          alignItems="center"
           justifyContent="center"
-          sx={{ bgcolor: 'background.default' }}
-        >
-          <Box sx={{ width: '100%', maxWidth: 420, px: { xs: 3, sm: 5 }, py: 6 }}>
-            {/* Logo mobile */}
-            <Box sx={{ display: { xs: 'block', lg: 'none' }, mb: 3, textAlign: 'center' }}>
-              <Typography variant="h4" fontWeight={800} color="primary">OTIMIZ</Typography>
-            </Box>
-
+          alignItems="center"
+          size={{
+            xs: 12,
+            sm: 12,
+            lg: 5,
+            xl: 4
+          }}>
+          <Box p={4}>
             <AuthLogin
-              title="Bem-vindo de volta"
+              title="Welcome to Modernize"
               subtext={
-                <Typography variant="body2" color="text.secondary" mb={3}>
-                  Faça login para acessar a plataforma de otimização.
+                <Typography variant="subtitle1" color="textSecondary" mb={1}>
+                  Your Admin Dashboard
                 </Typography>
               }
               subtitle={
-                <Box mt={3} textAlign="center">
-                  <Typography variant="caption" color="text.disabled">
-                    Sistema de Otimização de Transporte
+                <Stack direction="row" spacing={1} mt={3}>
+                  <Typography
+                    color="textSecondary"
+                    variant="h6"
+                    fontWeight="500"
+                  >
+                    New to Modernize?
                   </Typography>
-                </Box>
+                  <Typography
+                    component={Link}
+                    href="/auth/auth1/register"
+                    fontWeight="500"
+                    sx={{
+                      textDecoration: "none",
+                      color: "primary.main",
+                    }}
+                  >
+                    Create an account
+                  </Typography>
+                </Stack>
               }
             />
           </Box>
         </Grid>
       </Grid>
-    </PageContainer>
+    </PageContainer>)
   );
 }

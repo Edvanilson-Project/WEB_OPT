@@ -1,23 +1,23 @@
 const DarkThemeColors = [
-{
+  {
     name: 'BLUE_THEME',
     palette: {
       primary: {
-        main: '#3B82F6', // Blue 500 for high dark contrast
-        light: '#1E40AF',
-        dark: '#2563EB',
+        main: '#5D87FF',
+        light: '#253662',
+        dark: '#4570EA',
         contrastText: '#ffffff',
       },
       secondary: {
-        main: '#475569', // Slate 600
-        light: '#1E293B',
-        dark: '#334155',
+        main: '#49BEFF',
+        light: '#1C455D',
+        dark: '#23afdb',
         contrastText: '#ffffff',
       },
       background: {
-        default: '#0F172A', // Slate 900 (Deep Enterprise background)
-        dark: '#020617', // Slate 950
-        paper: '#1E293B', // Slate 800 (Cards and Panels)
+        default: '#2A3447',
+        dark: '#2A3547',
+        paper: '#2A3447',
       },
     },
   },

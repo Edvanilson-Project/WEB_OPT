@@ -1,5 +1,5 @@
 export interface ContactType {
-  id: number | string;
+  id: number;
   firstname: string;
   lastname: string;
   image: string;
@@ -12,4 +12,5 @@ export interface ContactType {
   frequentlycontacted: boolean;
   starred: boolean;
   deleted: boolean;
+  [key: string]: string | number | boolean;
 }

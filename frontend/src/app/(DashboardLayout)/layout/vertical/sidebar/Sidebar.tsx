@@ -4,34 +4,42 @@ import useMediaQuery from "@mui/material/useMediaQuery";
 import { useTheme } from "@mui/material/styles";
 import SidebarItems from "./SidebarItems";
 import Logo from "../../shared/logo/Logo";
-import { useSelector, useDispatch } from "@/store/hooks";
-import {
-  hoverSidebar,
-  toggleMobileSidebar,
-} from "@/store/customizer/CustomizerSlice";
+import { CustomizerContext } from "@/app/context/customizerContext";
+import config from '@/app/context/config'
+
 import Scrollbar from "@/app/components/custom-scroll/Scrollbar";
 import { Profile } from "./SidebarProfile/Profile";
-import { AppState } from "@/store/store";
+import { useContext } from "react";
+
 
 const Sidebar = () => {
-  const lgUp = useMediaQuery((theme: any) => theme.breakpoints.down("lg"));
-  const customizer = useSelector((state: AppState) => state.customizer);
-  const dispatch = useDispatch();
+  const lgUp = useMediaQuery((theme) => theme.breakpoints.down("lg"));
+  const {
+    isCollapse,
+    isSidebarHover,
+    setIsSidebarHover,
+    isMobileSidebar,
+    setIsMobileSidebar,
+  } = useContext(CustomizerContext);
+  const MiniSidebarWidth = config.miniSidebarWidth;
+  const SidebarWidth = config.sidebarWidth;
+
   const theme = useTheme();
   const toggleWidth =
-    customizer.isCollapse && !customizer.isSidebarHover
-      ? customizer.MiniSidebarWidth
-      : customizer.SidebarWidth;
+    isCollapse == "mini-sidebar" && !isSidebarHover
+      ? MiniSidebarWidth
+      : SidebarWidth;
 
   const onHoverEnter = () => {
-    if (customizer.isCollapse) {
-      dispatch(hoverSidebar(true));
+    if (isCollapse == "mini-sidebar") {
+      setIsSidebarHover(true);
     }
   };
 
   const onHoverLeave = () => {
-    dispatch(hoverSidebar(false));
+    setIsSidebarHover(false);
   };
+
 
   return (
     <>
@@ -41,7 +49,7 @@ const Sidebar = () => {
             zIndex: 100,
             width: toggleWidth,
             flexShrink: 0,
-            ...(customizer.isCollapse && {
+            ...(isCollapse == "mini-sidebar" && {
               position: "absolute",
             }),
           }}
@@ -55,14 +63,16 @@ const Sidebar = () => {
             onMouseEnter={onHoverEnter}
             onMouseLeave={onHoverLeave}
             variant="permanent"
-            PaperProps={{
-              sx: {
-                transition: theme.transitions.create("width", {
-                  duration: theme.transitions.duration.shortest,
-                }),
-                width: toggleWidth,
-                boxSizing: "border-box",
-              },
+            slotProps={{
+              paper: {
+                sx: {
+                  transition: theme.transitions.create("width", {
+                    duration: theme.transitions.duration.shortest,
+                  }),
+                  width: toggleWidth,
+                  boxSizing: "border-box",
+                },
+              }
             }}
           >
             {/* ------------------------------------------- */}
@@ -92,15 +102,17 @@ const Sidebar = () => {
       ) : (
         <Drawer
           anchor="left"
-          open={customizer.isMobileSidebar}
-          onClose={() => dispatch(toggleMobileSidebar())}
+          open={isMobileSidebar}
+          onClose={() => setIsMobileSidebar(false)}
           variant="temporary"
-          PaperProps={{
-            sx: {
-              width: customizer.SidebarWidth,
-              border: "0 !important",
-              boxShadow: (theme) => theme.shadows[8],
-            },
+          slotProps={{
+            paper: {
+              sx: {
+                width: SidebarWidth,
+                border: "0 !important",
+                boxShadow: (theme) => theme.shadows[8],
+              },
+            }
           }}
         >
           {/* ------------------------------------------- */}

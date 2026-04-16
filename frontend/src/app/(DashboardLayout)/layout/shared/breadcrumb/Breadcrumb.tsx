@@ -1,15 +1,21 @@
-import React from "react";
+"use client";
+import React, { ReactNode } from "react";
 import { Grid, Typography, Box, Breadcrumbs, Theme } from "@mui/material";
 import Link from "next/link";
 
 import { IconCircle } from "@tabler/icons-react";
 import Image from "next/image";
 
+interface BreadCrumbItem {
+  title: string;
+  to?: string;
+}
+
 interface BreadCrumbType {
   subtitle?: string;
-  items?: any[];
+  items?: BreadCrumbItem[];
   title: string;
-  children?: JSX.Element;
+  children?: ReactNode;
 }
 
 const Breadcrumb = ({ subtitle, items, title, children }: BreadCrumbType) => (
@@ -17,14 +23,21 @@ const Breadcrumb = ({ subtitle, items, title, children }: BreadCrumbType) => (
     container
     sx={{
       backgroundColor: "primary.light",
-      borderRadius: (theme: Theme) => theme.shape.borderRadius / 4,
+      borderRadius: (theme: Theme) => (theme.shape.borderRadius as number) / 4,
       p: "30px 25px 20px",
       marginBottom: "30px",
       position: "relative",
       overflow: "hidden",
     }}
   >
-    <Grid item xs={12} sm={6} lg={8} mb={1}>
+    <Grid
+      mb={1}
+      size={{
+        xs: 12,
+        sm: 6,
+        lg: 8,
+      }}
+    >
       <Typography variant="h4">{title}</Typography>
       <Typography
         color="textSecondary"
@@ -62,7 +75,15 @@ const Breadcrumb = ({ subtitle, items, title, children }: BreadCrumbType) => (
           : ""}
       </Breadcrumbs>
     </Grid>
-    <Grid item xs={12} sm={6} lg={4} display="flex" alignItems="flex-end">
+    <Grid
+      display="flex"
+      alignItems="flex-end"
+      size={{
+        xs: 12,
+        sm: 6,
+        lg: 4,
+      }}
+    >
       <Box
         sx={{
           display: { xs: "none", md: "block", lg: "flex" },

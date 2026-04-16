@@ -11,29 +11,24 @@ import {
   OptimizationRunEntity,
   OptimizationStatus,
 } from '../optimization/entities/optimization-run.entity';
+import { OptimizerClientService } from '../optimization/optimizer-client.service';
+import { OperatorsRepository } from './repositories/operators.repository';
 
 /**
- * Serviço de Integração com o Motor Python de Rostering.
- *
- * Responsável por:
- * 1. Buscar operadores e regras ativas do banco de dados.
- * 2. Buscar as duties de um optimization_run já concluído.
- * 3. Montar o payload exatamente como esperado pelo FastAPI Python.
- * 4. Chamar POST /optimize/rostering/ e retornar o resultado.
+ * Serviço de Integração com o Motor Python de Rostering (SRP: Gerencia dados de operadores/regras e delega a atribuição global ao Python via ponte segura).
  */
 @Injectable()
 export class RosteringIntegrationService {
   private readonly logger = new Logger(RosteringIntegrationService.name);
 
   constructor(
-    @InjectRepository(OperatorEntity)
-    private readonly operatorRepo: Repository<OperatorEntity>,
+    private readonly operatorRepo: OperatorsRepository,
     @InjectRepository(RosteringRuleEntity)
     private readonly ruleRepo: Repository<RosteringRuleEntity>,
     @InjectRepository(OptimizationRunEntity)
     private readonly runRepo: Repository<OptimizationRunEntity>,
     private readonly configService: ConfigService,
-    private readonly httpService: HttpService,
+    private readonly optimizerClient: OptimizerClientService,
   ) {}
 
   /**
@@ -45,9 +40,9 @@ export class RosteringIntegrationService {
     companyId: number,
     interShiftRestMinutes = 660,
   ): Promise<any> {
-    // 1. Buscar operadores
-    const operators = await this.operatorRepo.find({
-      where: { id: In(operatorIds), isActive: true },
+    // 1. Buscar operadores (Agora via repositório multi-tenant)
+    const operators = await this.operatorRepo.findAll({
+      where: { id: In(operatorIds), isActive: true } as any,
     });
 
     if (!operators.length) {
@@ -123,29 +118,19 @@ export class RosteringIntegrationService {
       `Rostering payload: ${operators.length} operadores, ${duties.length} duties, ${rules.length} regras`,
     );
 
-    // 5. Chamar o Python
-    const optimizerUrl = this.configService.get(
-      'OPTIMIZER_URL',
-      'http://localhost:8100',
-    );
-
+    // 5. Chamar o Python via Cliente Seguro
     try {
-      const response = await firstValueFrom(
-        this.httpService.post(`${optimizerUrl}/optimize/rostering/`, payload, {
-          timeout: 30000,
-        }),
-      );
+      const result = await this.optimizerClient.post<any>('/optimize/rostering/', payload);
 
       this.logger.log(
-        `Rostering concluído: ${response.data?.assignments?.length ?? 0} atribuições, ` +
-        `utility=${response.data?.total_utility ?? 0}`,
+        `Rostering concluído: ${result?.assignments?.length ?? 0} atribuições, ` +
+        `utility=${result?.total_utility ?? 0}`,
       );
 
-      return response.data;
+      return result;
     } catch (error) {
-      const msg = (error as any)?.response?.data?.detail ?? (error as Error).message;
-      this.logger.error(`Falha ao chamar o motor de Rostering: ${msg}`);
-      throw new Error(`Falha no motor de Rostering Python: ${msg}`);
+      this.logger.error(`Falha no motor de Rostering: ${(error as any).message}`);
+      throw error;
     }
   }
 }
