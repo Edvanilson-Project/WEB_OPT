@@ -1,1 +1,0 @@
-# Rostering services package
